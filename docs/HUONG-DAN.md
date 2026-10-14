@@ -1,4 +1,4 @@
-# Cài Dịch Apple lên iPhone, không cần Mac, không cần tài khoản trả phí
+# Cài và dùng Dịch Apple (không cần Mac, không cần tài khoản trả phí)
 
 Dùng cá nhân thì chỉ cần **Apple ID miễn phí** và một **máy tính Windows**. GitHub tự build file cài `.ipa`; công cụ **Sideloadly** trên Windows ký file đó bằng Apple ID của bạn rồi cài vào iPhone.
 
@@ -28,18 +28,45 @@ GitHub › repo `app-dichapple` › **Actions** › **iOS** › chọn lần ch�
 
 1. Mở Dịch Apple, làm theo mục **Cài bàn phím**: thêm bàn phím Dịch Apple, bật **Cho phép truy cập đầy đủ**.
 2. Dán API key OpenAI, bấm **Kiểm tra kết nối**.
-3. Muốn tự đọc ngữ cảnh: mục **Tự đọc ngữ cảnh** › chạm nút ghi › **Bắt đầu phát**. Khi phát, góc màn hình có chấm đỏ; chạm chấm đỏ để tắt.
+3. Mục **Về bạn**: chọn giới tính, ghi cách xưng hô (ví dụ “tôi xưng em, gọi đối tác là anh”), vài dòng về công việc và các thuật ngữ ngành. Bản dịch dựa vào đây để xưng hô và dùng từ cho đúng.
+4. Nếu iOS hỏi “Cho phép dán”, chọn **Cho phép**. Hoặc vào Cài đặt › Dịch Apple › **Dán từ ứng dụng khác** › **Cho phép**, để tin bạn sao chép được dịch ngay.
 
-## 5. Mỗi 7 ngày
+## 5. Dùng hằng ngày
+
+**Trả lời đối tác**
+1. Gõ tiếng Việt bằng bàn phím Dịch Apple (kiểu Telex).
+2. Bấm **Dịch**: cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, app tự trả lời đúng ngôn ngữ đối tác đang dùng.
+3. Dòng trên cùng hiện **Nghĩa**: câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, dòng này hiện **Lưu ý**. Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
+
+**Đọc tin đối tác**
+- **Bật đọc màn hình** (trong app, mục *Tin đối tác gửi*, chạm nút ghi rồi **Bắt đầu phát**): mỗi khi bạn chạm vào ô trả lời, bản dịch tin mới nhất của đối tác hiện ngay ở dòng trên cùng của bàn phím. Không cần sao chép. Khi phát, góc màn hình có chấm đỏ; chạm chấm đỏ để tắt.
+- **Không bật đọc màn hình**: nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Bản dịch hiện ngay ở dòng trên cùng.
+- **Đọc mà không mở bàn phím**: mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của Dịch Apple) › đặt tên. Rồi vào Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt đó. Từ đó: sao chép tin, gõ hai lần vào lưng iPhone là bản dịch hiện lên.
+
+**Gõ phím**
+- Giữ một nguyên âm để chọn dấu (á à ả ã ạ ă â…).
+- Giữ phím cách rồi kéo để di chuyển con trỏ.
+- Chạm hai lần Shift để khóa chữ hoa; chạm hai lần phím cách để thêm dấu chấm.
+- Giữ phím xóa: xóa từng chữ, giữ lâu thì xóa cả từ.
+- Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên. Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`.
+
+## 6. Mỗi 7 ngày
 
 Cắm iPhone (hoặc cùng mạng Wi-Fi nếu đã bật làm mới tự động của Sideloadly) và bấm **Start** lại với cùng file. Cài đè giữ nguyên API key và cài đặt.
 
 Có bản mới: tải artifact mới ở bước 1 và cài đè.
 
+## Chất lượng và chi phí
+
+- **Chuẩn nhất** (mặc định): GPT-6.1 Sol, khoảng 0,003 USD mỗi tin (1.000 tin ≈ 3 USD).
+- **Nhanh**: GPT-6 Luna, rẻ hơn khoảng 20 lần, dùng khi cần tiết kiệm.
+- Mỗi tin của đối tác chỉ dịch một lần; app nhớ bản dịch nên không gọi lại.
+- Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh. OpenAI không lưu nội dung (`store: false`).
+
 ## Cách app giữ nhẹ
 
-- Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước (`-Osize`).
-- Mỗi lần bấm Dịch là một request, tối đa 8 tin ngữ cảnh và 1.500 ký tự; không lưu gì phía OpenAI (`store: false`).
+- File cài khoảng 340 KB. Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước.
+- Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
 - Đọc màn hình chỉ chạy khi bàn phím Dịch Apple đang mở, tối đa 1 khung hình mỗi 1,5 giây, bỏ qua khi màn hình không đổi, chỉ đọc vùng khung chat. Không lưu ảnh, chỉ giữ chữ của vài tin cuối.
 
 ## Cần thử trên máy thật

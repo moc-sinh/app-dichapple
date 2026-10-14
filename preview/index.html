@@ -5,67 +5,69 @@
 /* Layout: the iPhone is the hero; short "how to try" notes sit beside it and stack under it on narrow screens. */
 :root {
   --bg: #E9EDF3; --fg: #0F172A; --muted: #475569; --line: #CBD3DE; --card: #FFFFFF;
-  --accent: #1D4ED8; --accent-fg: #FFFFFF; --incoming: #9A3412; --incoming-bg: #FFF4EC; --ok: #0F766E; --err: #B91C1C;
+  --accent: #1D4ED8; --accent-fg: #FFFFFF; --incoming: #9A3412; --incoming-bg: #FFF4EC; --ok: #0F766E; --warn: #B45309; --err: #B91C1C;
   --frame: #1B1F27;
   --chat-bg: #EEF1F5; --chat-head: #FFFFFF; --bubble-in: #FFFFFF; --bubble-line: #DDE2EA; --chat-muted: #4B5563;
   --field-bg: #F8FAFC; --field-line: #CBD2DC;
-  --kb: #D5DAE2; --kb-line: #C3CAD5; --key: #FFFFFF; --key-fg: #0F172A; --key-alt: #ADB4BF; --key-shadow: #8A93A3;
-  --chip: #F4F6F9; --chip-line: #6B7280; --kb-muted: #374151;
+  --kb: #D1D5DD; --kb-line: #C3CAD5; --key: #FFFFFF; --key-fg: #0F172A; --key-alt: #ABB2BC; --key-shadow: #898F99;
+  --chip: #F4F6F9; --chip-line: #6B7280; --kb-muted: #374151; --popup: #FFFFFF; --pick: #0A84FF;
   --font-ui: -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
   --font-display: "Be Vietnam Pro", -apple-system, "Helvetica Neue", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0E1117; --fg: #E6EAF0; --muted: #A3AEBE; --line: #2A3140; --card: #161B24;
-    --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --err: #F87171;
+    --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --warn: #FBBF24; --err: #F87171;
     --frame: #000000;
     --chat-bg: #0B0D11; --chat-head: #161A21; --bubble-in: #1F242D; --bubble-line: #2A303B; --chat-muted: #A3AEBE;
     --field-bg: #1A1F27; --field-line: #3A4250;
-    --kb: #2C2E33; --kb-line: #3A3D44; --key: #6A6C72; --key-fg: #FFFFFF; --key-alt: #46484E; --key-shadow: #1A1B1E;
-    --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0;
+    --kb: #2B2C30; --kb-line: #3A3D44; --key: #6B6C70; --key-fg: #FFFFFF; --key-alt: #46474C; --key-shadow: #18191C;
+    --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0; --popup: #6B6C70; --pick: #0A84FF;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0E1117; --fg: #E6EAF0; --muted: #A3AEBE; --line: #2A3140; --card: #161B24;
-  --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --err: #F87171;
+  --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --warn: #FBBF24; --err: #F87171;
   --frame: #000000;
   --chat-bg: #0B0D11; --chat-head: #161A21; --bubble-in: #1F242D; --bubble-line: #2A303B; --chat-muted: #A3AEBE;
   --field-bg: #1A1F27; --field-line: #3A4250;
-  --kb: #2C2E33; --kb-line: #3A3D44; --key: #6A6C72; --key-fg: #FFFFFF; --key-alt: #46484E; --key-shadow: #1A1B1E;
-  --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0;
+  --kb: #2B2C30; --kb-line: #3A3D44; --key: #6B6C70; --key-fg: #FFFFFF; --key-alt: #46474C; --key-shadow: #18191C;
+  --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0; --popup: #6B6C70; --pick: #0A84FF;
   color-scheme: dark;
 }
 
 html, body { min-height: 100%; }
 body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); }
 .wrap {
-  max-width: 980px; margin: 0 auto; box-sizing: border-box;
+  max-width: 1000px; margin: 0 auto; box-sizing: border-box;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 24px 40px;
   display: flex; flex-direction: column; gap: 20px;
 }
 .intro h1 { font-family: var(--font-display); font-weight: 700; font-size: 30px; margin: 0; text-wrap: balance; }
-.intro p { margin: 6px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; max-width: 62ch; }
+.intro p { margin: 6px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; max-width: 64ch; }
 .stage { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; justify-content: center; }
-.notes { flex: 1 1 280px; min-width: 0; max-width: 420px; display: flex; flex-direction: column; gap: 14px; }
+.notes { flex: 1 1 300px; min-width: 0; max-width: 440px; display: flex; flex-direction: column; gap: 14px; }
 .notes h2 { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin: 0; }
 .notes ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5; }
 .notes kbd { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
 .notes .fine { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
-.reset { align-self: flex-start; height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.sim { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- iPhone ---------- */
 .fit { flex: 0 0 auto; position: relative; }
 .phone { position: absolute; top: 0; left: 0; width: 414px; height: 868px; box-sizing: border-box; padding: 12px; border-radius: 60px; background: var(--frame); transform-origin: top left; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); }
-.screen { width: 390px; height: 844px; border-radius: 48px; overflow: hidden; display: flex; flex-direction: column; background: var(--chat-bg); font-family: var(--font-ui); position: relative; }
+.screen { width: 390px; height: 844px; border-radius: 48px; overflow: hidden; display: flex; flex-direction: column; background: var(--chat-bg); font-family: var(--font-ui); position: relative; user-select: none; -webkit-user-select: none; }
 .screen button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 
 .chat-head { flex-shrink: 0; height: 104px; box-sizing: border-box; padding: 50px 14px 0; display: flex; align-items: center; gap: 12px; background: var(--chat-head); border-bottom: 1px solid var(--bubble-line); }
 .avatar { width: 38px; height: 38px; border-radius: 19px; background: var(--incoming-bg); color: var(--incoming); display: grid; place-items: center; font-weight: 700; font-size: 14px; }
-.who b { display: block; font-size: 17px; font-weight: 600; }
+.who b { display: block; font-size: 17px; font-weight: 600; color: var(--fg); }
 .who span { font-size: 12px; color: var(--chat-muted); }
 
 .msgs { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; }
@@ -83,45 +85,42 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
 @keyframes blink { 50% { opacity: 0; } }
 .send { width: 44px; height: 44px; flex-shrink: 0; border: none; border-radius: 22px; background: var(--accent); display: grid; place-items: center; }
 
-.kb { flex-shrink: 0; background: var(--kb); color: var(--key-fg); }
-.bar { height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--kb-line); }
+.kb { flex-shrink: 0; background: var(--kb); color: var(--key-fg); position: relative; }
+.info { width: 100%; height: 30px; box-sizing: border-box; border: none; background: transparent; display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 15px; text-align: left; color: var(--kb-muted); }
+.info span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.info.incoming { color: var(--incoming); }
+.info.ok { color: var(--ok); }
+.info.warn { color: var(--warn); }
+.info.err { color: var(--err); }
+.bar { height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
 .bar .grow { flex: 1; }
-.pill { height: 34px; padding: 0 12px; border-radius: 17px; border: 1px solid var(--chip-line); background: var(--chip); color: var(--key-fg); font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.pill.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); font-size: 15px; padding: 0 16px; }
-.pill.incoming { border-color: var(--incoming); background: var(--incoming-bg); color: var(--incoming); }
-.pill.lang { border: none; font-size: 15px; }
-.pill.ctx { border: none; padding: 0 10px; font-variant-numeric: tabular-nums; }
-.pill.ctx.off { color: var(--kb-muted); font-weight: 500; }
-.ctx-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.35; }
-.ctx-line { display: flex; gap: 8px; }
-.ctx-line b { flex: 0 0 52px; font-weight: 600; color: var(--kb-muted); }
-.ctx-line.partner b { color: var(--incoming); }
-.ctx-empty { color: var(--kb-muted); font-size: 15px; line-height: 1.4; }
-.pill[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
-.status { flex: 1; min-width: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+.chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.pill { height: 34px; padding: 0 12px; border-radius: 17px; border: none; background: var(--chip); color: var(--key-fg); font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0; }
+.pill.primary, .pill[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.pill.incoming { background: var(--incoming-bg); color: var(--incoming); }
+.status { flex: 1; min-width: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; padding-left: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .status.err { color: var(--err); }
-.status.in { color: var(--incoming); font-weight: 600; }
-.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--kb-line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+.status.dim { color: var(--kb-muted); }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--kb-line); border-top-color: var(--accent); animation: spin .8s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.keys { height: 214px; box-sizing: border-box; padding: 8px 4px 4px; display: flex; flex-direction: column; gap: 11px; }
-.krow { display: flex; justify-content: center; gap: 5px; }
-.krow.edge { justify-content: space-between; }
-.krow .mid { display: flex; gap: 5px; }
-.key { flex: 0 0 33px; height: 42px; padding: 0; border: none; border-radius: 6px; background: var(--key); color: var(--key-fg); box-shadow: 0 1px 0 var(--key-shadow); font-size: 22px; display: grid; place-items: center; }
-.key:active { background: var(--key-alt); }
-.key.alt { background: var(--key-alt); }
-.key.alt[aria-pressed="true"] { background: var(--key); }
-.key.wide { flex: 0 0 44px; }
-.key.fn { flex: 0 0 88px; font-size: 16px; }
-.key.space { flex: 1; font-size: 16px; }
-.spacer { flex: 0 0 44px; }
+.keys { position: relative; height: 216px; touch-action: none; }
+.key { position: absolute; box-sizing: border-box; padding: 0; border: none; border-radius: 5px; background: var(--key); color: var(--key-fg); box-shadow: 0 1px 0 var(--key-shadow); font-size: 23px; display: grid; place-items: center; }
+.key.alt { background: var(--key-alt); font-size: 16px; }
+.key.alt.on, .key.alt.down { background: var(--key); }
+.key.space { font-size: 16px; }
+.key.space.down { background: var(--key-alt); }
+.popup { position: absolute; box-sizing: border-box; border-radius: 10px; background: var(--popup); color: var(--key-fg); box-shadow: 0 1px 3px rgba(0,0,0,.35); display: grid; place-items: center; font-size: 34px; pointer-events: none; z-index: 5; }
+.accents { position: absolute; display: flex; padding: 6px; gap: 0; border-radius: 10px; background: var(--popup); box-shadow: 0 2px 8px rgba(0,0,0,.35); pointer-events: none; z-index: 6; }
+.accents span { display: grid; place-items: center; border-radius: 6px; font-size: 24px; color: var(--key-fg); }
+.accents span.sel { background: var(--pick); color: #FFFFFF; }
 
-.panel { height: 214px; box-sizing: border-box; padding: 8px 6px 6px; }
-.panel-card { height: 100%; box-sizing: border-box; background: var(--chip); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.panel-src { font-size: 13px; color: var(--kb-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.panel-text { flex: 1; min-height: 0; overflow-y: auto; font-size: 17px; line-height: 1.4; }
-.panel-btn { height: 44px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 16px; font-weight: 600; }
+.panel { position: absolute; left: 6px; right: 6px; top: 76px; bottom: 44px; box-sizing: border-box; border-radius: 12px; background: var(--popup); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.panel-body .cap { font-size: 13px; font-weight: 500; color: var(--kb-muted); margin-top: 4px; }
+.panel-body .txt { font-size: 17px; line-height: 1.35; color: var(--key-fg); }
+.panel-btn { height: 44px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 16px; font-weight: 600; flex-shrink: 0; }
 
 .sys { height: 40px; display: flex; align-items: flex-start; justify-content: space-between; padding: 0 26px; }
 .home { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: var(--fg); opacity: .8; transform: translateX(-50%); }
@@ -132,7 +131,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
 <main class="wrap">
   <header class="intro">
     <h1>Dịch Apple</h1>
-    <p>Bàn phím gõ tiếng Việt, có thanh Dịch ở trên. Bấm Dịch là cả đoạn trong ô nhập đổi sang ngôn ngữ của người nhận.</p>
+    <p>Bàn phím gõ tiếng Việt chuẩn iPhone, có thanh Dịch ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ của đối tác; tin đối tác gửi tự hiện bằng tiếng Việt ở dòng trên cùng.</p>
   </header>
 
   <div class="stage">
@@ -151,13 +150,15 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-fg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
             </button>
           </div>
-          <div class="kb">
+          <div class="kb" id="kb">
+            <button class="info" id="info" data-act="info"></button>
             <div class="bar" id="bar"></div>
-            <div id="keys"></div>
+            <div class="keys" id="keys"></div>
             <div class="sys" aria-hidden="true">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--kb-muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--kb-muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>
             </div>
+            <div class="panel" id="panel" hidden></div>
           </div>
           <div class="home" aria-hidden="true"></div>
         </div>
@@ -167,168 +168,284 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     <aside class="notes">
       <h2>Thử nhanh</h2>
       <ol>
-        <li>Gõ bằng bàn phím trên màn hình, kiểu Telex: <kbd>aa</kbd> ra â, <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Gõ bằng bàn phím máy tính cũng được.</li>
-        <li>Bấm <b>Dịch</b>: cả đoạn trong ô nhập đổi sang ngôn ngữ đang chọn. Bấm <b>Hoàn tác</b> để lấy lại câu tiếng Việt.</li>
-        <li>Chạm nút <b>Việt → 中文</b> để đổi ngôn ngữ đích.</li>
-        <li>Chạm vào một tin màu trắng để giả lập Sao chép, rồi bấm <b>Tin copy</b> để đọc tin đó bằng tiếng Việt.</li>
-        <li>Chip có biểu tượng con mắt là <b>ngữ cảnh</b>: số tin app đang đọc được trên màn hình. Chạm để xem các tin đó, hoặc bấm <b>Cuộc mới</b> khi chuyển sang chat với người khác.</li>
+        <li>Gõ trên bàn phím như iPhone. Kiểu Telex: <kbd>aa</kbd> ra â, <kbd>w</kbd> ra ư, <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Từ tiếng Anh như <kbd>facebook</kbd>, <kbd>order</kbd> giữ nguyên. Giữ một nguyên âm để chọn dấu. Gõ bằng bàn phím máy tính cũng được.</li>
+        <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Dòng trên cùng hiện <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
+        <li>Bấm <b>Đối tác gửi tin mới</b> bên dưới: với đọc màn hình đang bật, bản dịch tiếng Việt hiện ngay ở dòng trên cùng, không cần sao chép.</li>
+        <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó.</li>
       </ol>
-      <p class="fine">Đây là bản xem trước: chỉ vài câu có bản dịch mẫu (câu có sẵn, “xin chào”, “cảm ơn”, “giá bao nhiêu”, “bao giờ giao hàng”). App thật gửi câu tới gpt-6-luna.</p>
-      <button class="reset" id="reset" type="button">Làm lại từ đầu</button>
+      <div class="sim">
+        <button class="btn" id="newmsg" type="button">Đối tác gửi tin mới</button>
+        <button class="btn" id="screen" type="button" aria-pressed="true">Đọc màn hình</button>
+        <button class="btn" id="reset" type="button">Làm lại từ đầu</button>
+      </div>
+      <p class="fine">Đây là bản xem trước trên web, dịch bằng câu mẫu có sẵn (câu soạn sẵn, “xin chào”, “cảm ơn”, “giá bao nhiêu”, “bao giờ giao hàng”). App thật dịch mọi câu bằng GPT-6.1 Sol, dùng ngữ cảnh cuộc chat.</p>
     </aside>
   </div>
 </main>
 
 <script>
 (function () {
+  /* ---------- Sample data ---------- */
   var DRAFT = 'Anh gửi giúp em báo giá chi tiết trước thứ Sáu nhé, cảm ơn anh.';
   var LANGS = [
-    { code: 'zh', label: '中文' },
-    { code: 'en', label: 'English' },
-    { code: 'ko', label: '한국어' },
-    { code: 'ja', label: '日本語' }
+    ['zh', '中文', 'tiếng Trung'], ['zh-Hant', '繁體中文', 'tiếng Trung phồn thể'], ['en', 'English', 'tiếng Anh'],
+    ['ko', '한국어', 'tiếng Hàn'], ['ja', '日本語', 'tiếng Nhật'], ['th', 'ไทย', 'tiếng Thái'], ['id', 'Indonesia', 'tiếng Indonesia'],
+    ['ms', 'Melayu', 'tiếng Mã Lai'], ['ru', 'Русский', 'tiếng Nga'], ['fr', 'Français', 'tiếng Pháp'], ['de', 'Deutsch', 'tiếng Đức'],
+    ['es', 'Español', 'tiếng Tây Ban Nha'], ['hi', 'हिन्दी', 'tiếng Hindi'], ['ar', 'العربية', 'tiếng Ả Rập']
   ];
-  var PHRASES = [
-    { vi: DRAFT, zh: '麻烦您在周五前把详细报价发给我，谢谢！', en: 'Could you send me the detailed quote before Friday? Thank you!', ko: '금요일 전까지 상세 견적서를 보내주시겠어요? 감사합니다!', ja: '金曜日までに詳しい見積もりを送っていただけますか？ありがとうございます！' },
-    { vi: 'xin chào', zh: '你好！', en: 'Hello!', ko: '안녕하세요!', ja: 'こんにちは！' },
-    { vi: 'cảm ơn', zh: '谢谢！', en: 'Thank you!', ko: '감사합니다!', ja: 'ありがとうございます！' },
-    { vi: 'giá bao nhiêu', zh: '多少钱？', en: 'How much is it?', ko: '얼마예요?', ja: 'いくらですか？' },
-    { vi: 'bao giờ giao hàng', zh: '什么时候发货？', en: 'When will you ship it?', ko: '언제 배송되나요?', ja: 'いつ発送されますか？' }
+  var OUT = [
+    { vi: DRAFT,
+      zh: ['麻烦您在周五前把详细报价发给我，谢谢！', 'Phiền anh gửi cho em báo giá chi tiết trước thứ Sáu, cảm ơn anh!'],
+      en: ['Could you send me the detailed quote before Friday? Thank you!', 'Anh có thể gửi cho em báo giá chi tiết trước thứ Sáu không? Cảm ơn anh!'],
+      ko: ['금요일 전까지 상세 견적서를 보내주시겠어요? 감사합니다!', 'Anh có thể gửi báo giá chi tiết trước thứ Sáu không ạ? Cảm ơn anh!'],
+      ja: ['金曜日までに詳しいお見積もりをお送りいただけますか？よろしくお願いいたします。', 'Anh có thể gửi báo giá chi tiết trước thứ Sáu được không ạ? Mong anh giúp đỡ.'] },
+    { vi: 'xin chào', zh: ['您好！', 'Xin chào anh!'], en: ['Hello!', 'Xin chào!'], ko: ['안녕하세요!', 'Xin chào!'], ja: ['こんにちは！', 'Xin chào!'] },
+    { vi: 'cảm ơn', zh: ['谢谢您！', 'Cảm ơn anh!'], en: ['Thank you!', 'Cảm ơn bạn!'], ko: ['감사합니다!', 'Cảm ơn anh!'], ja: ['ありがとうございます！', 'Cảm ơn anh!'] },
+    { vi: 'giá bao nhiêu', zh: ['这个多少钱？', 'Cái này giá bao nhiêu?'], en: ['How much is it?', 'Cái này giá bao nhiêu?'], ko: ['얼마예요?', 'Giá bao nhiêu ạ?'], ja: ['おいくらですか？', 'Giá bao nhiêu ạ?'] },
+    { vi: 'bao giờ giao hàng', note: 'Câu gốc không nói rõ hàng nào; đã dịch là lô hàng đang bàn.',
+      zh: ['这批货什么时候能发货？', 'Lô hàng này khi nào có thể giao?'], en: ['When can you ship this order?', 'Khi nào bên anh có thể giao đơn hàng này?'],
+      ko: ['이 물건은 언제 배송되나요?', 'Lô hàng này khi nào được giao?'], ja: ['この商品はいつ発送できますか？', 'Lô hàng này khi nào có thể gửi đi?'] }
   ];
-  var MESSAGES = [
+  var START = [
     { id: 1, dir: 'in', text: '您好！这批货我们本月可以准备12台。', vi: 'Chào anh! Lô này trong tháng bên em chuẩn bị được 12 máy ạ.' },
     { id: 2, dir: 'out', text: '配置和上次一样，月底前能交货吗？' },
     { id: 3, dir: 'in', text: '可以的。请确认配置和交货地址，我们再发详细报价。', vi: 'Được ạ. Anh xác nhận giúp em cấu hình và địa chỉ giao hàng, bên em sẽ gửi báo giá chi tiết sau nhé.' }
   ];
-  var LETTER_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
-  var NUMBER_ROWS = ['1234567890', '-/:;()&@"', '.,?!\'%+'];
+  var NEXT = [
+    { text: '好的，我们周四之前给您发详细报价。', vi: 'Dạ được, bên em sẽ gửi anh báo giá chi tiết trước thứ Năm ạ.' },
+    { text: '运费另算，需要含税价格吗？', vi: 'Phí vận chuyển tính riêng ạ. Anh có cần giá đã gồm thuế không?', note: '“含税” là giá đã gồm thuế; ở Trung Quốc thường là VAT 13%.' },
+    { text: '亲，这款现在有现货哦～', vi: 'Anh ơi, mẫu này hiện có sẵn hàng nhé~', note: '“亲” là cách gọi thân mật kiểu bán hàng online, giống “anh/chị ơi”.' }
+  ];
 
-  /* ---------- Telex ---------- */
-  var TABLE = { a: 'aáàảãạ', 'ă': 'ăắằẳẵặ', 'â': 'âấầẩẫậ', e: 'eéèẻẽẹ', 'ê': 'êếềểễệ', i: 'iíìỉĩị', o: 'oóòỏõọ', 'ô': 'ôốồổỗộ', 'ơ': 'ơớờởỡợ', u: 'uúùủũụ', 'ư': 'ưứừửữự', y: 'yýỳỷỹỵ' };
-  var INFO = {};
-  Object.keys(TABLE).forEach(function (b) { Array.from(TABLE[b]).forEach(function (c, t) { INFO[c] = [b, t]; }); });
-  function info(c) { return INFO[c.toLowerCase()]; }
-  function make(src, base, tone) { var out = Array.from(TABLE[base])[tone]; return src === src.toLowerCase() ? out : out.toUpperCase(); }
+  /* ---------- Telex (same rules as the app) ---------- */
+  var FORMS = { a: 'aáàảãạ', 'ă': 'ăắằẳẵặ', 'â': 'âấầẩẫậ', e: 'eéèẻẽẹ', 'ê': 'êếềểễệ', i: 'iíìỉĩị', o: 'oóòỏõọ', 'ô': 'ôốồổỗộ', 'ơ': 'ơớờởỡợ', u: 'uúùủũụ', 'ư': 'ưứừửữự', y: 'yýỳỷỹỵ' };
+  var VOW = {};
+  Object.keys(FORMS).forEach(function (b) { Array.from(FORMS[b]).forEach(function (c, t) { VOW[c] = [b, t]; }); });
+  var TONES = 'sfrxj', HATS = { a: 'â', e: 'ê', o: 'ô' }, HORNS = { a: 'ă', o: 'ơ', u: 'ư' }, UNHORNS = { 'ă': 'a', 'ơ': 'o', 'ư': 'u' };
+  function isUp(c) { return c !== c.toLowerCase(); }
+  function vw(c) { return VOW[c.toLowerCase()]; }
+  function mk(src, base, tone) { var c = Array.from(FORMS[base])[tone]; return isUp(src) ? c.toUpperCase() : c; }
   function toneTarget(ch) {
     var pos = [];
     for (var i = 0; i < ch.length; i++) {
-      var f = info(ch[i]); if (!f) continue;
+      var v = vw(ch[i]); if (!v) continue;
       var prev = i > 0 ? ch[i - 1].toLowerCase() : '';
-      var nextV = i + 1 < ch.length && info(ch[i + 1]);
-      if ((f[0] === 'u' && prev === 'q') || (f[0] === 'i' && prev === 'g' && nextV)) continue;
+      var nextV = i + 1 < ch.length && vw(ch[i + 1]);
+      if ((v[0] === 'u' && prev === 'q') || (v[0] === 'i' && prev === 'g' && nextV)) continue;
       pos.push(i);
     }
     if (!pos.length) return -1;
     var cl = [pos[pos.length - 1]];
     for (var j = pos.length - 2; j >= 0 && pos[j] === cl[0] - 1; j--) cl.unshift(pos[j]);
-    for (var k = cl.length - 1; k >= 0; k--) if ('ăâêôơư'.indexOf(info(ch[cl[k]])[0]) >= 0) return cl[k];
+    for (var k = cl.length - 1; k >= 0; k--) if ('ăâêôơư'.indexOf(vw(ch[cl[k]])[0]) >= 0) return cl[k];
     if (cl.length === 1) return cl[0];
     var end = cl[cl.length - 1];
     if (end < ch.length - 1) return end;
-    var pair = info(ch[end - 1])[0] + info(ch[end])[0];
+    var pair = vw(ch[end - 1])[0] + vw(ch[end])[0];
     if (cl.length === 2 && (pair === 'oa' || pair === 'oe' || pair === 'uy')) return end;
     return cl.length >= 3 ? cl[1] : cl[0];
   }
   function retone(ch) {
     var tone = 0;
-    for (var i = 0; i < ch.length; i++) { var f = info(ch[i]); if (f && f[1]) { tone = f[1]; ch[i] = make(ch[i], f[0], 0); } }
-    if (tone) { var t = toneTarget(ch); if (t >= 0) ch[t] = make(ch[t], info(ch[t])[0], tone); }
+    for (var i = 0; i < ch.length; i++) { var v = vw(ch[i]); if (v && v[1]) { tone = v[1]; ch[i] = mk(ch[i], v[0], 0); } }
+    if (tone) { var t = toneTarget(ch); if (t >= 0) ch[t] = mk(ch[t], vw(ch[t])[0], tone); }
     return ch.join('');
   }
-  function telex(word, key) {
-    var lk = key.toLowerCase();
-    var ch = Array.from(word);
-    if (!ch.length) return key;
-    var t = 'sfrxj'.indexOf(lk);
-    if (t >= 0 || lk === 'z') {
-      var tone = t + 1, cur = -1;
-      for (var i = 0; i < ch.length; i++) { var f = info(ch[i]); if (f && f[1]) { cur = i; break; } }
-      var target = toneTarget(ch);
-      if (target < 0 || (lk === 'z' && cur < 0)) return word + key;
-      if (cur >= 0 && info(ch[cur])[1] === tone) { ch[cur] = make(ch[cur], info(ch[cur])[0], 0); return ch.join('') + key; }
-      if (cur >= 0) ch[cur] = make(ch[cur], info(ch[cur])[0], 0);
-      if (lk !== 'z') ch[target] = make(ch[target], info(ch[target])[0], tone);
-      return ch.join('');
-    }
-    if (lk === 'd' && ch[0].toLowerCase() === 'd') { ch[0] = ch[0] === 'D' ? 'Đ' : 'đ'; return ch.join(''); }
-    var hat = { a: 'â', e: 'ê', o: 'ô' };
-    if (hat[lk]) {
-      for (var h = ch.length - 1; h >= 0; h--) {
-        var g = info(ch[h]); if (!g) continue;
-        if (g[0] === lk) { ch[h] = make(ch[h], hat[lk], g[1]); return retone(ch); }
-        if (g[0] === hat[lk]) { ch[h] = make(ch[h], lk, g[1]); return retone(ch) + key; }
-      }
-      return word + key;
-    }
-    if (lk === 'w') {
-      for (var u = 0; u + 1 < ch.length; u++) {
-        var a1 = info(ch[u]), a2 = info(ch[u + 1]);
-        if (a1 && a2 && a1[0] === 'u' && a2[0] === 'o') { ch[u] = make(ch[u], 'ư', a1[1]); ch[u + 1] = make(ch[u + 1], 'ơ', a2[1]); return retone(ch); }
-      }
-      var horn = { a: 'ă', o: 'ơ', u: 'ư' }, plain = { 'ă': 'a', 'ơ': 'o', 'ư': 'u' };
-      for (var w = ch.length - 1; w >= 0; w--) {
-        var v = info(ch[w]); if (!v) continue;
-        if (horn[v[0]]) { ch[w] = make(ch[w], horn[v[0]], v[1]); return retone(ch); }
-        if (plain[v[0]]) { ch[w] = make(ch[w], plain[v[0]], v[1]); return retone(ch) + key; }
-      }
-      return word + key;
-    }
-    return word + key;
+  function toneStep(ch, tone, key, word) {
+    var cur = -1;
+    for (var i = 0; i < ch.length; i++) { var v = vw(ch[i]); if (v && v[1]) { cur = i; break; } }
+    var target = toneTarget(ch);
+    if (target < 0 || (tone === 0 && cur < 0)) return [word + key, false];
+    if (cur >= 0) { var c = vw(ch[cur]); ch[cur] = mk(ch[cur], c[0], 0); if (c[1] === tone) return [ch.join('') + key, true]; }
+    if (tone > 0) ch[target] = mk(ch[target], vw(ch[target])[0], tone);
+    return [ch.join(''), false];
   }
+  function step(word, key) {
+    var k = key.toLowerCase(), ch = Array.from(word);
+    var hasV = ch.some(function (c) { return !!vw(c); });
+    if (k === 'w' && !hasV) return [word + (isUp(key) ? 'Ư' : 'ư'), false];
+    if (!ch.length) return [key, false];
+    var t = TONES.indexOf(k);
+    if (t >= 0) return toneStep(ch, t + 1, key, word);
+    if (k === 'z') return toneStep(ch, 0, key, word);
+    if (k === 'd' && ch[0].toLowerCase() === 'd') { ch[0] = isUp(ch[0]) ? 'Đ' : 'đ'; return [ch.join(''), false]; }
+    var i, v;
+    if (HATS[k]) {
+      for (i = ch.length - 1; i >= 0; i--) {
+        v = vw(ch[i]); if (!v) continue;
+        if (v[0] === k) { ch[i] = mk(ch[i], HATS[k], v[1]); return [retone(ch), false]; }
+        if (v[0] === HATS[k]) { ch[i] = mk(ch[i], k, v[1]); return [retone(ch) + key, true]; }
+      }
+      return [word + key, false];
+    }
+    if (k === 'w') {
+      for (i = 0; i + 1 < ch.length; i++) {
+        var a = vw(ch[i]), b = vw(ch[i + 1]);
+        if (a && b && a[0] === 'u' && b[0] === 'o') { ch[i] = mk(ch[i], 'ư', a[1]); ch[i + 1] = mk(ch[i + 1], 'ơ', b[1]); return [retone(ch), false]; }
+      }
+      for (i = ch.length - 1; i >= 0; i--) {
+        v = vw(ch[i]); if (!v) continue;
+        if (HORNS[v[0]]) { ch[i] = mk(ch[i], HORNS[v[0]], v[1]); return [retone(ch), false]; }
+        if (UNHORNS[v[0]]) { ch[i] = mk(ch[i], UNHORNS[v[0]], v[1]); return [retone(ch) + key, true]; }
+      }
+      return [word + key, false];
+    }
+    return [word + key, false];
+  }
+  var INITIALS = ['ngh', 'ng', 'nh', 'ch', 'gh', 'gi', 'kh', 'ph', 'qu', 'th', 'tr', 'b', 'c', 'd', 'đ', 'g', 'h', 'k', 'l', 'm', 'n', 'p', 'r', 's', 't', 'v', 'x'];
+  var FINALS = ['c', 'ch', 'm', 'n', 'ng', 'nh', 'p', 't'], STOPS = ['c', 'ch', 'p', 't'];
+  var NUC = ['a', 'ă', 'â', 'e', 'ê', 'i', 'o', 'ô', 'ơ', 'u', 'ư', 'y', 'ai', 'ao', 'au', 'ay', 'âu', 'ây', 'eo', 'êu', 'ia', 'iê', 'iu', 'oa', 'oă', 'oe', 'oi', 'ôi', 'ơi', 'oo', 'ua', 'uâ', 'uê', 'ui', 'uô', 'uơ', 'uy', 'ưa', 'ưi', 'ươ', 'ưu', 'yê', 'iêu', 'yêu', 'oai', 'oay', 'oeo', 'uây', 'uôi', 'ươi', 'ươu', 'uya', 'uyê', 'uyu'].map(function (n) { return Array.from(n); });
+  var PLAIN = { 'ă': 'a', 'â': 'a', 'ê': 'e', 'ô': 'o', 'ơ': 'o', 'ư': 'u' };
+  function isVB(c) { return 'aăâeêioôơuưy'.indexOf(c) >= 0; }
+  function fits(v, complete) {
+    return NUC.some(function (n) {
+      if (complete ? n.length !== v.length : n.length < v.length) return false;
+      for (var i = 0; i < v.length; i++) if (v[i] !== n[i] && (PLAIN[n[i]] || n[i]) !== v[i]) return false;
+      return true;
+    });
+  }
+  function plausible(word) {
+    var base = '', tone = 0;
+    Array.from(word.toLowerCase()).forEach(function (c) { var v = VOW[c]; if (v) { base += v[0]; if (v[1]) tone = v[1]; } else base += c; });
+    var rest = Array.from(base), initial = '';
+    for (var i = 0; i < INITIALS.length; i++) if (base.indexOf(INITIALS[i]) === 0) { initial = INITIALS[i]; break; }
+    rest = rest.slice(Array.from(initial).length);
+    if (initial === 'gi' && !rest.some(isVB)) rest = ['i'].concat(rest);
+    var vp = [];
+    while (vp.length < rest.length && isVB(rest[vp.length])) vp.push(rest[vp.length]);
+    var fin = rest.slice(vp.length).join('');
+    if (!vp.length) return fin === '';
+    if (!fin) return fits(vp, false);
+    if (!fits(vp, true) || FINALS.indexOf(fin) < 0) return false;
+    return !(STOPS.indexOf(fin) >= 0 && tone >= 2 && tone <= 4);
+  }
+  function processRaw(raw) { var w = '', u = false; Array.from(raw).forEach(function (k) { var r = step(w, k); w = r[0]; u = r[1]; }); return [w, u]; }
+  function rawKeys(word) {
+    var out = '', tk = '';
+    Array.from(word).forEach(function (c) {
+      var v = vw(c);
+      if (v) {
+        var keys = { 'â': 'aa', 'ă': 'aw', 'ê': 'ee', 'ô': 'oo', 'ơ': 'ow', 'ư': 'uw' }[v[0]] || v[0];
+        out += isUp(c) ? keys[0].toUpperCase() + keys.slice(1) : keys;
+        if (v[1]) tk = TONES[v[1] - 1];
+      } else if (c.toLowerCase() === 'đ') out += isUp(c) ? 'Dd' : 'dd';
+      else out += c;
+    });
+    return out + tk;
+  }
+  function Word(resume) { this.raw = resume ? rawKeys(resume) : ''; this.shown = resume || ''; this.literal = false; }
+  Word.prototype.type = function (key) {
+    var rb = this.raw, sb = this.shown;
+    this.raw += key;
+    if (this.literal) { this.shown += key; return; }
+    var r = processRaw(this.raw);
+    if (r[1] && sb !== rb) { this.literal = true; this.shown = r[0]; }
+    else if (r[0] === this.raw || plausible(r[0])) this.shown = r[0];
+    else this.shown = this.raw;
+  };
 
   /* ---------- State ---------- */
-  var S, timer, stream;
+  var S, busyTimer, incomingTimer;
   function fresh() {
-    return { draft: DRAFT, lang: 'zh', bar: 'normal', original: '', shift: false, numbers: false, copiedId: null, copyShown: '', copyLabel: 'Sao chép bản dịch', err: '', msgs: MESSAGES.slice(), nextId: 4, ctxFrom: 0, usedCtx: 0 };
+    return { draft: DRAFT, target: 'auto', bar: 'normal', info: { kind: 'idle' }, panel: null, original: '', lastTarget: null,
+      shift: 'off', lastShiftTap: 0, page: 'letters', msgs: START.slice(), nextId: 4, next: 0, copiedId: null,
+      screen: true, ctxFrom: 0, word: new Word(), lastSpace: 0 };
   }
-  function ctxLines() { return S.msgs.slice(S.ctxFrom).slice(-8); }
   S = fresh();
-  function set(p) { Object.assign(S, p); render(); }
-  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  function langOf(code) { return LANGS.filter(function (l) { return l.code === code; })[0] || LANGS[0]; }
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function lang(code) { var l = LANGS.filter(function (x) { return x[0] === code; })[0] || LANGS[0]; return { code: l[0], label: l[1], name: l[2] }; }
+  function ctxLines() { return S.msgs.slice(S.ctxFrom).slice(-10); }
+  function partnerLang() {
+    var last = ctxLines().filter(function (m) { return m.dir === 'in'; }).slice(-1)[0];
+    if (!last) return 'zh';
+    var t = last.text;
+    if (/[぀-ヿ]/.test(t)) return 'ja';
+    if (/[가-힯]/.test(t)) return 'ko';
+    if (/[฀-๿]/.test(t)) return 'th';
+    if (/[一-鿿]/.test(t)) return 'zh';
+    return 'en';
+  }
+  function resolvedTarget() { return lang(S.target === 'auto' ? partnerLang() : S.target); }
   function norm(t) { return t.toLowerCase().replace(/[.,!?…]+/g, ' ').replace(/\s+/g, ' ').trim(); }
-  function translateText(text, code) {
-    var n = norm(text);
-    for (var i = 0; i < PHRASES.length; i++) if (norm(PHRASES[i].vi) === n) return PHRASES[i][code];
-    return '(Câu này chưa có bản mẫu) ' + text;
-  }
-  function settle() { return S.bar === 'done' || S.bar === 'error' ? 'normal' : S.bar; }
 
-  function typeText(text) { set({ draft: S.draft + text, shift: false, bar: settle() }); }
-  function pressLetter(key) {
-    var k = S.shift ? key.toUpperCase() : key;
-    if (S.numbers || !/[a-zA-Z]/.test(k)) { typeText(k); return; }
-    var m = S.draft.match(/(\S*)$/), word = m ? m[1] : '';
-    set({ draft: S.draft.slice(0, S.draft.length - word.length) + telex(word, k), shift: false, bar: settle() });
+  /* ---------- Typing ---------- */
+  function trailingWord(text) { var m = text.match(/[\p{L}]*$/u); return m ? m[0] : ''; }
+  function afterEdit() {
+    if (S.bar === 'done' || S.bar === 'failed') S.bar = 'normal';
+    if (S.info.kind === 'outgoing' || S.info.kind === 'error') S.info = { kind: 'idle' };
+    if (S.shift !== 'locked' && S.page === 'letters') {
+      var d = S.draft;
+      S.shift = (d === '' || /\n$/.test(d) || /[.!?]\s+$/.test(d)) ? 'once' : 'off';
+    }
   }
-  function backspace() { var c = Array.from(S.draft); c.pop(); set({ draft: c.join(''), bar: settle() }); }
-  function translate() {
+  function typeLetter(c) {
+    var cur = trailingWord(S.draft);
+    if (cur !== S.word.shown) S.word = new Word(cur);
+    var before = S.word.shown;
+    S.word.type(c);
+    S.draft = S.draft.slice(0, S.draft.length - before.length) + S.word.shown;
+  }
+  function insert(text) {
+    S.draft += text;
+    if (/^\p{L}+$/u.test(text)) S.word = new Word(S.word.shown + text); else S.word = new Word();
+  }
+  function del(wordMode) {
+    var c = Array.from(S.draft);
+    if (wordMode) {
+      var i = c.length;
+      while (i > 0 && /\s/.test(c[i - 1])) i--;
+      while (i > 0 && !/\s/.test(c[i - 1])) i--;
+      c = c.slice(0, Math.min(i, c.length - 1));
+    } else c.pop();
+    S.draft = c.join('');
+    S.word = new Word();
+  }
+  function space() {
+    var now = Date.now();
+    if (now - S.lastSpace < 1200 && /[\p{L}\p{N}] $/u.test(S.draft)) { S.draft = S.draft.slice(0, -1) + '. '; S.lastSpace = 0; }
+    else { S.draft += ' '; S.lastSpace = now; }
+    S.word = new Word();
+    if (S.page !== 'letters') S.page = 'letters';
+  }
+
+  /* ---------- Translation (sample sentences) ---------- */
+  function translateDraft() {
     var text = S.draft.trim();
-    if (!text) { set({ bar: 'error', err: 'Ô nhập đang trống.' }); return; }
-    var out = translateText(text, S.lang);
-    set({ bar: 'busy' });
-    clearTimeout(timer);
-    var used = ctxLines().length;
-    timer = setTimeout(function () { set({ original: S.draft, draft: out, bar: 'done', usedCtx: used }); }, 900);
+    if (!text) { S.bar = 'failed'; S.failText = 'Ô nhập đang trống.'; render(); return; }
+    var target = resolvedTarget();
+    var row = OUT.filter(function (r) { return norm(r.vi) === norm(text); })[0];
+    var pair = row && row[target.code];
+    var result = pair ? { text: pair[0], meaning: pair[1], note: row.note || null }
+      : { text: '(Bản xem trước chỉ có câu mẫu) ' + text, meaning: null, note: 'App thật dịch được mọi câu.' };
+    S.lastTarget = target;
+    S.bar = 'busy'; render();
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(function () {
+      S.original = S.draft; S.draft = result.text; S.word = new Word();
+      S.bar = 'done'; S.info = { kind: 'outgoing', t: result, original: S.original, lang: target };
+      render();
+    }, 1100);
   }
-  function showCopy() {
-    var m = S.msgs.filter(function (x) { return x.id === S.copiedId; })[0];
-    if (!m) return;
-    clearInterval(stream);
-    var i = 0;
-    set({ bar: 'copy', copyShown: '', copyLabel: 'Sao chép bản dịch' });
-    stream = setInterval(function () {
-      i += 2;
-      if (i >= m.vi.length) { clearInterval(stream); set({ copyShown: m.vi }); } else set({ copyShown: m.vi.slice(0, i) });
-    }, 30);
+  function showIncoming(msg) {
+    S.info = { kind: 'incomingBusy' }; render();
+    clearTimeout(incomingTimer);
+    incomingTimer = setTimeout(function () { S.info = { kind: 'incoming', src: msg.text, vi: msg.vi, note: msg.note || null }; render(); }, 700);
   }
 
   /* ---------- Render ---------- */
-  var $ = function (id) { return document.getElementById(id); };
-  var ICON_CHECK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-  var ICON_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.5 3 2.5 5.5 5.5 7"/><path d="M11 5c-.8 3.5-3.2 6.5-7 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>';
-  var ICON_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
-  var ICON_EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var ICON = {
+    eye: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    bubble: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 2-2z"/></svg>',
+    check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    warn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>',
+    down: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+    tr: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.5 3 2.5 5.5 5.5 7"/><path d="M11 5c-.8 3.5-3.2 6.5-7 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>',
+    shift: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 8h-4.5v7h-7v-7H4z"/></svg>',
+    shiftOn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 8h-4.5v7h-7v-7H4z"/></svg>',
+    lock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 8h-4.5v5h-7v-5H4z"/><path d="M7.5 20h9" fill="none"/></svg>',
+    back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg>'
+  };
 
   function renderMsgs() {
     $('msgs').innerHTML = S.msgs.map(function (m) {
@@ -342,118 +459,282 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     f.innerHTML = S.draft ? esc(S.draft) + '<span class="caret" aria-hidden="true"></span>' : '<span class="caret" aria-hidden="true"></span><span class="ph">Nhập tin nhắn</span>';
     f.scrollTop = f.scrollHeight;
   }
-  function renderBar() {
-    var lang = langOf(S.lang).label, h = '';
-    if (S.bar === 'normal') {
+  function renderInfo() {
+    var i = S.info, cls = '', icon = ICON.eye, text = '';
+    if (i.kind === 'idle') {
       var n = ctxLines().length;
-      h = '<button class="pill lang" data-act="lang" aria-label="Đổi ngôn ngữ dịch, đang là ' + lang + '">Việt → ' + lang + ICON_DOWN + '</button>' +
-        '<button class="pill ctx' + (n ? '' : ' off') + '" data-act="ctx" aria-label="Ngữ cảnh: ' + n + ' tin trên màn hình">' + ICON_EYE + n + '</button><span class="grow"></span>' +
-        (S.copiedId ? '<button class="pill incoming" data-act="copy">Tin copy</button>' : '') +
-        '<button class="pill primary" data-act="translate">' + ICON_TRANSLATE + 'Dịch</button>';
-    } else if (S.bar === 'lang') {
-      h = LANGS.map(function (l) { return '<button class="pill" data-act="pick" data-lang="' + l.code + '" aria-pressed="' + (l.code === S.lang) + '">' + l.label + '</button>'; }).join('');
+      text = S.screen ? 'Đang đọc màn hình · ' + n + ' tin ngữ cảnh' : (n ? 'Ngữ cảnh: ' + n + ' tin gần đây' : 'Chưa có ngữ cảnh');
+    } else if (i.kind === 'incomingBusy') { text = 'Đang dịch tin mới của đối tác…'; }
+    else if (i.kind === 'incoming') { cls = 'incoming'; icon = i.note ? ICON.warn : ICON.bubble; text = i.vi; }
+    else if (i.kind === 'outgoing') {
+      if (i.t.note) { cls = 'warn'; icon = ICON.warn; text = 'Lưu ý: ' + i.t.note; }
+      else if (i.t.meaning) { cls = 'ok'; icon = ICON.check; text = 'Nghĩa: ' + i.t.meaning; }
+      else { cls = 'ok'; icon = ICON.check; text = 'Đã dịch sang ' + i.lang.name; }
+    } else if (i.kind === 'error') { cls = 'err'; icon = ICON.warn; text = i.text; }
+    var b = $('info');
+    b.className = 'info ' + cls;
+    b.innerHTML = icon + '<span>' + esc(text) + '</span>';
+    b.setAttribute('aria-label', text + '. Chạm để xem chi tiết');
+  }
+  function renderBar() {
+    var h = '', t = resolvedTarget();
+    if (S.bar === 'normal') {
+      var title = S.target === 'auto' ? 'Tự động · ' + t.label : 'Việt → ' + t.label;
+      h = '<button class="pill" data-act="lang" aria-label="Ngôn ngữ dịch: ' + t.name + '">' + esc(title) + ICON.down + '</button><span class="grow"></span>' +
+        '<button class="pill primary" data-act="translate">' + ICON.tr + 'Dịch</button>';
+    } else if (S.bar === 'picking') {
+      h = '<div class="chips">' + [['auto', 'Tự động']].concat(LANGS.map(function (l) { return [l[0], l[1]]; })).map(function (o) {
+        return '<button class="pill" data-act="pick" data-lang="' + o[0] + '" aria-pressed="' + (o[0] === S.target) + '">' + esc(o[1]) + '</button>';
+      }).join('') + '</div><button class="pill" data-act="close">Xong</button>';
     } else if (S.bar === 'busy') {
-      h = '<div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch sang ' + lang + '…</div><button class="pill" data-act="cancel">Hủy</button>';
+      h = '<div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch sang ' + esc(S.lastTarget.name) + '…</div><button class="pill" data-act="cancel">Hủy</button>';
     } else if (S.bar === 'done') {
-      h = '<div class="status" role="status">' + ICON_CHECK + 'Đã dịch bằng AI' + (S.usedCtx ? ' · ' + S.usedCtx + ' tin ngữ cảnh' : '') + '</div><button class="pill" data-act="undo">Hoàn tác</button>';
-    } else if (S.bar === 'ctx') {
-      h = '<div class="status">Ngữ cảnh đọc từ màn hình</div><button class="pill" data-act="close">Xong</button>';
-    } else if (S.bar === 'copy') {
-      h = '<div class="status in">Tin đến → Tiếng Việt</div><button class="pill" data-act="close">Xong</button>';
-    } else if (S.bar === 'error') {
-      h = '<div class="status err" role="status">' + esc(S.err) + '</div><button class="pill" data-act="close">Đóng</button>';
+      h = '<div class="status" role="status" style="color:var(--ok)">' + ICON.check + 'Đã dịch sang ' + esc(S.lastTarget.name) + '</div><button class="pill" data-act="undo">Hoàn tác</button>';
+    } else if (S.bar === 'failed') {
+      h = '<div class="status err" role="status">' + esc(S.failText) + '</div><button class="pill" data-act="close">Đóng</button>';
+    } else if (S.bar === 'panel') {
+      h = '<div class="status dim">' + esc(S.panel.title) + '</div><button class="pill" data-act="closepanel">Xong</button>';
     }
     $('bar').innerHTML = h;
   }
-  function keyBtn(c) {
-    var label = S.shift && !S.numbers ? c.toUpperCase() : c;
-    return '<button class="key" data-act="k" data-k="' + esc(c) + '">' + esc(label) + '</button>';
+  function renderPanel() {
+    var p = $('panel');
+    if (S.bar !== 'panel') { p.hidden = true; $('keys').style.visibility = 'visible'; return; }
+    $('keys').style.visibility = 'hidden';
+    p.hidden = false;
+    p.innerHTML = '<div class="panel-body">' + S.panel.parts.map(function (x) {
+      return '<div class="' + (x[1] ? 'cap' : 'txt') + '">' + esc(x[0]) + '</div>';
+    }).join('') + '</div><button class="panel-btn" data-act="panelbtn">' + esc(S.panel.button) + '</button>';
+  }
+
+  /* ---------- Keys: iPhone metrics ---------- */
+  var ROWS = {
+    letters: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    numbers: ['1234567890', '-/:;()₫&@"', '.,?!\''],
+    symbols: ['[]{}#%^*+=', '_\\|~<>€£¥•', '.,?!\'']
+  };
+  var ACCENTS = { a: 'aáàảãạăâ', e: 'eéèẻẽẹê', i: 'iíìỉĩị', o: 'oóòỏõọôơ', u: 'uúùủũụư', y: 'yýỳỷỹỵ', d: 'dđ' };
+  var KEYS = [];
+  function layoutKeys() {
+    var W = 390, side = 3, g = 6, top = 8, rowGap = 11, h = 42.75;
+    var u = (W - 2 * side - 9 * g) / 10;
+    var rows = ROWS[S.page], up = S.shift !== 'off' && S.page === 'letters';
+    var list = [];
+    function add(kind, x, y, w, label, extra) { list.push({ kind: kind, x: x, y: y, w: w, h: h, label: label, extra: extra || '' }); }
+    [0, 1].forEach(function (r) {
+      var chars = Array.from(rows[r]), n = chars.length, x = (W - (n * u + (n - 1) * g)) / 2, y = top + r * (h + rowGap);
+      chars.forEach(function (c) { add('char', x, y, u, c); x += u + g; });
+    });
+    var y2 = top + 2 * (h + rowGap), edge = Math.round(u * 1.36), chars2 = Array.from(rows[2]);
+    if (S.page === 'letters') add('shift', side, y2, edge, '');
+    else add('page', side, y2, edge, S.page === 'numbers' ? '#+=' : '123', S.page === 'numbers' ? 'symbols' : 'numbers');
+    if (S.page === 'letters') {
+      var x2 = (W - (chars2.length * u + (chars2.length - 1) * g)) / 2;
+      chars2.forEach(function (c) { add('char', x2, y2, u, c); x2 += u + g; });
+    } else {
+      var start = side + edge + 2 * g, end = W - side - edge - 2 * g, kw = (end - start - (chars2.length - 1) * g) / chars2.length, x3 = start;
+      chars2.forEach(function (c) { add('char', x3, y2, kw, c); x3 += kw + g; });
+    }
+    add('back', W - side - edge, y2, edge, '');
+    var y3 = top + 3 * (h + rowGap), pw = Math.round(u * 2.35 + g), rw = Math.round(u * 2.6 + g);
+    add('page', side, y3, pw, S.page === 'letters' ? '123' : 'ABC', S.page === 'letters' ? 'numbers' : 'letters');
+    add('space', side + pw + g, y3, W - 2 * side - pw - rw - 2 * g, 'dấu cách');
+    add('ret', W - side - rw, y3, rw, 'xuống dòng');
+    KEYS = list.map(function (k) { if (k.kind === 'char') k.text = up ? k.label.toUpperCase() : k.label; return k; });
   }
   function renderKeys() {
-    var box = $('keys');
-    if (S.bar === 'copy') {
-      var m = S.msgs.filter(function (x) { return x.id === S.copiedId; })[0];
-      box.className = 'panel';
-      box.innerHTML = '<div class="panel-card"><div class="panel-src">' + esc(m ? m.text : '') + '</div>' +
-        '<div class="panel-text" aria-live="polite">' + esc(S.copyShown) + '</div>' +
-        '<button class="panel-btn" data-act="copytext">' + S.copyLabel + '</button></div>';
-      return;
-    }
-    if (S.bar === 'ctx') {
-      var lines = ctxLines();
-      box.className = 'panel';
-      box.innerHTML = '<div class="panel-card"><div class="ctx-list">' +
-        (lines.length ? lines.map(function (l) {
-          return '<div class="ctx-line' + (l.dir === 'in' ? ' partner' : '') + '"><b>' + (l.dir === 'in' ? 'Đối tác' : 'Tôi') + '</b><span>' + esc(l.text) + '</span></div>';
-        }).join('') : '<div class="ctx-empty">Chưa có tin nào. Tin mới trên màn hình sẽ tự hiện ở đây.</div>') +
-        '</div><button class="panel-btn" data-act="newconv">Cuộc mới</button></div>';
-      return;
-    }
-    var rows = S.numbers ? NUMBER_ROWS : LETTER_ROWS;
-    box.className = 'keys';
-    box.innerHTML =
-      '<div class="krow">' + Array.from(rows[0]).map(keyBtn).join('') + '</div>' +
-      '<div class="krow">' + Array.from(rows[1]).map(keyBtn).join('') + '</div>' +
-      '<div class="krow edge">' +
-        (S.numbers ? '<span class="spacer"></span>' :
-          '<button class="key alt wide" data-act="shift" aria-label="Chữ hoa" aria-pressed="' + S.shift + '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 8h-4.5v7h-7v-7H4z"/></svg></button>') +
-        '<div class="mid">' + Array.from(rows[2]).map(keyBtn).join('') + '</div>' +
-        '<button class="key alt wide" data-act="back" aria-label="Xóa"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></button>' +
-      '</div>' +
-      '<div class="krow">' +
-        '<button class="key alt fn" data-act="mode">' + (S.numbers ? 'ABC' : '123') + '</button>' +
-        '<button class="key space" data-act="space">dấu cách</button>' +
-        '<button class="key alt fn" data-act="nl">xuống dòng</button>' +
-      '</div>';
+    layoutKeys();
+    $('keys').innerHTML = KEYS.map(function (k, i) {
+      var cls = 'key' + (k.kind === 'char' ? '' : k.kind === 'space' ? ' space' : ' alt');
+      if (k.kind === 'shift' && S.shift !== 'off') cls += ' on';
+      var inner = k.kind === 'char' ? esc(k.text) : k.kind === 'shift' ? (S.shift === 'locked' ? ICON.lock : S.shift === 'once' ? ICON.shiftOn : ICON.shift) : k.kind === 'back' ? ICON.back : esc(k.label);
+      var aria = k.kind === 'shift' ? ' aria-label="Shift" aria-pressed="' + (S.shift !== 'off') + '"' : k.kind === 'back' ? ' aria-label="Xóa"' : '';
+      return '<button class="' + cls + '" data-k="' + i + '"' + aria + ' style="left:' + k.x + 'px;top:' + k.y + 'px;width:' + k.w + 'px;height:' + k.h + 'px">' + inner + '</button>';
+    }).join('');
   }
-  function render() { renderMsgs(); renderField(); renderBar(); renderKeys(); }
+  function render() { renderMsgs(); renderField(); renderInfo(); renderBar(); renderKeys(); renderPanel(); }
 
-  /* ---------- Events ---------- */
-  var phone = $('phone');
-  phone.addEventListener('pointerdown', function (e) { if (e.target.closest('.key')) e.preventDefault(); });
-  phone.addEventListener('click', function (e) {
+  /* ---------- Key touches: pop-up on press, type on release, accents on hold ---------- */
+  var press = null, holdTimer = null, delTimer = null, delCount = 0;
+  function keyAt(x, y) {
+    var best = null, bestD = 1e9;
+    KEYS.forEach(function (k, i) {
+      var cx = Math.max(k.x, Math.min(x, k.x + k.w)), cy = Math.max(k.y, Math.min(y, k.y + k.h));
+      var d = (cx - x) * (cx - x) + (cy - y) * (cy - y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }
+  function localPoint(e) {
+    var r = $('keys').getBoundingClientRect(), scale = r.width / 390;
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  }
+  function showPopup(i) {
+    hidePopup();
+    var k = KEYS[i]; if (k.kind !== 'char') return;
+    var bw = Math.max(k.w + 22, 48), bh = k.h + 14, bx = Math.min(Math.max(k.x + k.w / 2 - bw / 2, 0), 390 - bw);
+    var el = document.createElement('div');
+    el.className = 'popup'; el.id = 'popup';
+    el.style.cssText = 'left:' + bx + 'px;top:' + (k.y - bh - 6) + 'px;width:' + bw + 'px;height:' + bh + 'px';
+    el.textContent = k.text;
+    $('keys').appendChild(el);
+  }
+  function hidePopup() { var p = $('popup'); if (p) p.remove(); var a = $('accents'); if (a) a.remove(); }
+  function showAccents(i, x) {
+    hidePopup();
+    var k = KEYS[i], opts = Array.from(ACCENTS[k.label.toLowerCase()]);
+    if (S.shift !== 'off') opts = opts.map(function (o) { return o.toUpperCase(); });
+    var cw = Math.max(Math.min(k.w, 40), 30), w = cw * opts.length + 12, left = Math.min(Math.max(k.x - 6, 2), 390 - w - 2);
+    var el = document.createElement('div');
+    el.className = 'accents'; el.id = 'accents';
+    el.style.cssText = 'left:' + left + 'px;top:' + (k.y - k.h - 20) + 'px';
+    el.innerHTML = opts.map(function (o) { return '<span style="width:' + cw + 'px;height:' + k.h + 'px">' + o + '</span>'; }).join('');
+    $('keys').appendChild(el);
+    press.accents = { opts: opts, left: left + 6, cw: cw, sel: 0 };
+    selectAccent(x);
+  }
+  function selectAccent(x) {
+    var a = press.accents, idx = Math.max(0, Math.min(a.opts.length - 1, Math.floor((x - a.left) / a.cw)));
+    a.sel = idx;
+    Array.from($('accents').children).forEach(function (s, j) { s.className = j === idx ? 'sel' : ''; });
+  }
+  function keyDown(i, e) {
+    var k = KEYS[i];
+    if (k.kind === 'char') {
+      showPopup(i);
+      if (S.page === 'letters' && ACCENTS[k.label.toLowerCase()]) holdTimer = setTimeout(function () { if (press) showAccents(press.i, localPoint(e).x); }, 400);
+    } else if (k.kind === 'shift') {
+      var now = Date.now();
+      S.shift = S.shift === 'locked' ? 'off' : S.shift === 'once' ? (now - S.lastShiftTap < 350 ? 'locked' : 'off') : 'once';
+      S.lastShiftTap = now; renderKeys(); press = null;
+    } else if (k.kind === 'page') {
+      S.page = k.extra; if (S.page !== 'letters') S.shift = 'off'; renderKeys(); press = null;
+    } else if (k.kind === 'back') {
+      del(false); afterEdit(); render(); delCount = 0;
+      delTimer = setTimeout(function rep() { delCount++; del(delCount > 16); afterEdit(); renderField(); renderInfo(); renderBar(); delTimer = setTimeout(rep, delCount > 16 ? 180 : 90); }, 450);
+    } else {
+      var el = document.querySelector('[data-k="' + i + '"]'); if (el) el.classList.add('down');
+    }
+  }
+  function keyUp() {
+    clearTimeout(holdTimer); clearTimeout(delTimer);
+    if (!press) return;
+    var k = KEYS[press.i], p = press; press = null;
+    if (p.accents) { insert(p.accents.opts[p.accents.sel]); if (S.shift === 'once') S.shift = 'off'; afterEdit(); render(); return; }
+    hidePopup();
+    if (k.kind === 'char') {
+      var text = k.text;
+      if (S.page === 'letters' && /\p{L}/u.test(text)) typeLetter(text); else insert(text);
+      if (S.shift === 'once') S.shift = 'off';
+      if (S.page !== 'letters' && text === '\'') S.page = 'letters';
+      afterEdit(); render(); return;
+    }
+    if (k.kind === 'space') { space(); afterEdit(); render(); return; }
+    if (k.kind === 'ret') { insert('\n'); afterEdit(); render(); return; }
+    if (k.kind === 'back') { render(); }
+  }
+  var keysEl = $('keys');
+  keysEl.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (S.bar === 'panel') return;
+    var pt = localPoint(e), i = keyAt(pt.x, pt.y);
+    if (i === null) return;
+    if (press && KEYS[press.i] && KEYS[press.i].kind === 'char' && !press.accents) keyUp();
+    press = { i: i, id: e.pointerId };
+    try { keysEl.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional */ }
+    keyDown(i, e);
+  });
+  keysEl.addEventListener('pointermove', function (e) {
+    if (!press || press.id !== e.pointerId) return;
+    var pt = localPoint(e);
+    if (press.accents) { selectAccent(pt.x); return; }
+    var k = KEYS[press.i];
+    if (k.kind !== 'char') return;
+    var j = keyAt(pt.x, pt.y);
+    if (j !== null && j !== press.i && KEYS[j].kind === 'char') {
+      clearTimeout(holdTimer);
+      press.i = j; showPopup(j);
+      if (S.page === 'letters' && ACCENTS[KEYS[j].label.toLowerCase()]) holdTimer = setTimeout(function () { if (press) showAccents(press.i, pt.x); }, 400);
+    }
+  });
+  keysEl.addEventListener('pointerup', function (e) { if (press && press.id === e.pointerId) keyUp(); });
+  keysEl.addEventListener('pointercancel', function () { clearTimeout(holdTimer); clearTimeout(delTimer); press = null; hidePopup(); renderKeys(); });
+
+  /* ---------- Bar, info, chat ---------- */
+  $('phone').addEventListener('click', function (e) {
     var el = e.target.closest('[data-act]'); if (!el) return;
     var act = el.getAttribute('data-act');
-    if (act === 'k') pressLetter(el.getAttribute('data-k'));
-    else if (act === 'shift') set({ shift: !S.shift });
-    else if (act === 'back') backspace();
-    else if (act === 'space') typeText(' ');
-    else if (act === 'nl') typeText('\n');
-    else if (act === 'mode') set({ numbers: !S.numbers, shift: false });
-    else if (act === 'lang') set({ bar: 'lang' });
-    else if (act === 'pick') set({ lang: el.getAttribute('data-lang'), bar: 'normal' });
-    else if (act === 'translate') translate();
-    else if (act === 'cancel') { clearTimeout(timer); set({ bar: 'normal' }); }
-    else if (act === 'undo') set({ draft: S.original, bar: 'normal' });
-    else if (act === 'copy') showCopy();
-    else if (act === 'close') { clearInterval(stream); set({ bar: 'normal' }); }
-    else if (act === 'copytext') set({ copyLabel: 'Đã sao chép' });
-    else if (act === 'ctx') set({ bar: 'ctx' });
-    else if (act === 'newconv') set({ ctxFrom: S.msgs.length, bar: 'normal' });
-    else if (act === 'msg') set({ copiedId: Number(el.getAttribute('data-id')), bar: S.bar === 'copy' ? 'normal' : S.bar });
-    else if (act === 'send') {
+    if (act === 'lang') { S.bar = 'picking'; render(); }
+    else if (act === 'pick') { S.target = el.getAttribute('data-lang'); S.bar = 'normal'; render(); }
+    else if (act === 'close') { S.bar = 'normal'; render(); }
+    else if (act === 'translate') translateDraft();
+    else if (act === 'cancel') { clearTimeout(busyTimer); S.bar = 'normal'; render(); }
+    else if (act === 'undo') { S.draft = S.original; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); }
+    else if (act === 'info') openInfo();
+    else if (act === 'closepanel') { S.bar = 'normal'; render(); }
+    else if (act === 'panelbtn') { S.panel.action(); }
+    else if (act === 'msg') {
+      var id = Number(el.getAttribute('data-id'));
+      S.copiedId = id;
+      var m = S.msgs.filter(function (x) { return x.id === id; })[0];
+      render(); if (m && m.vi) showIncoming(m);
+    } else if (act === 'send') {
       if (!S.draft.trim()) return;
-      set({ msgs: S.msgs.concat([{ id: S.nextId, dir: 'out', text: S.draft.trim() }]), nextId: S.nextId + 1, draft: '', bar: 'normal' });
+      S.msgs = S.msgs.concat([{ id: S.nextId++, dir: 'out', text: S.draft.trim() }]);
+      S.draft = ''; S.bar = 'normal'; S.info = { kind: 'idle' }; S.word = new Word(); afterEdit(); render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
     }
   });
+  function openInfo() {
+    var i = S.info;
+    if (i.kind === 'incomingBusy') return;
+    if (i.kind === 'incoming') {
+      var parts = [[i.src, true], ['→ ' + i.vi, false]];
+      if (i.note) parts.push(['Lưu ý: ' + i.note, true]);
+      S.panel = { title: 'Tin đối tác → Tiếng Việt', parts: parts, button: 'Sao chép bản dịch', action: function () { S.panel.button = 'Đã sao chép'; renderPanel(); } };
+    } else if (i.kind === 'outgoing') {
+      var o = [['Bạn viết', true], [i.original, false], ['Đã đổi sang ' + i.lang.name, true], [i.t.text, false]];
+      if (i.t.meaning) o.push(['Nghĩa khi dịch ngược', true], [i.t.meaning, false]);
+      if (i.t.note) o.push(['Lưu ý', true], [i.t.note, false]);
+      S.panel = { title: 'Kiểm tra bản dịch', parts: o, button: 'Hoàn tác, lấy lại câu gốc', action: function () { S.draft = S.original; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); } };
+    } else {
+      var lines = ctxLines();
+      S.panel = { title: 'Ngữ cảnh đang dùng',
+        parts: lines.length ? lines.map(function (l) { return [(l.dir === 'in' ? 'Đối tác: ' : 'Tôi: ') + l.text, l.dir !== 'in']; }) : [['Chưa có tin nào làm ngữ cảnh.', true]],
+        button: 'Cuộc mới (xóa ngữ cảnh)', action: function () { S.ctxFrom = S.msgs.length; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); } };
+    }
+    S.bar = 'panel'; render();
+  }
+
+  /* ---------- Desktop keyboard ---------- */
   document.addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var a = document.activeElement;
     if (a && a.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
-    if (S.bar === 'copy' || S.bar === 'ctx') return;
-    if (e.key === 'Backspace') { e.preventDefault(); backspace(); }
-    else if (e.key === 'Enter') { e.preventDefault(); typeText('\n'); }
-    else if (e.key === ' ') { e.preventDefault(); typeText(' '); }
-    else if (e.key.length === 1) {
-      e.preventDefault();
-      if (/[a-zA-Z]/.test(e.key)) {
-        var m = S.draft.match(/(\S*)$/), word = m ? m[1] : '';
-        set({ draft: S.draft.slice(0, S.draft.length - word.length) + telex(word, e.key), bar: settle() });
-      } else typeText(e.key);
-    }
+    if (S.bar === 'panel') return;
+    var handled = true;
+    if (e.key === 'Backspace') del(false);
+    else if (e.key === 'Enter') insert('\n');
+    else if (e.key === ' ') space();
+    else if (e.key.length === 1) { if (/\p{L}/u.test(e.key) && /[a-z]/i.test(e.key)) typeLetter(e.key); else insert(e.key); }
+    else handled = false;
+    if (handled) { e.preventDefault(); afterEdit(); render(); }
   });
-  $('reset').addEventListener('click', function () { clearTimeout(timer); clearInterval(stream); S = fresh(); render(); });
+
+  /* ---------- Simulation controls ---------- */
+  $('newmsg').addEventListener('click', function () {
+    var m = NEXT[S.next % NEXT.length]; S.next++;
+    var msg = { id: S.nextId++, dir: 'in', text: m.text, vi: m.vi, note: m.note };
+    S.msgs = S.msgs.concat([msg]); render();
+    $('msgs').scrollTop = $('msgs').scrollHeight;
+    if (S.screen) showIncoming(msg);
+  });
+  $('screen').addEventListener('click', function () {
+    S.screen = !S.screen; this.setAttribute('aria-pressed', String(S.screen)); render();
+  });
+  $('reset').addEventListener('click', function () {
+    clearTimeout(busyTimer); clearTimeout(incomingTimer); S = fresh(); $('screen').setAttribute('aria-pressed', 'true'); afterEdit(); render();
+  });
 
   /* ---------- Fit the phone to the window ---------- */
   function fit() {
@@ -461,12 +742,15 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     var room = box.parentElement.clientWidth;
     var scale = Math.min(1, (window.innerHeight - 32) / 868, room / 414);
     scale = Math.max(scale, 0.5);
-    phone.style.transform = 'scale(' + scale + ')';
+    $('phone').style.transform = 'scale(' + scale + ')';
     box.style.width = Math.round(414 * scale) + 'px';
     box.style.height = Math.round(868 * scale) + 'px';
   }
   window.addEventListener('resize', fit);
   fit();
+  afterEdit();
   render();
+
+  window.__telex = function (keys) { var w = new Word(); Array.from(keys).forEach(function (k) { w.type(k); }); return w.shown; };
 })();
 </script>
