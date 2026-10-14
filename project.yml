@@ -1,0 +1,112 @@
+# XcodeGen spec: `xcodegen generate` turns this into DichApple.xcodeproj (no Mac needed to edit it).
+# Bundle IDs and the App Group are also used in Shared/Config.swift; change them together.
+name: DichApple
+options:
+  bundleIdPrefix: com.mocsinh
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-Osize"
+      SWIFT_COMPILATION_MODE: wholemodule
+      GCC_OPTIMIZATION_LEVEL: s
+      STRIP_INSTALLED_PRODUCT: YES
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+
+targets:
+  DichApple:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Support/App-Info.plist
+      properties:
+        CFBundleDisplayName: Dịch Apple
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+    entitlements:
+      path: Support/DichApple.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.mocsinh.dichapple]
+        keychain-access-groups: [$(AppIdentifierPrefix)com.mocsinh.dichapple.shared]
+    dependencies:
+      - target: DichKeyboard
+      - target: DichScreen
+    scheme: {}
+
+  # Translation keyboard. UIKit only: keyboards get a small memory budget.
+  DichKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Keyboard
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple.keyboard
+    info:
+      path: Support/Keyboard-Info.plist
+      properties:
+        CFBundleDisplayName: Dịch Apple
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: vi-VN
+            RequestsOpenAccess: true
+    entitlements:
+      path: Support/DichKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.mocsinh.dichapple]
+        keychain-access-groups: [$(AppIdentifierPrefix)com.mocsinh.dichapple.shared]
+
+  # Screen reading: a ReplayKit broadcast extension that reads chat text on-device.
+  DichScreen:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Screen
+      - path: Shared/Config.swift
+      - path: Shared/SharedStore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple.screen
+    info:
+      path: Support/Screen-Info.plist
+      properties:
+        CFBundleDisplayName: Dịch Apple
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+    entitlements:
+      path: Support/DichScreen.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.mocsinh.dichapple]

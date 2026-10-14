@@ -90,6 +90,13 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
 .pill.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); font-size: 15px; padding: 0 16px; }
 .pill.incoming { border-color: var(--incoming); background: var(--incoming-bg); color: var(--incoming); }
 .pill.lang { border: none; font-size: 15px; }
+.pill.ctx { border: none; padding: 0 10px; font-variant-numeric: tabular-nums; }
+.pill.ctx.off { color: var(--kb-muted); font-weight: 500; }
+.ctx-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.35; }
+.ctx-line { display: flex; gap: 8px; }
+.ctx-line b { flex: 0 0 52px; font-weight: 600; color: var(--kb-muted); }
+.ctx-line.partner b { color: var(--incoming); }
+.ctx-empty { color: var(--kb-muted); font-size: 15px; line-height: 1.4; }
 .pill[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
 .status { flex: 1; min-width: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; padding-left: 4px; }
 .status.err { color: var(--err); }
@@ -163,7 +170,8 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
         <li>Gõ bằng bàn phím trên màn hình, kiểu Telex: <kbd>aa</kbd> ra â, <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Gõ bằng bàn phím máy tính cũng được.</li>
         <li>Bấm <b>Dịch</b>: cả đoạn trong ô nhập đổi sang ngôn ngữ đang chọn. Bấm <b>Hoàn tác</b> để lấy lại câu tiếng Việt.</li>
         <li>Chạm nút <b>Việt → 中文</b> để đổi ngôn ngữ đích.</li>
-        <li>Chạm vào một tin màu trắng để giả lập Sao chép, rồi bấm <b>Dịch tin copy</b> để đọc tin đó bằng tiếng Việt.</li>
+        <li>Chạm vào một tin màu trắng để giả lập Sao chép, rồi bấm <b>Tin copy</b> để đọc tin đó bằng tiếng Việt.</li>
+        <li>Chip có biểu tượng con mắt là <b>ngữ cảnh</b>: số tin app đang đọc được trên màn hình. Chạm để xem các tin đó, hoặc bấm <b>Cuộc mới</b> khi chuyển sang chat với người khác.</li>
       </ol>
       <p class="fine">Đây là bản xem trước: chỉ vài câu có bản dịch mẫu (câu có sẵn, “xin chào”, “cảm ơn”, “giá bao nhiêu”, “bao giờ giao hàng”). App thật gửi câu tới gpt-6-luna.</p>
       <button class="reset" id="reset" type="button">Làm lại từ đầu</button>
@@ -271,8 +279,9 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
   /* ---------- State ---------- */
   var S, timer, stream;
   function fresh() {
-    return { draft: DRAFT, lang: 'zh', bar: 'normal', original: '', shift: false, numbers: false, copiedId: null, copyShown: '', copyLabel: 'Sao chép bản dịch', err: '', msgs: MESSAGES.slice(), nextId: 4 };
+    return { draft: DRAFT, lang: 'zh', bar: 'normal', original: '', shift: false, numbers: false, copiedId: null, copyShown: '', copyLabel: 'Sao chép bản dịch', err: '', msgs: MESSAGES.slice(), nextId: 4, ctxFrom: 0, usedCtx: 0 };
   }
+  function ctxLines() { return S.msgs.slice(S.ctxFrom).slice(-8); }
   S = fresh();
   function set(p) { Object.assign(S, p); render(); }
   function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -299,7 +308,8 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     var out = translateText(text, S.lang);
     set({ bar: 'busy' });
     clearTimeout(timer);
-    timer = setTimeout(function () { set({ original: S.draft, draft: out, bar: 'done' }); }, 900);
+    var used = ctxLines().length;
+    timer = setTimeout(function () { set({ original: S.draft, draft: out, bar: 'done', usedCtx: used }); }, 900);
   }
   function showCopy() {
     var m = S.msgs.filter(function (x) { return x.id === S.copiedId; })[0];
@@ -318,6 +328,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
   var ICON_CHECK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var ICON_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.5 3 2.5 5.5 5.5 7"/><path d="M11 5c-.8 3.5-3.2 6.5-7 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>';
   var ICON_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  var ICON_EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 
   function renderMsgs() {
     $('msgs').innerHTML = S.msgs.map(function (m) {
@@ -334,15 +345,19 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
   function renderBar() {
     var lang = langOf(S.lang).label, h = '';
     if (S.bar === 'normal') {
-      h = '<button class="pill lang" data-act="lang" aria-label="Đổi ngôn ngữ dịch, đang là ' + lang + '">Việt → ' + lang + ICON_DOWN + '</button><span class="grow"></span>' +
-        (S.copiedId ? '<button class="pill incoming" data-act="copy">Dịch tin copy</button>' : '') +
+      var n = ctxLines().length;
+      h = '<button class="pill lang" data-act="lang" aria-label="Đổi ngôn ngữ dịch, đang là ' + lang + '">Việt → ' + lang + ICON_DOWN + '</button>' +
+        '<button class="pill ctx' + (n ? '' : ' off') + '" data-act="ctx" aria-label="Ngữ cảnh: ' + n + ' tin trên màn hình">' + ICON_EYE + n + '</button><span class="grow"></span>' +
+        (S.copiedId ? '<button class="pill incoming" data-act="copy">Tin copy</button>' : '') +
         '<button class="pill primary" data-act="translate">' + ICON_TRANSLATE + 'Dịch</button>';
     } else if (S.bar === 'lang') {
       h = LANGS.map(function (l) { return '<button class="pill" data-act="pick" data-lang="' + l.code + '" aria-pressed="' + (l.code === S.lang) + '">' + l.label + '</button>'; }).join('');
     } else if (S.bar === 'busy') {
       h = '<div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch sang ' + lang + '…</div><button class="pill" data-act="cancel">Hủy</button>';
     } else if (S.bar === 'done') {
-      h = '<div class="status" role="status">' + ICON_CHECK + 'Đã dịch sang ' + lang + ' bằng AI</div><button class="pill" data-act="undo">Hoàn tác</button>';
+      h = '<div class="status" role="status">' + ICON_CHECK + 'Đã dịch bằng AI' + (S.usedCtx ? ' · ' + S.usedCtx + ' tin ngữ cảnh' : '') + '</div><button class="pill" data-act="undo">Hoàn tác</button>';
+    } else if (S.bar === 'ctx') {
+      h = '<div class="status">Ngữ cảnh đọc từ màn hình</div><button class="pill" data-act="close">Xong</button>';
     } else if (S.bar === 'copy') {
       h = '<div class="status in">Tin đến → Tiếng Việt</div><button class="pill" data-act="close">Xong</button>';
     } else if (S.bar === 'error') {
@@ -362,6 +377,16 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
       box.innerHTML = '<div class="panel-card"><div class="panel-src">' + esc(m ? m.text : '') + '</div>' +
         '<div class="panel-text" aria-live="polite">' + esc(S.copyShown) + '</div>' +
         '<button class="panel-btn" data-act="copytext">' + S.copyLabel + '</button></div>';
+      return;
+    }
+    if (S.bar === 'ctx') {
+      var lines = ctxLines();
+      box.className = 'panel';
+      box.innerHTML = '<div class="panel-card"><div class="ctx-list">' +
+        (lines.length ? lines.map(function (l) {
+          return '<div class="ctx-line' + (l.dir === 'in' ? ' partner' : '') + '"><b>' + (l.dir === 'in' ? 'Đối tác' : 'Tôi') + '</b><span>' + esc(l.text) + '</span></div>';
+        }).join('') : '<div class="ctx-empty">Chưa có tin nào. Tin mới trên màn hình sẽ tự hiện ở đây.</div>') +
+        '</div><button class="panel-btn" data-act="newconv">Cuộc mới</button></div>';
       return;
     }
     var rows = S.numbers ? NUMBER_ROWS : LETTER_ROWS;
@@ -403,6 +428,8 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     else if (act === 'copy') showCopy();
     else if (act === 'close') { clearInterval(stream); set({ bar: 'normal' }); }
     else if (act === 'copytext') set({ copyLabel: 'Đã sao chép' });
+    else if (act === 'ctx') set({ bar: 'ctx' });
+    else if (act === 'newconv') set({ ctxFrom: S.msgs.length, bar: 'normal' });
     else if (act === 'msg') set({ copiedId: Number(el.getAttribute('data-id')), bar: S.bar === 'copy' ? 'normal' : S.bar });
     else if (act === 'send') {
       if (!S.draft.trim()) return;
@@ -414,7 +441,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); o
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var a = document.activeElement;
     if (a && a.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
-    if (S.bar === 'copy') return;
+    if (S.bar === 'copy' || S.bar === 'ctx') return;
     if (e.key === 'Backspace') { e.preventDefault(); backspace(); }
     else if (e.key === 'Enter') { e.preventDefault(); typeText('\n'); }
     else if (e.key === ' ') { e.preventDefault(); typeText(' '); }

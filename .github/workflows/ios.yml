@@ -1,0 +1,86 @@
+name: iOS
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: "Upload to TestFlight"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Telex tests
+        run: |
+          swiftc -O Keyboard/Telex.swift Tests/main.swift -o telex-tests
+          ./telex-tests
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build (simulator, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -40
+
+  testflight:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      TEAM_ID: ${{ secrets.TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        run: |
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 TEAM_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Thiếu secret $v (xem docs/HUONG-DAN.md)"; exit 1; fi
+          done
+
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Archive and upload
+        run: |
+          set -o pipefail
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s' "$ASC_KEY_P8" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/DichApple.xcarchive \
+            DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            "${AUTH[@]}" archive | tail -40
+          sed "s/TEAM_ID_PLACEHOLDER/$TEAM_ID/" ExportOptions.plist > build/ExportOptions.plist
+          xcodebuild -exportArchive -archivePath build/DichApple.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
+            "${AUTH[@]}" | tail -40
