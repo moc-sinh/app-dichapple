@@ -1,0 +1,445 @@
+<title>Dịch Apple trên iPhone</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;700&display=swap">
+<style>
+/* Layout: the iPhone is the hero; short "how to try" notes sit beside it and stack under it on narrow screens. */
+:root {
+  --bg: #E9EDF3; --fg: #0F172A; --muted: #475569; --line: #CBD3DE; --card: #FFFFFF;
+  --accent: #1D4ED8; --accent-fg: #FFFFFF; --incoming: #9A3412; --incoming-bg: #FFF4EC; --ok: #0F766E; --err: #B91C1C;
+  --frame: #1B1F27;
+  --chat-bg: #EEF1F5; --chat-head: #FFFFFF; --bubble-in: #FFFFFF; --bubble-line: #DDE2EA; --chat-muted: #4B5563;
+  --field-bg: #F8FAFC; --field-line: #CBD2DC;
+  --kb: #D5DAE2; --kb-line: #C3CAD5; --key: #FFFFFF; --key-fg: #0F172A; --key-alt: #ADB4BF; --key-shadow: #8A93A3;
+  --chip: #F4F6F9; --chip-line: #6B7280; --kb-muted: #374151;
+  --font-ui: -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-display: "Be Vietnam Pro", -apple-system, "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1117; --fg: #E6EAF0; --muted: #A3AEBE; --line: #2A3140; --card: #161B24;
+    --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --err: #F87171;
+    --frame: #000000;
+    --chat-bg: #0B0D11; --chat-head: #161A21; --bubble-in: #1F242D; --bubble-line: #2A303B; --chat-muted: #A3AEBE;
+    --field-bg: #1A1F27; --field-line: #3A4250;
+    --kb: #2C2E33; --kb-line: #3A3D44; --key: #6A6C72; --key-fg: #FFFFFF; --key-alt: #46484E; --key-shadow: #1A1B1E;
+    --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1117; --fg: #E6EAF0; --muted: #A3AEBE; --line: #2A3140; --card: #161B24;
+  --accent: #2F5FE0; --accent-fg: #FFFFFF; --incoming: #F0A070; --incoming-bg: #3A2418; --ok: #34D399; --err: #F87171;
+  --frame: #000000;
+  --chat-bg: #0B0D11; --chat-head: #161A21; --bubble-in: #1F242D; --bubble-line: #2A303B; --chat-muted: #A3AEBE;
+  --field-bg: #1A1F27; --field-line: #3A4250;
+  --kb: #2C2E33; --kb-line: #3A3D44; --key: #6A6C72; --key-fg: #FFFFFF; --key-alt: #46484E; --key-shadow: #1A1B1E;
+  --chip: #46484E; --chip-line: #8A8D94; --kb-muted: #B4B8C0;
+  color-scheme: dark;
+}
+
+html, body { min-height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); }
+.wrap {
+  max-width: 980px; margin: 0 auto; box-sizing: border-box;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.intro h1 { font-family: var(--font-display); font-weight: 700; font-size: 30px; margin: 0; text-wrap: balance; }
+.intro p { margin: 6px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; max-width: 62ch; }
+.stage { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; justify-content: center; }
+.notes { flex: 1 1 280px; min-width: 0; max-width: 420px; display: flex; flex-direction: column; gap: 14px; }
+.notes h2 { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin: 0; }
+.notes ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5; }
+.notes kbd { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+.notes .fine { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.reset { align-self: flex-start; height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- iPhone ---------- */
+.fit { flex: 0 0 auto; position: relative; }
+.phone { position: absolute; top: 0; left: 0; width: 414px; height: 868px; box-sizing: border-box; padding: 12px; border-radius: 60px; background: var(--frame); transform-origin: top left; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); }
+.screen { width: 390px; height: 844px; border-radius: 48px; overflow: hidden; display: flex; flex-direction: column; background: var(--chat-bg); font-family: var(--font-ui); position: relative; }
+.screen button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+
+.chat-head { flex-shrink: 0; height: 104px; box-sizing: border-box; padding: 50px 14px 0; display: flex; align-items: center; gap: 12px; background: var(--chat-head); border-bottom: 1px solid var(--bubble-line); }
+.avatar { width: 38px; height: 38px; border-radius: 19px; background: var(--incoming-bg); color: var(--incoming); display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+.who b { display: block; font-size: 17px; font-weight: 600; }
+.who span { font-size: 12px; color: var(--chat-muted); }
+
+.msgs { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; }
+.row-in { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.row-out { display: flex; justify-content: flex-end; }
+.bubble { max-width: 82%; font-size: 16px; line-height: 1.4; padding: 9px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble.in { border: 1px solid var(--bubble-line); background: var(--bubble-in); color: var(--fg); text-align: left; border-radius: 18px 18px 18px 6px; }
+.bubble.out { background: var(--accent); color: var(--accent-fg); border-radius: 18px 18px 6px 18px; }
+.copied-tag { font-size: 11px; font-weight: 600; color: var(--incoming); padding-left: 6px; }
+
+.compose { flex-shrink: 0; display: flex; align-items: flex-end; gap: 8px; padding: 8px 10px; background: var(--chat-head); border-top: 1px solid var(--bubble-line); }
+.field { flex: 1; min-width: 0; min-height: 44px; max-height: 88px; overflow-y: auto; box-sizing: border-box; border: 1px solid var(--field-line); border-radius: 20px; padding: 10px 14px; background: var(--field-bg); color: var(--fg); font-size: 16px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+.field .ph { color: var(--chat-muted); }
+.caret { display: inline-block; width: 2px; height: 1.1em; margin-left: 1px; vertical-align: -0.18em; background: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.send { width: 44px; height: 44px; flex-shrink: 0; border: none; border-radius: 22px; background: var(--accent); display: grid; place-items: center; }
+
+.kb { flex-shrink: 0; background: var(--kb); color: var(--key-fg); }
+.bar { height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--kb-line); }
+.bar .grow { flex: 1; }
+.pill { height: 34px; padding: 0 12px; border-radius: 17px; border: 1px solid var(--chip-line); background: var(--chip); color: var(--key-fg); font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pill.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); font-size: 15px; padding: 0 16px; }
+.pill.incoming { border-color: var(--incoming); background: var(--incoming-bg); color: var(--incoming); }
+.pill.lang { border: none; font-size: 15px; }
+.pill[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.status { flex: 1; min-width: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+.status.err { color: var(--err); }
+.status.in { color: var(--incoming); font-weight: 600; }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--kb-line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.keys { height: 214px; box-sizing: border-box; padding: 8px 4px 4px; display: flex; flex-direction: column; gap: 11px; }
+.krow { display: flex; justify-content: center; gap: 5px; }
+.krow.edge { justify-content: space-between; }
+.krow .mid { display: flex; gap: 5px; }
+.key { flex: 0 0 33px; height: 42px; padding: 0; border: none; border-radius: 6px; background: var(--key); color: var(--key-fg); box-shadow: 0 1px 0 var(--key-shadow); font-size: 22px; display: grid; place-items: center; }
+.key:active { background: var(--key-alt); }
+.key.alt { background: var(--key-alt); }
+.key.alt[aria-pressed="true"] { background: var(--key); }
+.key.wide { flex: 0 0 44px; }
+.key.fn { flex: 0 0 88px; font-size: 16px; }
+.key.space { flex: 1; font-size: 16px; }
+.spacer { flex: 0 0 44px; }
+
+.panel { height: 214px; box-sizing: border-box; padding: 8px 6px 6px; }
+.panel-card { height: 100%; box-sizing: border-box; background: var(--chip); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel-src { font-size: 13px; color: var(--kb-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.panel-text { flex: 1; min-height: 0; overflow-y: auto; font-size: 17px; line-height: 1.4; }
+.panel-btn { height: 44px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 16px; font-weight: 600; }
+
+.sys { height: 40px; display: flex; align-items: flex-start; justify-content: space-between; padding: 0 26px; }
+.home { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; border-radius: 3px; background: var(--fg); opacity: .8; transform: translateX(-50%); }
+
+@media (prefers-reduced-motion: reduce) { .caret, .spinner { animation: none; } }
+</style>
+
+<main class="wrap">
+  <header class="intro">
+    <h1>Dịch Apple</h1>
+    <p>Bàn phím gõ tiếng Việt, có thanh Dịch ở trên. Bấm Dịch là cả đoạn trong ô nhập đổi sang ngôn ngữ của người nhận.</p>
+  </header>
+
+  <div class="stage">
+    <div class="fit" id="fit">
+      <div class="phone" id="phone">
+        <div class="screen">
+          <div class="chat-head">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+            <div class="avatar" aria-hidden="true">CW</div>
+            <div class="who"><b>Chen Wei</b><span>Nhà cung cấp · Thâm Quyến</span></div>
+          </div>
+          <div class="msgs" id="msgs" aria-live="polite"></div>
+          <div class="compose">
+            <div class="field" id="field" role="textbox" aria-multiline="true" aria-label="Ô nhập tin nhắn" tabindex="0"></div>
+            <button class="send" data-act="send" aria-label="Gửi">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-fg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+          <div class="kb">
+            <div class="bar" id="bar"></div>
+            <div id="keys"></div>
+            <div class="sys" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--kb-muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--kb-muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>
+            </div>
+          </div>
+          <div class="home" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="notes">
+      <h2>Thử nhanh</h2>
+      <ol>
+        <li>Gõ bằng bàn phím trên màn hình, kiểu Telex: <kbd>aa</kbd> ra â, <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Gõ bằng bàn phím máy tính cũng được.</li>
+        <li>Bấm <b>Dịch</b>: cả đoạn trong ô nhập đổi sang ngôn ngữ đang chọn. Bấm <b>Hoàn tác</b> để lấy lại câu tiếng Việt.</li>
+        <li>Chạm nút <b>Việt → 中文</b> để đổi ngôn ngữ đích.</li>
+        <li>Chạm vào một tin màu trắng để giả lập Sao chép, rồi bấm <b>Dịch tin copy</b> để đọc tin đó bằng tiếng Việt.</li>
+      </ol>
+      <p class="fine">Đây là bản xem trước: chỉ vài câu có bản dịch mẫu (câu có sẵn, “xin chào”, “cảm ơn”, “giá bao nhiêu”, “bao giờ giao hàng”). App thật gửi câu tới gpt-6-luna.</p>
+      <button class="reset" id="reset" type="button">Làm lại từ đầu</button>
+    </aside>
+  </div>
+</main>
+
+<script>
+(function () {
+  var DRAFT = 'Anh gửi giúp em báo giá chi tiết trước thứ Sáu nhé, cảm ơn anh.';
+  var LANGS = [
+    { code: 'zh', label: '中文' },
+    { code: 'en', label: 'English' },
+    { code: 'ko', label: '한국어' },
+    { code: 'ja', label: '日本語' }
+  ];
+  var PHRASES = [
+    { vi: DRAFT, zh: '麻烦您在周五前把详细报价发给我，谢谢！', en: 'Could you send me the detailed quote before Friday? Thank you!', ko: '금요일 전까지 상세 견적서를 보내주시겠어요? 감사합니다!', ja: '金曜日までに詳しい見積もりを送っていただけますか？ありがとうございます！' },
+    { vi: 'xin chào', zh: '你好！', en: 'Hello!', ko: '안녕하세요!', ja: 'こんにちは！' },
+    { vi: 'cảm ơn', zh: '谢谢！', en: 'Thank you!', ko: '감사합니다!', ja: 'ありがとうございます！' },
+    { vi: 'giá bao nhiêu', zh: '多少钱？', en: 'How much is it?', ko: '얼마예요?', ja: 'いくらですか？' },
+    { vi: 'bao giờ giao hàng', zh: '什么时候发货？', en: 'When will you ship it?', ko: '언제 배송되나요?', ja: 'いつ発送されますか？' }
+  ];
+  var MESSAGES = [
+    { id: 1, dir: 'in', text: '您好！这批货我们本月可以准备12台。', vi: 'Chào anh! Lô này trong tháng bên em chuẩn bị được 12 máy ạ.' },
+    { id: 2, dir: 'out', text: '配置和上次一样，月底前能交货吗？' },
+    { id: 3, dir: 'in', text: '可以的。请确认配置和交货地址，我们再发详细报价。', vi: 'Được ạ. Anh xác nhận giúp em cấu hình và địa chỉ giao hàng, bên em sẽ gửi báo giá chi tiết sau nhé.' }
+  ];
+  var LETTER_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+  var NUMBER_ROWS = ['1234567890', '-/:;()&@"', '.,?!\'%+'];
+
+  /* ---------- Telex ---------- */
+  var TABLE = { a: 'aáàảãạ', 'ă': 'ăắằẳẵặ', 'â': 'âấầẩẫậ', e: 'eéèẻẽẹ', 'ê': 'êếềểễệ', i: 'iíìỉĩị', o: 'oóòỏõọ', 'ô': 'ôốồổỗộ', 'ơ': 'ơớờởỡợ', u: 'uúùủũụ', 'ư': 'ưứừửữự', y: 'yýỳỷỹỵ' };
+  var INFO = {};
+  Object.keys(TABLE).forEach(function (b) { Array.from(TABLE[b]).forEach(function (c, t) { INFO[c] = [b, t]; }); });
+  function info(c) { return INFO[c.toLowerCase()]; }
+  function make(src, base, tone) { var out = Array.from(TABLE[base])[tone]; return src === src.toLowerCase() ? out : out.toUpperCase(); }
+  function toneTarget(ch) {
+    var pos = [];
+    for (var i = 0; i < ch.length; i++) {
+      var f = info(ch[i]); if (!f) continue;
+      var prev = i > 0 ? ch[i - 1].toLowerCase() : '';
+      var nextV = i + 1 < ch.length && info(ch[i + 1]);
+      if ((f[0] === 'u' && prev === 'q') || (f[0] === 'i' && prev === 'g' && nextV)) continue;
+      pos.push(i);
+    }
+    if (!pos.length) return -1;
+    var cl = [pos[pos.length - 1]];
+    for (var j = pos.length - 2; j >= 0 && pos[j] === cl[0] - 1; j--) cl.unshift(pos[j]);
+    for (var k = cl.length - 1; k >= 0; k--) if ('ăâêôơư'.indexOf(info(ch[cl[k]])[0]) >= 0) return cl[k];
+    if (cl.length === 1) return cl[0];
+    var end = cl[cl.length - 1];
+    if (end < ch.length - 1) return end;
+    var pair = info(ch[end - 1])[0] + info(ch[end])[0];
+    if (cl.length === 2 && (pair === 'oa' || pair === 'oe' || pair === 'uy')) return end;
+    return cl.length >= 3 ? cl[1] : cl[0];
+  }
+  function retone(ch) {
+    var tone = 0;
+    for (var i = 0; i < ch.length; i++) { var f = info(ch[i]); if (f && f[1]) { tone = f[1]; ch[i] = make(ch[i], f[0], 0); } }
+    if (tone) { var t = toneTarget(ch); if (t >= 0) ch[t] = make(ch[t], info(ch[t])[0], tone); }
+    return ch.join('');
+  }
+  function telex(word, key) {
+    var lk = key.toLowerCase();
+    var ch = Array.from(word);
+    if (!ch.length) return key;
+    var t = 'sfrxj'.indexOf(lk);
+    if (t >= 0 || lk === 'z') {
+      var tone = t + 1, cur = -1;
+      for (var i = 0; i < ch.length; i++) { var f = info(ch[i]); if (f && f[1]) { cur = i; break; } }
+      var target = toneTarget(ch);
+      if (target < 0 || (lk === 'z' && cur < 0)) return word + key;
+      if (cur >= 0 && info(ch[cur])[1] === tone) { ch[cur] = make(ch[cur], info(ch[cur])[0], 0); return ch.join('') + key; }
+      if (cur >= 0) ch[cur] = make(ch[cur], info(ch[cur])[0], 0);
+      if (lk !== 'z') ch[target] = make(ch[target], info(ch[target])[0], tone);
+      return ch.join('');
+    }
+    if (lk === 'd' && ch[0].toLowerCase() === 'd') { ch[0] = ch[0] === 'D' ? 'Đ' : 'đ'; return ch.join(''); }
+    var hat = { a: 'â', e: 'ê', o: 'ô' };
+    if (hat[lk]) {
+      for (var h = ch.length - 1; h >= 0; h--) {
+        var g = info(ch[h]); if (!g) continue;
+        if (g[0] === lk) { ch[h] = make(ch[h], hat[lk], g[1]); return retone(ch); }
+        if (g[0] === hat[lk]) { ch[h] = make(ch[h], lk, g[1]); return retone(ch) + key; }
+      }
+      return word + key;
+    }
+    if (lk === 'w') {
+      for (var u = 0; u + 1 < ch.length; u++) {
+        var a1 = info(ch[u]), a2 = info(ch[u + 1]);
+        if (a1 && a2 && a1[0] === 'u' && a2[0] === 'o') { ch[u] = make(ch[u], 'ư', a1[1]); ch[u + 1] = make(ch[u + 1], 'ơ', a2[1]); return retone(ch); }
+      }
+      var horn = { a: 'ă', o: 'ơ', u: 'ư' }, plain = { 'ă': 'a', 'ơ': 'o', 'ư': 'u' };
+      for (var w = ch.length - 1; w >= 0; w--) {
+        var v = info(ch[w]); if (!v) continue;
+        if (horn[v[0]]) { ch[w] = make(ch[w], horn[v[0]], v[1]); return retone(ch); }
+        if (plain[v[0]]) { ch[w] = make(ch[w], plain[v[0]], v[1]); return retone(ch) + key; }
+      }
+      return word + key;
+    }
+    return word + key;
+  }
+
+  /* ---------- State ---------- */
+  var S, timer, stream;
+  function fresh() {
+    return { draft: DRAFT, lang: 'zh', bar: 'normal', original: '', shift: false, numbers: false, copiedId: null, copyShown: '', copyLabel: 'Sao chép bản dịch', err: '', msgs: MESSAGES.slice(), nextId: 4 };
+  }
+  S = fresh();
+  function set(p) { Object.assign(S, p); render(); }
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function langOf(code) { return LANGS.filter(function (l) { return l.code === code; })[0] || LANGS[0]; }
+  function norm(t) { return t.toLowerCase().replace(/[.,!?…]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function translateText(text, code) {
+    var n = norm(text);
+    for (var i = 0; i < PHRASES.length; i++) if (norm(PHRASES[i].vi) === n) return PHRASES[i][code];
+    return '(Câu này chưa có bản mẫu) ' + text;
+  }
+  function settle() { return S.bar === 'done' || S.bar === 'error' ? 'normal' : S.bar; }
+
+  function typeText(text) { set({ draft: S.draft + text, shift: false, bar: settle() }); }
+  function pressLetter(key) {
+    var k = S.shift ? key.toUpperCase() : key;
+    if (S.numbers || !/[a-zA-Z]/.test(k)) { typeText(k); return; }
+    var m = S.draft.match(/(\S*)$/), word = m ? m[1] : '';
+    set({ draft: S.draft.slice(0, S.draft.length - word.length) + telex(word, k), shift: false, bar: settle() });
+  }
+  function backspace() { var c = Array.from(S.draft); c.pop(); set({ draft: c.join(''), bar: settle() }); }
+  function translate() {
+    var text = S.draft.trim();
+    if (!text) { set({ bar: 'error', err: 'Ô nhập đang trống.' }); return; }
+    var out = translateText(text, S.lang);
+    set({ bar: 'busy' });
+    clearTimeout(timer);
+    timer = setTimeout(function () { set({ original: S.draft, draft: out, bar: 'done' }); }, 900);
+  }
+  function showCopy() {
+    var m = S.msgs.filter(function (x) { return x.id === S.copiedId; })[0];
+    if (!m) return;
+    clearInterval(stream);
+    var i = 0;
+    set({ bar: 'copy', copyShown: '', copyLabel: 'Sao chép bản dịch' });
+    stream = setInterval(function () {
+      i += 2;
+      if (i >= m.vi.length) { clearInterval(stream); set({ copyShown: m.vi }); } else set({ copyShown: m.vi.slice(0, i) });
+    }, 30);
+  }
+
+  /* ---------- Render ---------- */
+  var $ = function (id) { return document.getElementById(id); };
+  var ICON_CHECK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var ICON_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.5 3 2.5 5.5 5.5 7"/><path d="M11 5c-.8 3.5-3.2 6.5-7 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>';
+  var ICON_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+
+  function renderMsgs() {
+    $('msgs').innerHTML = S.msgs.map(function (m) {
+      if (m.dir === 'out') return '<div class="row-out"><div class="bubble out">' + esc(m.text) + '</div></div>';
+      return '<div class="row-in"><button class="bubble in" data-act="msg" data-id="' + m.id + '" aria-label="Sao chép tin: ' + esc(m.text) + '">' + esc(m.text) + '</button>' +
+        (m.id === S.copiedId ? '<div class="copied-tag">Đã sao chép</div>' : '') + '</div>';
+    }).join('');
+  }
+  function renderField() {
+    var f = $('field');
+    f.innerHTML = S.draft ? esc(S.draft) + '<span class="caret" aria-hidden="true"></span>' : '<span class="caret" aria-hidden="true"></span><span class="ph">Nhập tin nhắn</span>';
+    f.scrollTop = f.scrollHeight;
+  }
+  function renderBar() {
+    var lang = langOf(S.lang).label, h = '';
+    if (S.bar === 'normal') {
+      h = '<button class="pill lang" data-act="lang" aria-label="Đổi ngôn ngữ dịch, đang là ' + lang + '">Việt → ' + lang + ICON_DOWN + '</button><span class="grow"></span>' +
+        (S.copiedId ? '<button class="pill incoming" data-act="copy">Dịch tin copy</button>' : '') +
+        '<button class="pill primary" data-act="translate">' + ICON_TRANSLATE + 'Dịch</button>';
+    } else if (S.bar === 'lang') {
+      h = LANGS.map(function (l) { return '<button class="pill" data-act="pick" data-lang="' + l.code + '" aria-pressed="' + (l.code === S.lang) + '">' + l.label + '</button>'; }).join('');
+    } else if (S.bar === 'busy') {
+      h = '<div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch sang ' + lang + '…</div><button class="pill" data-act="cancel">Hủy</button>';
+    } else if (S.bar === 'done') {
+      h = '<div class="status" role="status">' + ICON_CHECK + 'Đã dịch sang ' + lang + ' bằng AI</div><button class="pill" data-act="undo">Hoàn tác</button>';
+    } else if (S.bar === 'copy') {
+      h = '<div class="status in">Tin đến → Tiếng Việt</div><button class="pill" data-act="close">Xong</button>';
+    } else if (S.bar === 'error') {
+      h = '<div class="status err" role="status">' + esc(S.err) + '</div><button class="pill" data-act="close">Đóng</button>';
+    }
+    $('bar').innerHTML = h;
+  }
+  function keyBtn(c) {
+    var label = S.shift && !S.numbers ? c.toUpperCase() : c;
+    return '<button class="key" data-act="k" data-k="' + esc(c) + '">' + esc(label) + '</button>';
+  }
+  function renderKeys() {
+    var box = $('keys');
+    if (S.bar === 'copy') {
+      var m = S.msgs.filter(function (x) { return x.id === S.copiedId; })[0];
+      box.className = 'panel';
+      box.innerHTML = '<div class="panel-card"><div class="panel-src">' + esc(m ? m.text : '') + '</div>' +
+        '<div class="panel-text" aria-live="polite">' + esc(S.copyShown) + '</div>' +
+        '<button class="panel-btn" data-act="copytext">' + S.copyLabel + '</button></div>';
+      return;
+    }
+    var rows = S.numbers ? NUMBER_ROWS : LETTER_ROWS;
+    box.className = 'keys';
+    box.innerHTML =
+      '<div class="krow">' + Array.from(rows[0]).map(keyBtn).join('') + '</div>' +
+      '<div class="krow">' + Array.from(rows[1]).map(keyBtn).join('') + '</div>' +
+      '<div class="krow edge">' +
+        (S.numbers ? '<span class="spacer"></span>' :
+          '<button class="key alt wide" data-act="shift" aria-label="Chữ hoa" aria-pressed="' + S.shift + '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 8h-4.5v7h-7v-7H4z"/></svg></button>') +
+        '<div class="mid">' + Array.from(rows[2]).map(keyBtn).join('') + '</div>' +
+        '<button class="key alt wide" data-act="back" aria-label="Xóa"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></button>' +
+      '</div>' +
+      '<div class="krow">' +
+        '<button class="key alt fn" data-act="mode">' + (S.numbers ? 'ABC' : '123') + '</button>' +
+        '<button class="key space" data-act="space">dấu cách</button>' +
+        '<button class="key alt fn" data-act="nl">xuống dòng</button>' +
+      '</div>';
+  }
+  function render() { renderMsgs(); renderField(); renderBar(); renderKeys(); }
+
+  /* ---------- Events ---------- */
+  var phone = $('phone');
+  phone.addEventListener('pointerdown', function (e) { if (e.target.closest('.key')) e.preventDefault(); });
+  phone.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]'); if (!el) return;
+    var act = el.getAttribute('data-act');
+    if (act === 'k') pressLetter(el.getAttribute('data-k'));
+    else if (act === 'shift') set({ shift: !S.shift });
+    else if (act === 'back') backspace();
+    else if (act === 'space') typeText(' ');
+    else if (act === 'nl') typeText('\n');
+    else if (act === 'mode') set({ numbers: !S.numbers, shift: false });
+    else if (act === 'lang') set({ bar: 'lang' });
+    else if (act === 'pick') set({ lang: el.getAttribute('data-lang'), bar: 'normal' });
+    else if (act === 'translate') translate();
+    else if (act === 'cancel') { clearTimeout(timer); set({ bar: 'normal' }); }
+    else if (act === 'undo') set({ draft: S.original, bar: 'normal' });
+    else if (act === 'copy') showCopy();
+    else if (act === 'close') { clearInterval(stream); set({ bar: 'normal' }); }
+    else if (act === 'copytext') set({ copyLabel: 'Đã sao chép' });
+    else if (act === 'msg') set({ copiedId: Number(el.getAttribute('data-id')), bar: S.bar === 'copy' ? 'normal' : S.bar });
+    else if (act === 'send') {
+      if (!S.draft.trim()) return;
+      set({ msgs: S.msgs.concat([{ id: S.nextId, dir: 'out', text: S.draft.trim() }]), nextId: S.nextId + 1, draft: '', bar: 'normal' });
+      $('msgs').scrollTop = $('msgs').scrollHeight;
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var a = document.activeElement;
+    if (a && a.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    if (S.bar === 'copy') return;
+    if (e.key === 'Backspace') { e.preventDefault(); backspace(); }
+    else if (e.key === 'Enter') { e.preventDefault(); typeText('\n'); }
+    else if (e.key === ' ') { e.preventDefault(); typeText(' '); }
+    else if (e.key.length === 1) {
+      e.preventDefault();
+      if (/[a-zA-Z]/.test(e.key)) {
+        var m = S.draft.match(/(\S*)$/), word = m ? m[1] : '';
+        set({ draft: S.draft.slice(0, S.draft.length - word.length) + telex(word, e.key), bar: settle() });
+      } else typeText(e.key);
+    }
+  });
+  $('reset').addEventListener('click', function () { clearTimeout(timer); clearInterval(stream); S = fresh(); render(); });
+
+  /* ---------- Fit the phone to the window ---------- */
+  function fit() {
+    var box = $('fit');
+    var room = box.parentElement.clientWidth;
+    var scale = Math.min(1, (window.innerHeight - 32) / 868, room / 414);
+    scale = Math.max(scale, 0.5);
+    phone.style.transform = 'scale(' + scale + ')';
+    box.style.width = Math.round(414 * scale) + 'px';
+    box.style.height = Math.round(868 * scale) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+  render();
+})();
+</script>
