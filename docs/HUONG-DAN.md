@@ -1,61 +1,40 @@
-# Đưa Dịch Apple lên iPhone (không cần Mac)
+# Cài Dịch Apple lên iPhone, không cần Mac, không cần tài khoản trả phí
 
-GitHub Actions build app trên máy macOS của GitHub, ký bằng tài khoản Apple Developer của bạn, rồi đẩy lên TestFlight. Bạn cài app bằng TestFlight trên iPhone.
+Dùng cá nhân thì chỉ cần **Apple ID miễn phí** và một **máy tính Windows**. GitHub tự build file cài `.ipa`; công cụ **Sideloadly** trên Windows ký file đó bằng Apple ID của bạn rồi cài vào iPhone.
 
-## 1. Tài khoản Apple Developer
+## Giới hạn của Apple ID miễn phí
 
-Đăng ký bằng app **Apple Developer** trên iPhone ($99/năm). Đợi Apple duyệt xong (thường vài giờ đến 1–2 ngày).
+- App hết hạn sau **7 ngày**, phải ký lại (Sideloadly làm lại trong khoảng một phút, hoặc tự làm nếu bật làm mới tự động).
+- Tối đa **3 app** cài kiểu này trên một máy và **10 mã ứng dụng mỗi 7 ngày**. Dịch Apple dùng 3 mã (app, bàn phím, đọc màn hình).
+- Không dùng được TestFlight.
 
-## 2. Tạo mã định danh (làm trên web, máy nào cũng được)
+## 1. Lấy file cài
 
-Vào <https://developer.apple.com/account/resources/identifiers/list>:
+GitHub › repo `app-dichapple` › **Actions** › **iOS** › chọn lần chạy mới nhất có dấu xanh › mục **Artifacts** › tải **DichApple-ipa**. File tải về là `.zip`, giải nén ra `DichApple.ipa`.
 
-1. Bấm **+** › **App Groups** › mã `group.com.mocsinh.dichapple`.
-2. Bấm **+** › **App IDs** › **App**, tạo 3 mã, mỗi mã bật **App Groups** rồi gắn nhóm ở bước 1:
-   - `com.mocsinh.dichapple` (app chính)
-   - `com.mocsinh.dichapple.keyboard` (bàn phím)
-   - `com.mocsinh.dichapple.screen` (đọc màn hình)
+## 2. Cài Sideloadly trên Windows
 
-Nếu Apple báo mã đã có người dùng, đổi `com.mocsinh` thành tiền tố khác ở cả hai chỗ: `project.yml` và `Shared/Config.swift`.
+1. Cài **iTunes** và **iCloud** bản tải từ trang Apple (không dùng bản Microsoft Store) để Windows nhận iPhone.
+2. Tải Sideloadly tại <https://sideloadly.io> và cài.
 
-## 3. Tạo app trên App Store Connect
+## 3. Cài app vào iPhone
 
-<https://appstoreconnect.apple.com> › **Ứng dụng** › **+** › **Ứng dụng mới**: nền tảng iOS, tên `Dịch Apple` (hoặc tên khác nếu trùng), Bundle ID `com.mocsinh.dichapple`, SKU tùy ý.
+1. Cắm iPhone vào máy tính bằng cáp, mở khóa iPhone, chọn **Tin cậy**.
+2. Mở Sideloadly, kéo `DichApple.ipa` vào, nhập Apple ID, bấm **Start**. Nên dùng một Apple ID phụ.
+3. Trên iPhone, bật **Chế độ nhà phát triển**: Cài đặt › Quyền riêng tư & Bảo mật › Chế độ nhà phát triển › bật, rồi khởi động lại máy.
+4. Cài đặt › Cài đặt chung › **VPN & Quản lý thiết bị** › chọn Apple ID của bạn › **Tin cậy**.
 
-## 4. Tạo API key cho GitHub
+## 4. Thiết lập trong app
 
-App Store Connect › **Người dùng và quyền truy cập** › **Tích hợp** › **App Store Connect API** › **Khóa nhóm** › **+**:
+1. Mở Dịch Apple, làm theo mục **Cài bàn phím**: thêm bàn phím Dịch Apple, bật **Cho phép truy cập đầy đủ**.
+2. Dán API key OpenAI, bấm **Kiểm tra kết nối**.
+3. Muốn tự đọc ngữ cảnh: mục **Tự đọc ngữ cảnh** › chạm nút ghi › **Bắt đầu phát**. Khi phát, góc màn hình có chấm đỏ; chạm chấm đỏ để tắt.
 
-- Vai trò **Admin** (cần để GitHub tự tạo chứng chỉ ký app).
-- Tải file `.p8` về (chỉ tải được một lần). Ghi lại **Key ID** và **Issuer ID** trên trang đó.
+## 5. Mỗi 7 ngày
 
-Team ID nằm ở <https://developer.apple.com/account> › **Membership details**.
+Cắm iPhone (hoặc cùng mạng Wi-Fi nếu đã bật làm mới tự động của Sideloadly) và bấm **Start** lại với cùng file. Cài đè giữ nguyên API key và cài đặt.
 
-## 5. Đưa khóa vào GitHub
-
-Repo trên GitHub › **Settings** › **Secrets and variables** › **Actions** › **New repository secret**, tạo 4 secret:
-
-| Tên | Giá trị |
-|---|---|
-| `ASC_KEY_ID` | Key ID |
-| `ASC_ISSUER_ID` | Issuer ID |
-| `ASC_KEY_P8` | Toàn bộ nội dung file `.p8` (mở bằng trình soạn văn bản, chép cả dòng BEGIN/END) |
-| `TEAM_ID` | Team ID |
-
-## 6. Build và đẩy lên TestFlight
-
-GitHub › **Actions** › **iOS** › **Run workflow** (để tích **Upload to TestFlight**). Mất khoảng 15–25 phút.
-
-Mỗi lần push code, workflow chỉ build thử (không cần secret) để bắt lỗi sớm. Chỉ khi bấm **Run workflow** mới đẩy lên TestFlight.
-
-## 7. Cài trên iPhone
-
-1. App Store Connect › app › **TestFlight** › **Kiểm thử nội bộ** › thêm chính bạn.
-2. Cài app **TestFlight** trên iPhone, mở lời mời, cài **Dịch Apple**.
-3. Mở Dịch Apple, làm theo mục **Cài bàn phím**, dán API key OpenAI.
-4. Muốn tự đọc ngữ cảnh: mục **Tự đọc ngữ cảnh** › chạm nút ghi › **Bắt đầu phát**. Khi phát, góc màn hình có chấm đỏ; tắt bằng cách chạm chấm đỏ.
-
-Bản TestFlight dùng được 90 ngày; chạy lại bước 6 để có bản mới.
+Có bản mới: tải artifact mới ở bước 1 và cài đè.
 
 ## Cách app giữ nhẹ
 
@@ -68,3 +47,8 @@ Bản TestFlight dùng được 90 ngày; chạy lại bước 6 để có bản
 - Bàn phím đọc được bao nhiêu chữ trong ô nhập của Zalo, Messenger, WeChat (iOS có thể chỉ trả một phần).
 - Vision có nhận chữ tiếng Việt không (tiếng Trung, Anh, Hàn, Nhật được hỗ trợ).
 - Bộ nhớ của phần đọc màn hình dưới giới hạn khoảng 50 MB.
+- Sideloadly giữ đúng App Group khi ký lại (app tự đọc App Group thật từ hồ sơ ký, nên đổi tên nhóm vẫn chạy).
+
+## Sau này nếu có tài khoản Apple Developer trả phí
+
+App hết hạn sau 1 năm thay vì 7 ngày và cài được qua TestFlight. Cần thêm 4 secret `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `TEAM_ID` trong Settings › Secrets and variables › Actions của repo, rồi chạy **Run workflow** với tùy chọn **Upload to TestFlight**.

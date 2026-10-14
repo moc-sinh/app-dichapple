@@ -453,7 +453,7 @@ final class KeyboardViewController: UIInputViewController {
             mode = .failed(TranslateError.noFullAccess.errorDescription ?? "")
             return nil
         }
-        guard let key = Keychain.apiKey() else {
+        guard let key = SharedStore.apiKey else {
             mode = .failed(TranslateError.noKey.errorDescription ?? "")
             return nil
         }

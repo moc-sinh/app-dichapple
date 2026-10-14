@@ -7,8 +7,8 @@ Bàn phím iPhone gõ tiếng Việt (Telex) có thanh **Dịch** ở trên: b�
 | `App/` | App chính (SwiftUI): cài bàn phím, API key, ngôn ngữ, đọc màn hình, hồ sơ và thuật ngữ |
 | `Keyboard/` | Bàn phím (UIKit): bộ gõ Telex, thanh Dịch, thay chữ trong ô nhập |
 | `Screen/` | Phần mở rộng ReplayKit đọc chữ trên màn hình bằng Vision, ngay trên máy |
-| `Shared/` | Cấu hình, lưu dữ liệu chung (App Group), Keychain, gọi OpenAI |
+| `Shared/` | Cấu hình, lưu dữ liệu chung (App Group), gọi OpenAI |
 | `preview/` | Trang xem trước giao diện trên web |
 | `Tests/` | Kiểm thử bộ gõ Telex |
 
-Project Xcode được sinh từ `project.yml` bằng XcodeGen; GitHub Actions build và đẩy lên TestFlight. Cách làm từng bước, không cần Mac: [docs/HUONG-DAN.md](docs/HUONG-DAN.md).
+Project Xcode được sinh từ `project.yml` bằng XcodeGen. Mỗi lần push, GitHub Actions build file cài `DichApple.ipa`; dùng cá nhân thì cài bằng Sideloadly với Apple ID miễn phí. Từng bước, không cần Mac: [docs/HUONG-DAN.md](docs/HUONG-DAN.md).

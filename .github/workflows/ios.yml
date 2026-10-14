@@ -36,12 +36,31 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build (simulator, unsigned)
+      - name: Build for iPhone (unsigned)
         run: |
           set -o pipefail
           xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
             CODE_SIGNING_ALLOWED=NO build | tail -40
+
+      # A free Apple ID can install this IPA with Sideloadly or AltStore, which re-sign it.
+      # Ad-hoc signing here only embeds the App Group entitlements so they survive re-signing.
+      - name: Package IPA
+        run: |
+          APP=build/ipa/Payload/DichApple.app
+          mkdir -p build/ipa/Payload
+          cp -R build/dd/Build/Products/Release-iphoneos/DichApple.app build/ipa/Payload/
+          codesign -f -s - --entitlements Support/DichKeyboard.entitlements "$APP/PlugIns/DichKeyboard.appex"
+          codesign -f -s - --entitlements Support/DichScreen.entitlements "$APP/PlugIns/DichScreen.appex"
+          codesign -f -s - --entitlements Support/DichApple.entitlements "$APP"
+          (cd build/ipa && zip -qry ../DichApple.ipa Payload)
+          ls -lh build/DichApple.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DichApple-ipa
+          path: build/DichApple.ipa
+          retention-days: 30
 
   testflight:
     needs: build

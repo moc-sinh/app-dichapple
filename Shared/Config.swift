@@ -1,10 +1,24 @@
 import Foundation
 
 enum Config {
-    // Keep in sync with project.yml.
-    static let appGroup = "group.com.mocsinh.dichapple"
-    static let keychainGroupSuffix = "com.mocsinh.dichapple.shared"
-    static let screenExtension = "com.mocsinh.dichapple.screen"
+    /// The App Group shared by the app and its extensions. Sideloading tools that
+    /// sign with a free Apple ID may rename it, so prefer the one the embedded
+    /// provisioning profile actually grants; fall back to the name in project.yml.
+    static let appGroup: String = {
+        let groups = provisionedAppGroups()
+        return groups.first { $0.hasPrefix("group.com.mocsinh.dichapple") } ?? groups.first ?? "group.com.mocsinh.dichapple"
+    }()
+
+    private static func provisionedAppGroups() -> [String] {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: data.subdata(in: start.lowerBound..<end.upperBound), format: nil) as? [String: Any],
+              let entitlements = plist["Entitlements"] as? [String: Any] else { return [] }
+        return entitlements["com.apple.security.application-groups"] as? [String] ?? []
+    }
 
     static let model = "gpt-6-luna"
     static let endpoint = URL(string: "https://api.openai.com/v1/responses")!

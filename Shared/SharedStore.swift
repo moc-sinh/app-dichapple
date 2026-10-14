@@ -13,6 +13,7 @@ enum SharedStore {
     static let defaults = UserDefaults(suiteName: Config.appGroup) ?? .standard
 
     enum Key {
+        static let apiKey = "apiKey"
         static let targetCode = "targetCode"
         static let profile = "profile"
         static let glossary = "glossary"
@@ -24,6 +25,12 @@ enum SharedStore {
         static let keyboardVisible = "keyboardVisible"
         static let keyboardHasFullAccess = "keyboardHasFullAccess"
         static let handledPasteboard = "handledPasteboard"
+    }
+
+    /// The OpenAI key, kept in the App Group container on this iPhone only.
+    static var apiKey: String? {
+        let key = defaults.string(forKey: Key.apiKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return key.isEmpty ? nil : key
     }
 
     static var targetCode: String {

@@ -1,5 +1,5 @@
 # XcodeGen spec: `xcodegen generate` turns this into DichApple.xcodeproj (no Mac needed to edit it).
-# Bundle IDs and the App Group are also used in Shared/Config.swift; change them together.
+# The App Group is also named in Shared/Config.swift (used when no provisioning profile is embedded).
 name: DichApple
 options:
   bundleIdPrefix: com.mocsinh
@@ -43,12 +43,10 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         ITSAppUsesNonExemptEncryption: false
-        AppIdentifierPrefix: $(AppIdentifierPrefix)
     entitlements:
       path: Support/DichApple.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
-        keychain-access-groups: [$(AppIdentifierPrefix)com.mocsinh.dichapple.shared]
     dependencies:
       - target: DichKeyboard
       - target: DichScreen
@@ -70,7 +68,6 @@ targets:
         CFBundleDisplayName: Dịch Apple
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        AppIdentifierPrefix: $(AppIdentifierPrefix)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
@@ -83,7 +80,6 @@ targets:
       path: Support/DichKeyboard.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
-        keychain-access-groups: [$(AppIdentifierPrefix)com.mocsinh.dichapple.shared]
 
   # Screen reading: a ReplayKit broadcast extension that reads chat text on-device.
   DichScreen:

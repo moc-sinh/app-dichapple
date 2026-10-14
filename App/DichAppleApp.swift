@@ -13,7 +13,7 @@ struct ContentView: View {
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
     @AppStorage(SharedStore.Key.glossary, store: SharedStore.defaults) private var glossary = ""
     @AppStorage(SharedStore.Key.useScreen, store: SharedStore.defaults) private var useScreen = true
-    @State private var apiKey = Keychain.apiKey() ?? ""
+    @AppStorage(SharedStore.Key.apiKey, store: SharedStore.defaults) private var apiKey = ""
     @State private var testResult = ""
     @State private var testing = false
     @State private var tryText = ""
@@ -45,9 +45,6 @@ struct ContentView: View {
                     SecureField("sk-...", text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .onChange(of: apiKey) { _, new in
-                            _ = Keychain.setAPIKey(new)
-                        }
                     LabeledContent("Model", value: Config.model)
                     Button(testing ? "Đang kiểm tra…" : "Kiểm tra kết nối") { test() }
                         .disabled(apiKey.isEmpty || testing)
@@ -55,7 +52,7 @@ struct ContentView: View {
                 } header: {
                     Text("OpenAI")
                 } footer: {
-                    Text("Key chỉ lưu trong Keychain của iPhone này.")
+                    Text("Key chỉ lưu trên iPhone này, trong vùng dữ liệu chung của app và bàn phím.")
                 }
 
                 Section("Tin đi dịch sang") {
@@ -131,10 +128,23 @@ private struct Step: View {
 private struct BroadcastButton: UIViewRepresentable {
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-        picker.preferredExtension = Config.screenExtension
+        picker.preferredExtension = Self.screenExtensionID()
         picker.showsMicrophoneButton = false
         return picker
     }
 
     func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+
+    /// The broadcast extension's real bundle ID (sideloading tools may rename it).
+    private static func screenExtensionID() -> String? {
+        guard let plugins = Bundle.main.builtInPlugInsURL,
+              let items = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil) else { return nil }
+        for url in items where url.pathExtension == "appex" {
+            guard let bundle = Bundle(url: url),
+                  let ext = bundle.object(forInfoDictionaryKey: "NSExtension") as? [String: Any],
+                  ext["NSExtensionPointIdentifier"] as? String == "com.apple.broadcast-services-upload" else { continue }
+            return bundle.bundleIdentifier
+        }
+        return nil
+    }
 }
