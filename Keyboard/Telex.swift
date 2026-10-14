@@ -1,6 +1,8 @@
-/// Telex input for Vietnamese: `aa`→â, `aw`→ă, `ow`→ơ, `uw`→ư, `dd`→đ, and
+/// Telex input for Vietnamese: `aa`→â, `aw`→ă, `ow`→ơ, `uw`→ư, `w`→ư, `dd`→đ, and
 /// `s f r x j` for sắc, huyền, hỏi, ngã, nặng (`z` removes the tone).
-/// Typing the same modifier twice undoes it (`as` + `s` → `ass`).
+/// Typing the same modifier twice undoes it (`as` + `s` → `as`).
+/// Words that cannot be Vietnamese keep the keys as typed, so English words
+/// such as "facebook", "order" or "thanks" come out unchanged.
 enum Telex {
     private static let forms: [Character: [Character]] = [
         "a": Array("aáàảãạ"), "ă": Array("ăắằẳẵặ"), "â": Array("âấầẩẫậ"),
@@ -25,26 +27,85 @@ enum Telex {
     private static let unhorns: [Character: Character] = ["ă": "a", "ơ": "o", "ư": "u"]
     private static let marked: Set<Character> = ["ă", "â", "ê", "ô", "ơ", "ư"]
 
+    // MARK: Public
+
+    /// The text shown for a word typed as `raw` keys from scratch.
+    static func output(for raw: String) -> String {
+        var word = TelexWord()
+        for key in raw { word.type(key) }
+        return word.shown
+    }
+
+    /// Runs the keys through the engine; also says whether the last key undid a mark.
+    static func process(_ raw: String) -> (text: String, lastWasUndo: Bool) {
+        var word = ""
+        var undo = false
+        for key in raw {
+            let step = self.step(word, key)
+            word = step.text
+            undo = step.undo
+        }
+        return (word, undo)
+    }
+
+    /// Keys that type `word` again, so editing can continue after the word was changed elsewhere.
+    static func rawKeys(for word: String) -> String {
+        var out = ""
+        var toneKey: Character?
+        for c in word {
+            let upper = c.isUppercase
+            if let v = vowel(c) {
+                let keys: String
+                switch v.base {
+                case "â": keys = "aa"
+                case "ă": keys = "aw"
+                case "ê": keys = "ee"
+                case "ô": keys = "oo"
+                case "ơ": keys = "ow"
+                case "ư": keys = "uw"
+                default: keys = String(v.base)
+                }
+                out += upper ? keys.prefix(1).uppercased() + keys.dropFirst() : keys
+                if v.tone > 0 { toneKey = toneKeys[v.tone - 1] }
+            } else if lower(c) == "đ" {
+                out += upper ? "Dd" : "dd"
+            } else {
+                out.append(c)
+            }
+        }
+        if let toneKey { out.append(toneKey) }
+        return out
+    }
+
     /// Returns the word after typing `key` at its end.
-    static func apply(_ word: String, _ key: Character) -> String {
+    static func apply(_ word: String, _ key: Character) -> String { step(word, key).text }
+
+    // MARK: Engine
+
+    private static func step(_ word: String, _ key: Character) -> (text: String, undo: Bool) {
         let k = lower(key)
         var ch = Array(word)
-        let plain = word + String(key)
-        guard !ch.isEmpty else { return String(key) }
+        let plain = (word + String(key), false)
+        let hasVowel = ch.contains { vowel($0) != nil }
 
-        if let t = toneKeys.firstIndex(of: k) { return tone(ch, t + 1, plain) }
-        if k == "z" { return tone(ch, 0, plain) }
+        if k == "w" && !hasVowel {
+            return (word + (key.isUppercase ? "Ư" : "ư"), false)
+        }
+        guard !ch.isEmpty else { return (String(key), false) }
+
+        if let t = toneKeys.firstIndex(of: k) { return tone(ch, t + 1, key, word) }
+        if k == "z" { return tone(ch, 0, key, word) }
 
         if k == "d", lower(ch[0]) == "d" {
-            ch[0] = isUpper(ch[0]) ? "Đ" : "đ"
-            return String(ch)
+            ch[0] = ch[0].isUppercase ? "Đ" : "đ"
+            return (String(ch), false)
         }
 
         if let hat = hats[k] {
             for i in ch.indices.reversed() {
                 guard let v = vowel(ch[i]) else { continue }
-                if v.base == k { ch[i] = make(ch[i], hat, v.tone); return retone(&ch) }
-                if v.base == hat { ch[i] = make(ch[i], k, v.tone); return retone(&ch) + String(key) }
+                if v.base == k { ch[i] = make(ch[i], hat, v.tone); return (retone(&ch), false) }
+                if v.base == hat { ch[i] = make(ch[i], k, v.tone); return (retone(&ch) + String(key), true) }
             }
             return plain
         }
@@ -54,13 +115,13 @@ enum Telex {
                 if let a = vowel(ch[i]), let b = vowel(ch[i + 1]), a.base == "u", b.base == "o" {
                     ch[i] = make(ch[i], "ư", a.tone)
                     ch[i + 1] = make(ch[i + 1], "ơ", b.tone)
-                    return retone(&ch)
+                    return (retone(&ch), false)
                 }
             }
             for i in ch.indices.reversed() {
                 guard let v = vowel(ch[i]) else { continue }
-                if let h = horns[v.base] { ch[i] = make(ch[i], h, v.tone); return retone(&ch) }
-                if let p = unhorns[v.base] { ch[i] = make(ch[i], p, v.tone); return retone(&ch) + String(key) }
+                if let h = horns[v.base] { ch[i] = make(ch[i], h, v.tone); return (retone(&ch), false) }
+                if let p = unhorns[v.base] { ch[i] = make(ch[i], p, v.tone); return (retone(&ch) + String(key), true) }
             }
             return plain
         }
@@ -68,17 +129,17 @@ enum Telex {
         return plain
     }
 
-    private static func tone(_ original: [Character], _ tone: Int, _ plain: String) -> String {
+    private static func tone(_ original: [Character], _ tone: Int, _ key: Character, _ word: String) -> (text: String, undo: Bool) {
         var ch = original
         let current = ch.firstIndex { (vowel($0)?.tone ?? 0) > 0 }
-        guard let target = toneTarget(ch) else { return plain }
-        if tone == 0 && current == nil { return plain }
+        guard let target = toneTarget(ch) else { return (word + String(key), false) }
+        if tone == 0 && current == nil { return (word + String(key), false) }
         if let cur = current, let v = vowel(ch[cur]) {
             ch[cur] = make(ch[cur], v.base, 0)
-            if v.tone == tone { return String(ch) + String(plain.last!) }
+            if v.tone == tone { return (String(ch) + String(key), true) }
         }
         if tone > 0, let v = vowel(ch[target]) { ch[target] = make(ch[target], v.base, tone) }
-        return String(ch)
+        return (String(ch), false)
     }
 
     /// Where the tone mark goes, following the modern placement rules.
@@ -117,12 +178,115 @@ enum Telex {
         return String(ch)
     }
 
+    // MARK: Vietnamese syllables
+
+    private static let initials = [
+        "ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
+        "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "v", "x",
+    ]
+    private static let finalPrefixes: Set<String> = ["c", "ch", "m", "n", "ng", "nh", "p", "t"]
+    private static let stopFinals: Set<String> = ["c", "ch", "p", "t"]
+
+    private static let nuclei: [[Character]] = [
+        "a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y",
+        "ai", "ao", "au", "ay", "âu", "ây", "eo", "êu", "ia", "iê", "iu", "oa", "oă", "oe",
+        "oi", "ôi", "ơi", "oo", "ua", "uâ", "uê", "ui", "uô", "uơ", "uy", "ưa", "ưi", "ươ", "ưu",
+        "yê", "iêu", "yêu", "oai", "oay", "oeo", "uây", "uôi", "ươi", "ươu", "uya", "uyê", "uyu",
+    ].map { Array($0) }
+
+    /// Whether these vowels are a nucleus, or the start of one when `complete` is false.
+    /// A plain letter may still get its hat or horn later ("tuan" before "tuân"), a marked one may not.
+    private static func fitsNucleus(_ v: [Character], complete: Bool) -> Bool {
+        nuclei.contains { n in
+            (complete ? n.count == v.count : n.count >= v.count)
+                && zip(v, n).allSatisfy { a, b in a == b || unmarked(b) == a }
+        }
+    }
+
+    /// Whether `word` is a Vietnamese syllable, or the start of one.
+    static func isPlausible(_ word: String) -> Bool {
+        var base = ""
+        var tone = 0
+        for c in word.lowercased() {
+            if let v = vowels[c] {
+                base.append(v.base)
+                if v.tone > 0 { tone = v.tone }
+            } else {
+                base.append(c)
+            }
+        }
+        var rest = Substring(base)
+        var initial = initials.first { rest.hasPrefix($0) } ?? ""
+        rest = rest.dropFirst(initial.count)
+        if initial == "gi" && !rest.contains(where: isVowelBase) {
+            initial = "g"
+            rest = "i" + rest
+        }
+        let vowelPart = Array(rest.prefix(while: isVowelBase))
+        let final = String(rest.dropFirst(vowelPart.count))
+        if vowelPart.isEmpty { return final.isEmpty }
+        if final.isEmpty { return fitsNucleus(vowelPart, complete: false) }
+        guard fitsNucleus(vowelPart, complete: true), finalPrefixes.contains(final) else { return false }
+        if stopFinals.contains(final) && (2...4).contains(tone) { return false }
+        return true
+    }
+
+    private static func isVowelBase(_ c: Character) -> Bool { "aăâeêioôơuưy".contains(c) }
+
+    private static func unmarked(_ c: Character) -> Character {
+        switch c {
+        case "ă", "â": return "a"
+        case "ê": return "e"
+        case "ô", "ơ": return "o"
+        case "ư": return "u"
+        default: return c
+        }
+    }
+
+    // MARK: Characters
+
     private static func vowel(_ c: Character) -> Vowel? { vowels[lower(c)] }
     private static func lower(_ c: Character) -> Character { Character(c.lowercased()) }
-    private static func isUpper(_ c: Character) -> Bool { c.isUppercase }
 
     private static func make(_ source: Character, _ base: Character, _ tone: Int) -> Character {
         let c = forms[base]![tone]
-        return isUpper(source) ? Character(c.uppercased()) : c
+        return source.isUppercase ? Character(c.uppercased()) : c
+    }
+}
+
+/// The word at the cursor while it is being typed.
+struct TelexWord {
+    private(set) var raw = ""
+    private(set) var shown = ""
+    private var literal = false
+
+    init() {}
+
+    /// Continues a word that is already in the text field.
+    init(resuming word: String) {
+        raw = Telex.rawKeys(for: word)
+        shown = word
+    }
+
+    mutating func type(_ key: Character) {
+        let rawBefore = raw
+        let shownBefore = shown
+        raw.append(key)
+        if literal {
+            shown.append(key)
+            return
+        }
+        let (candidate, lastWasUndo) = Telex.process(raw)
+        if lastWasUndo && shownBefore != rawBefore {
+            // Repeating a modifier right after it took effect types that letter as is (as -> á -> as),
+            // and the rest of the word stays as typed.
+            literal = true
+            shown = candidate
+        } else if candidate == raw || Telex.isPlausible(candidate) {
+            shown = candidate
+        } else {
+            // Not Vietnamese: keep the keys as typed.
+            shown = raw
+        }
     }
 }

@@ -16,7 +16,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         SharedStore.screenActive = true
-        let partner = Language.target(SharedStore.targetCode).ocrCode
+        let code = SharedStore.targetCode == Language.autoCode ? SharedStore.lastPartnerCode : SharedStore.targetCode
+        let partner = Language.named(code)?.ocrCode ?? "zh-Hans"
         let wanted = [partner, "vi-VT", "vi-VN", "en-US"]
         let supported = (try? VNRecognizeTextRequest().supportedRecognitionLanguages()) ?? []
         var picked: [String] = []
