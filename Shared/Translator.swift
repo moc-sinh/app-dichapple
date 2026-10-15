@@ -5,8 +5,8 @@ enum TranslateError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noKey: return "Chưa có API key. Mở app Dịch Apple để dán key."
-        case .noFullAccess: return "Bật “Cho phép truy cập đầy đủ” cho bàn phím Dịch Apple."
+        case .noKey: return "Chưa có API key. Mở app MSTrans để dán key."
+        case .noFullAccess: return "Bật “Cho phép truy cập đầy đủ” cho bàn phím MSTrans."
         case .empty: return "Ô nhập đang trống."
         case .network: return "Không kết nối được. Kiểm tra mạng rồi thử lại."
         case .formatUnsupported: return "Model không hỗ trợ kiểu trả lời này."
@@ -126,13 +126,13 @@ struct Translator {
 
     private func explain(status: Int, message: String) -> String {
         switch status {
-        case 401: return "API key không đúng. Kiểm tra lại trong app Dịch Apple."
-        case 404: return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app Dịch Apple."
+        case 401: return "API key không đúng. Kiểm tra lại trong app MSTrans."
+        case 404: return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
         case 429: return "Hết hạn mức hoặc gọi quá nhanh. Thử lại sau ít phút."
         case 500...599: return "Máy chủ OpenAI đang bận. Thử lại."
         default:
             if message.localizedCaseInsensitiveContains("model") {
-                return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app Dịch Apple."
+                return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
             }
             return "Lỗi \(status)" + (message.isEmpty ? ". Thử lại." : ": \(message)")
         }

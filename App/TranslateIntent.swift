@@ -29,6 +29,9 @@ struct TranslateCopiedIntent: AppIntent {
                 output = result.text
                 note = result.note
                 SharedStore.cacheIncoming(source, translation: output)
+                SharedStore.addHistory(HistoryItem(side: .partner, source: source, translation: output,
+                                                   languageCode: LanguageDetector.language(of: source)?.code ?? "",
+                                                   note: result.note))
             } catch {
                 throw IntentFailure.message(error.localizedDescription)
             }
@@ -49,7 +52,7 @@ enum IntentFailure: Error, CustomLocalizedStringResourceConvertible {
     }
 }
 
-struct DichAppleShortcuts: AppShortcutsProvider {
+struct MSTransShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: TranslateCopiedIntent(),

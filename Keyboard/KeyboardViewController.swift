@@ -310,15 +310,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     // MARK: Info line
 
+    /// The icon carries the colour (orange: partner, green: you, gold: check this, red: problem);
+    /// the text stays in label colours so it reads on the keyboard background.
     private func renderInfo() {
         var c = UIButton.Configuration.plain()
         c.titleLineBreakMode = .byTruncatingTail
-        c.imagePadding = 6
-        c.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
+        c.imagePadding = 7
+        c.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)
         c.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         let title: String
         let symbol: String
-        let color: UIColor
+        let tint: UIColor
+        var text = UIColor.label
         switch info {
         case .idle:
             let count = SharedStore.context().count
@@ -326,41 +329,44 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             title = screen ? "Đang đọc màn hình · \(count) tin ngữ cảnh"
                 : (count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh")
             symbol = screen ? "eye.fill" : "eye"
-            color = .secondaryLabel
+            tint = .secondaryLabel
+            text = .secondaryLabel
         case .copied:
             title = "Có tin vừa sao chép · chạm để dịch"
-            symbol = "doc.on.clipboard"
-            color = Palette.incoming
+            symbol = "doc.on.clipboard.fill"
+            tint = Brand.orange
         case .incomingBusy:
             title = "Đang dịch tin mới của đối tác…"
-            symbol = "ellipsis.bubble"
-            color = .secondaryLabel
+            symbol = "ellipsis.bubble.fill"
+            tint = Brand.orange
+            text = .secondaryLabel
         case .incoming(_, let translation):
             title = translation.text
             symbol = translation.note == nil ? "bubble.left.fill" : "exclamationmark.bubble.fill"
-            color = Palette.incoming
+            tint = Brand.orange
         case .outgoing(let translation, _):
             if let note = translation.note {
                 title = "Lưu ý: \(note)"
                 symbol = "exclamationmark.triangle.fill"
-                color = .systemOrange
+                tint = Brand.gold
             } else if let meaning = translation.meaning {
                 title = "Nghĩa: \(meaning)"
                 symbol = "checkmark.circle.fill"
-                color = Palette.ok
+                tint = Brand.green
             } else {
                 title = "Đã dịch sang \(translation.language.name)"
                 symbol = "checkmark.circle.fill"
-                color = Palette.ok
+                tint = Brand.green
             }
-        case .message(let text):
-            title = text
-            symbol = "exclamationmark.circle"
-            color = .systemRed
+        case .message(let message):
+            title = message
+            symbol = "exclamationmark.circle.fill"
+            tint = .systemRed
         }
         c.title = title
         c.image = UIImage(systemName: symbol)
-        c.baseForegroundColor = color
+        c.baseForegroundColor = text
+        c.imageColorTransformer = UIConfigurationColorTransformer { _ in tint }
         c.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var a = attributes
             a.font = .systemFont(ofSize: 15)
@@ -416,6 +422,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         switch mode {
         case .normal:
+            bar.addArrangedSubview(logoButton())
             let context = SharedStore.context()
             let target = resolvedTarget(context: context)
             let title = targetCode == Language.autoCode ? "Tự động · \(target.label)" : "Việt → \(target.label)"
@@ -437,10 +444,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 self?.mode = .normal
             })
         case .done:
-            bar.addArrangedSubview(status("Đã dịch sang \(activeTarget?.name ?? "ngôn ngữ đích")", check: true))
+            bar.addArrangedSubview(status("Đã dịch sang \(activeTarget?.name ?? "ngôn ngữ đích")", symbol: "checkmark.circle.fill"))
             bar.addArrangedSubview(pill("Hoàn tác") { [weak self] in self?.undo() })
         case .failed(let message):
-            bar.addArrangedSubview(status(message, color: .systemRed))
+            bar.addArrangedSubview(status(message, symbol: "exclamationmark.circle.fill", tint: .systemRed))
             bar.addArrangedSubview(pill("Đóng") { [weak self] in self?.mode = .normal })
         case .panel(let title):
             bar.addArrangedSubview(status(title, color: .secondaryLabel))
@@ -492,12 +499,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             c.baseForegroundColor = .label
         case .primary:
             c = .filled()
-            c.baseBackgroundColor = Palette.accent
+            c.baseBackgroundColor = Brand.greenFill
             c.baseForegroundColor = .white
         case .incoming:
             c = .tinted()
-            c.baseBackgroundColor = Palette.incoming
-            c.baseForegroundColor = Palette.incoming
+            c.baseBackgroundColor = Brand.orange
+            c.baseForegroundColor = Brand.orange
         }
         c.title = title
         c.cornerStyle = .capsule
@@ -519,7 +526,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         return b
     }
 
-    private func status(_ text: String, color: UIColor = .label, spinner: Bool = false, check: Bool = false) -> UIView {
+    private func status(_ text: String, color: UIColor = .label, spinner: Bool = false,
+                        symbol: String? = nil, tint: UIColor = Brand.green) -> UIView {
         let label = UILabel()
         label.text = text
         label.font = .systemFont(ofSize: 15)
@@ -534,14 +542,38 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             indicator.startAnimating()
             stack.insertArrangedSubview(indicator, at: 0)
         }
-        if check {
-            let icon = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-            icon.tintColor = Palette.ok
+        if let symbol {
+            let icon = UIImageView(image: UIImage(systemName: symbol))
+            icon.tintColor = tint
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+            icon.setContentCompressionResistancePriority(.required, for: .horizontal)
             stack.insertArrangedSubview(icon, at: 0)
         }
         stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return stack
+    }
+
+    /// The Mộc Sinh mark: shows which keyboard is up, and opens the context in use.
+    private func logoButton() -> UIButton {
+        let button = UIButton(configuration: .plain(), primaryAction: UIAction { [weak self] _ in self?.openContext() })
+        let mark = UIImageView(image: UIImage(named: "Logo"))
+        mark.contentMode = .scaleAspectFit
+        mark.isUserInteractionEnabled = false
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(mark)
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 36),
+            button.heightAnchor.constraint(equalToConstant: 36),
+            mark.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            mark.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            mark.widthAnchor.constraint(equalToConstant: 24),
+            mark.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        button.accessibilityLabel = Brand.name
+        button.accessibilityHint = "Xem ngữ cảnh đang dùng"
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        return button
     }
 
     private func spacer() -> UIView {
@@ -566,7 +598,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         panelText.backgroundColor = .clear
 
         var c = UIButton.Configuration.filled()
-        c.baseBackgroundColor = Palette.accent
+        c.baseBackgroundColor = Brand.greenFill
         c.baseForegroundColor = .white
         c.cornerStyle = .medium
         panelButton.configuration = c
@@ -639,6 +671,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 self.original = text
                 self.replaceAll(with: result.text)
                 SharedStore.remember(ChatLine(side: .me, text: result.text, date: Date()))
+                SharedStore.addHistory(HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
+                                                   meaning: result.meaning, note: result.note))
                 self.mode = .done
                 self.info = .outgoing(result, original: text)
             } catch is CancellationError {
@@ -732,6 +766,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             do {
                 let result = try await Translator(apiKey: apiKey).translate(text, to: .vietnamese, context: context)
                 SharedStore.cacheIncoming(text, translation: result.text)
+                SharedStore.addHistory(HistoryItem(side: .partner, source: text, translation: result.text,
+                                                   languageCode: LanguageDetector.language(of: text)?.code ?? "",
+                                                   note: result.note))
                 guard let self, !Task.isCancelled else { return }
                 self.info = .incoming(source: text, translation: result)
             } catch is CancellationError {
@@ -761,16 +798,4 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 /// Lets keys play the standard keyboard click.
 final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
-}
-
-enum Palette {
-    static let accent = UIColor {
-        $0.userInterfaceStyle == .dark ? UIColor(red: 0.18, green: 0.37, blue: 0.88, alpha: 1) : UIColor(red: 0.11, green: 0.31, blue: 0.85, alpha: 1)
-    }
-    static let incoming = UIColor {
-        $0.userInterfaceStyle == .dark ? UIColor(red: 0.94, green: 0.63, blue: 0.44, alpha: 1) : UIColor(red: 0.60, green: 0.20, blue: 0.07, alpha: 1)
-    }
-    static let ok = UIColor {
-        $0.userInterfaceStyle == .dark ? UIColor(red: 0.20, green: 0.83, blue: 0.60, alpha: 1) : UIColor(red: 0.06, green: 0.46, blue: 0.43, alpha: 1)
-    }
 }

@@ -1,7 +1,7 @@
 import ReplayKit
 import Vision
 
-/// Reads chat text from the screen while the user broadcasts to Dịch Apple.
+/// Reads chat text from the screen while the user broadcasts to MSTrans.
 /// Kept light for the ~50 MB extension limit: it reads at most one frame every
 /// 1.5 s, only while the translation keyboard is open, and only when the
 /// screen changed. Nothing but the recognised text of the last few messages

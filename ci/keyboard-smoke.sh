@@ -1,12 +1,12 @@
 #!/bin/bash
-# Opens the Dịch Apple keyboard in an iOS Simulator and reports whether it starts:
+# Opens the MSTrans keyboard in an iOS Simulator and reports whether it starts:
 # which keyboard the system shows, whether the extension process stays alive, its
 # memory, crash reports and launch errors. Phase 1 is a fresh install; phase 2 adds
 # Full Access, an API key and a copied message, as on a set-up iPhone.
-# Run from the repo root after building DichApple for the simulator.
+# Run from the repo root after building MSTrans for the simulator.
 set -uo pipefail
 
-APP=${1:-build/sim/Build/Products/Release-iphonesimulator/DichApple.app}
+APP=${1:-build/sim/Build/Products/Release-iphonesimulator/MSTrans.app}
 OUT=build/smoke
 HOST=build/KeyboardHost.app
 APP_ID=com.mocsinh.dichapple
@@ -18,8 +18,8 @@ mkdir -p "$OUT"
 
 group() { echo "::group::$*"; }
 endgroup() { echo "::endgroup::"; }
-crash_reports() { ls "$REPORTS" 2>/dev/null | grep -i -E 'DichKeyboard|DichApple' || true; }
-keyboard_pid() { pgrep -f 'DichKeyboard.appex/DichKeyboard' | head -1; }
+crash_reports() { ls "$REPORTS" 2>/dev/null | grep -i -E 'MSTrans' || true; }
+keyboard_pid() { pgrep -f 'MSTransKeyboard.appex/MSTransKeyboard' | head -1; }
 
 group "Host app"
 rm -rf "$HOST" && mkdir -p "$HOST"
@@ -49,8 +49,8 @@ codesign -f -s - "$HOST" || exit 1
 endgroup
 
 group "App signature and entitlements"
-codesign -dv --entitlements - "$APP/PlugIns/DichKeyboard.appex" 2>&1 | tail -20
-plutil -p "$APP/PlugIns/DichKeyboard.appex/Info.plist"
+codesign -dv --entitlements - "$APP/PlugIns/MSTransKeyboard.appex" 2>&1 | tail -20
+plutil -p "$APP/PlugIns/MSTransKeyboard.appex/Info.plist"
 endgroup
 
 group "Simulator"
@@ -73,7 +73,7 @@ xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b >/dev/null
 xcrun simctl install "$UDID" "$APP" || exit 1
 xcrun simctl install "$UDID" "$HOST" || exit 1
-# Dịch Apple first, so it is the keyboard that comes up.
+# MSTrans first, so it is the keyboard that comes up.
 xcrun simctl spawn "$UDID" defaults write -g AppleKeyboards -array "$KEYBOARD_ID" "en_US@sw=QWERTY;hw=Automatic" "emoji@sw=Emoji"
 xcrun simctl spawn "$UDID" defaults write -g AppleKeyboardsExpanded -bool true
 xcrun simctl spawn "$UDID" defaults write com.apple.Preferences KeyboardLastUsed "$KEYBOARD_ID"
@@ -87,7 +87,7 @@ run_phase() {
     group "Phase: $name"
     before=$(crash_reports)
     xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
-    pkill -f 'DichKeyboard.appex/DichKeyboard' >/dev/null 2>&1
+    pkill -f 'MSTransKeyboard.appex/MSTransKeyboard' >/dev/null 2>&1
     sleep 1
     xcrun simctl launch --terminate-running-process \
         --stdout="$PWD/$OUT/$name-host.log" --stderr="$PWD/$OUT/$name-host.err" "$UDID" "$HOST_ID"
@@ -105,7 +105,7 @@ run_phase() {
     cat "$OUT/$name-host.log"
     echo "--- keyboard process after 16 s: $(keyboard_pid || true)"
     xcrun simctl spawn "$UDID" log show --last 1m --style compact \
-        --predicate 'process == "DichKeyboard" OR eventMessage CONTAINS[c] "DichKeyboard" OR eventMessage CONTAINS[c] "dichapple"' \
+        --predicate 'process == "MSTransKeyboard" OR eventMessage CONTAINS[c] "MSTransKeyboard" OR eventMessage CONTAINS[c] "dichapple"' \
         > "$OUT/$name-system.log" 2>&1
     echo "--- system log (errors)"
     grep -i -E 'error|fail|crash|terminat|exception|denied|invalid|jetsam|kill|abort|signal' "$OUT/$name-system.log" | tail -60
@@ -124,7 +124,7 @@ run_phase() {
     if grep -q "current=$KEYBOARD_ID" "$OUT/$name-host.log"; then
         if [ -z "$(keyboard_pid)" ]; then
             FAILED=1
-            echo "::error::Dịch Apple was the current keyboard but its process is gone (phase '$name')"
+            echo "::error::MSTrans was the current keyboard but its process is gone (phase '$name')"
         fi
         # The keys take ~290 pt; below that only the system's globe/dictation strip showed.
         height=$(sed -n 's/^KEYBOARD_HEIGHT=//p' "$OUT/$name-host.log" | tail -1)
@@ -186,7 +186,55 @@ endgroup
 run_phase full-access
 
 group "What the keyboard saved"
-[ -n "$GROUP_DIR" ] && plutil -p "$GROUP_DIR/Library/Preferences/group.com.mocsinh.dichapple.plist" 2>&1 | grep -v -i apikey
+[ -n "$GROUP_DIR" ] && plutil -p "$GROUP_DIR/Library/Preferences/group.com.mocsinh.dichapple.plist" 2>&1 | grep -v -i -E 'apikey|history'
+endgroup
+
+xcrun simctl ui "$UDID" appearance dark
+run_phase dark
+xcrun simctl ui "$UDID" appearance light
+
+# Screenshots of each tab of the app, light and dark, with a few sample translations.
+group "App screens"
+xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+xcrun simctl shutdown "$UDID"
+python3 - "$GROUP_DIR" <<'EOF'
+import json, os, plistlib, sys, time, uuid
+path = os.path.join(sys.argv[1], "Library/Preferences/group.com.mocsinh.dichapple.plist")
+with open(path, "rb") as f:
+    values = plistlib.load(f)
+now = time.time() - 978307200  # Foundation's reference date
+def item(side, source, translation, code, minutes, **extra):
+    entry = dict(id=str(uuid.uuid4()).upper(), side=side, source=source, translation=translation,
+                 languageCode=code, date=now - minutes * 60, starred=False)
+    entry.update(extra)
+    return entry
+history = [
+    item("me", "Dạ mẫu này giá 1.200 USD, bên em giao trong 2 tuần ạ.", "您好，这个型号的价格是1200美元，我们两周内发货。", "zh", 2,
+         meaning="Chào anh, mẫu này giá 1.200 USD, bên em giao hàng trong vòng hai tuần."),
+    item("partner", "你好，请问这个型号的价格是多少？", "Chào bạn, cho hỏi mẫu này giá bao nhiêu?", "zh", 3),
+    item("partner", "Could you send me the packing list for the 4 containers?", "Bạn gửi giúp mình packing list của 4 container nhé?", "en", 90,
+         note="“Packing list” là phiếu đóng gói hàng; giữ nguyên thuật ngữ."),
+    item("me", "Em gửi anh hợp đồng bản cuối, anh xem giúp em nhé.", "I've attached the final contract. Could you please take a look?", "en", 1500,
+         meaning="Em đã gửi kèm hợp đồng bản cuối. Anh xem giúp em được không?", starred=True),
+]
+values["history"] = json.dumps(history, ensure_ascii=False).encode()
+values["glossary"] = "主轴 = trục chính\n数控机床 = máy CNC\npacking list = phiếu đóng gói\nMộc Sinh"
+with open(path, "wb") as f:
+    plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)
+print("sample data written")
+EOF
+xcrun simctl boot "$UDID"
+xcrun simctl bootstatus "$UDID" -b >/dev/null
+for appearance in light dark; do
+    xcrun simctl ui "$UDID" appearance "$appearance"
+    for tab in translate history glossary settings; do
+        xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" >/dev/null
+        sleep 4
+        xcrun simctl io "$UDID" screenshot "$OUT/app-$tab-$appearance.png" >/dev/null 2>&1 && echo "app-$tab-$appearance.png"
+    done
+done
+new=$(crash_reports)
+[ -n "$new" ] && { FAILED=1; echo "::error::Crash reports: $new"; for f in $new; do head -c 20000 "$REPORTS/$f"; done; }
 endgroup
 
 xcrun simctl shutdown "$UDID" >/dev/null 2>&1

@@ -1,6 +1,8 @@
-# XcodeGen spec: `xcodegen generate` turns this into DichApple.xcodeproj (no Mac needed to edit it).
+# XcodeGen spec: `xcodegen generate` turns this into MSTrans.xcodeproj (no Mac needed to edit it).
+# Bundle IDs and the App Group keep their first (com.mocsinh.dichapple) names, so a new build
+# installs over the old one and keeps its settings.
 # The App Group is also named in Shared/Config.swift (used when no provisioning profile is embedded).
-name: DichApple
+name: MSTrans
 options:
   bundleIdPrefix: com.mocsinh
   deploymentTarget:
@@ -10,7 +12,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
@@ -24,7 +26,7 @@ settings:
       DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
 
 targets:
-  DichApple:
+  MSTrans:
     type: application
     platform: iOS
     sources:
@@ -34,27 +36,29 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     info:
-      path: Support/App-Info.plist
+      path: Support/MSTrans-Info.plist
       properties:
-        CFBundleDisplayName: Dịch Apple
+        CFBundleDisplayName: MSTrans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
     entitlements:
-      path: Support/DichApple.entitlements
+      path: Support/MSTrans.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
     dependencies:
-      - target: DichKeyboard
-      - target: DichScreen
+      - target: MSTransKeyboard
+      - target: MSTransScreen
     scheme: {}
 
   # Translation keyboard. UIKit only: keyboards get a small memory budget.
-  DichKeyboard:
+  MSTransKeyboard:
     type: app-extension
     platform: iOS
     sources:
@@ -64,9 +68,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple.keyboard
     info:
-      path: Support/Keyboard-Info.plist
+      path: Support/MSTransKeyboard-Info.plist
       properties:
-        CFBundleDisplayName: Dịch Apple
+        CFBundleDisplayName: MSTrans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -78,12 +82,12 @@ targets:
             PrimaryLanguage: vi-VN
             RequestsOpenAccess: true
     entitlements:
-      path: Support/DichKeyboard.entitlements
+      path: Support/MSTransKeyboard.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
 
   # Screen reading: a ReplayKit broadcast extension that reads chat text on-device.
-  DichScreen:
+  MSTransScreen:
     type: app-extension
     platform: iOS
     sources:
@@ -94,9 +98,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple.screen
     info:
-      path: Support/Screen-Info.plist
+      path: Support/MSTransScreen-Info.plist
       properties:
-        CFBundleDisplayName: Dịch Apple
+        CFBundleDisplayName: MSTrans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -104,6 +108,6 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
           RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
     entitlements:
-      path: Support/DichScreen.entitlements
+      path: Support/MSTransScreen.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]

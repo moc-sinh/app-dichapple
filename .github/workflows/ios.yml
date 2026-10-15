@@ -39,7 +39,7 @@ jobs:
       - name: Build for iPhone (unsigned)
         run: |
           set -o pipefail
-          xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
+          xcodebuild -project MSTrans.xcodeproj -scheme MSTrans -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
             CODE_SIGNING_ALLOWED=NO build | tail -40
 
@@ -47,19 +47,19 @@ jobs:
       # Ad-hoc signing here only embeds the App Group entitlements so they survive re-signing.
       - name: Package IPA
         run: |
-          APP=build/ipa/Payload/DichApple.app
+          APP=build/ipa/Payload/MSTrans.app
           mkdir -p build/ipa/Payload
-          cp -R build/dd/Build/Products/Release-iphoneos/DichApple.app build/ipa/Payload/
-          codesign -f -s - --entitlements Support/DichKeyboard.entitlements "$APP/PlugIns/DichKeyboard.appex"
-          codesign -f -s - --entitlements Support/DichScreen.entitlements "$APP/PlugIns/DichScreen.appex"
-          codesign -f -s - --entitlements Support/DichApple.entitlements "$APP"
-          (cd build/ipa && zip -qry ../DichApple.ipa Payload)
-          ls -lh build/DichApple.ipa
+          cp -R build/dd/Build/Products/Release-iphoneos/MSTrans.app build/ipa/Payload/
+          codesign -f -s - --entitlements Support/MSTransKeyboard.entitlements "$APP/PlugIns/MSTransKeyboard.appex"
+          codesign -f -s - --entitlements Support/MSTransScreen.entitlements "$APP/PlugIns/MSTransScreen.appex"
+          codesign -f -s - --entitlements Support/MSTrans.entitlements "$APP"
+          (cd build/ipa && zip -qry ../MSTrans.ipa Payload)
+          ls -lh build/MSTrans.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DichApple-ipa
-          path: build/DichApple.ipa
+          name: MSTrans-ipa
+          path: build/MSTrans.ipa
           retention-days: 30
 
   # Opens the keyboard in the iOS Simulator; fails if it crashes or never starts.
@@ -80,7 +80,7 @@ jobs:
       - name: Build for the simulator
         run: |
           set -o pipefail
-          xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
+          xcodebuild -project MSTrans.xcodeproj -scheme MSTrans -configuration Release \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim \
             ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= build | tail -20
 
@@ -127,11 +127,11 @@ jobs:
           KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           printf '%s' "$ASC_KEY_P8" > "$KEY"
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
-          xcodebuild -project DichApple.xcodeproj -scheme DichApple -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath build/DichApple.xcarchive \
+          xcodebuild -project MSTrans.xcodeproj -scheme MSTrans -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/MSTrans.xcarchive \
             DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             "${AUTH[@]}" archive | tail -40
           sed "s/TEAM_ID_PLACEHOLDER/$TEAM_ID/" ExportOptions.plist > build/ExportOptions.plist
-          xcodebuild -exportArchive -archivePath build/DichApple.xcarchive \
+          xcodebuild -exportArchive -archivePath build/MSTrans.xcarchive \
             -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
             "${AUTH[@]}" | tail -40

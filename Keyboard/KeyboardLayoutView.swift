@@ -653,8 +653,9 @@ enum KeyColor {
         $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.15) : UIColor(red: 0.671, green: 0.698, blue: 0.737, alpha: 1)
     }
     static let popup = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.42, alpha: 1) : .white }
-    static let prominent = UIColor.systemBlue
-    static let prominentPressed = UIColor { $0.userInterfaceStyle == .dark ? UIColor.systemBlue.withAlphaComponent(0.7) : UIColor(red: 0.0, green: 0.38, blue: 0.85, alpha: 1) }
+    /// Send, Go, Search… in the Mộc Sinh green, like the Dịch button.
+    static let prominent = Brand.greenFill
+    static let prominentPressed = UIColor(light: 0x084D32, dark: 0x146140)
 }
 
 // MARK: - Key pop-up
