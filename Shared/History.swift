@@ -43,6 +43,12 @@ extension SharedStore {
         (try? storedHistory()) ?? []
     }
 
+    /// Translations from the conversation going on: as recent as the context, and since "Cuộc mới".
+    static func recentHistory() -> [HistoryItem] {
+        let since = max(Date().addingTimeInterval(-Config.memoryMaxAge), contextClearedAt ?? .distantPast)
+        return history().filter { $0.date > since }
+    }
+
     /// Throws when saved history cannot be read, so the writers below leave it untouched
     /// instead of replacing it with an empty list.
     private static func storedHistory() throws -> [HistoryItem] {

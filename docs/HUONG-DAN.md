@@ -48,13 +48,25 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 ## 5. Dùng hằng ngày
 
 **Trả lời đối tác**
-1. Trong Zalo, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex).
+1. Trong WhatsApp, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex). Zalo không cho dùng bàn phím ngoài: xem mục **Dùng trong Zalo** bên dưới.
 2. Bấm **Dịch** (nút xanh): cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, bàn phím tự trả lời đúng ngôn ngữ đối tác đang dùng.
-3. Dòng trên cùng hiện **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, dòng này hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
+3. Thanh dịch hiện **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, thanh hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần.
-- **Đọc mà không mở bàn phím**: mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › đặt tên. Rồi vào Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt đó. Từ đó: sao chép tin, gõ hai lần vào lưng iPhone là bản dịch hiện lên.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên thanh dịch, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: thanh dịch hiện nút **Tin copy · Dịch**, chạm một lần.
+- Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa, lưu ý) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
+
+**Dùng trong Zalo**
+
+Zalo không cho bàn phím ngoài hiện trong app của họ: giữ quả địa cầu trong Zalo sẽ không thấy MSTrans (WhatsApp, Messenger… vẫn dùng được). Trong Zalo, dùng chạm lưng iPhone, một lần thiết lập:
+1. Mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › Xong.
+2. Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt vừa tạo.
+
+Từ đó, cùng một cái chạm làm cả hai chiều:
+- **Đọc**: giữ tin đối tác › Sao chép › gõ hai lần vào lưng iPhone: bản dịch tiếng Việt hiện lên.
+- **Trả lời**: gõ tiếng Việt bằng bàn phím iPhone (Tiếng Việt Telex) › chạm giữ ô chat › **Chọn tất cả** › **Cắt** › gõ hai lần vào lưng iPhone: MSTrans dịch sang tiếng đối tác và chép sẵn bản dịch › chạm giữ ô chat › **Dán** › gửi.
+
+Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím tắt vừa tạo, thêm thao tác **Lấy bảng tạm** lên trước thao tác MSTrans. Nếu báo “chưa tự chép được”: thêm thao tác **Sao chép vào bảng tạm** sau thao tác MSTrans.
 
 **Trong app MSTrans**
 - **Dịch**: dịch đoạn dài, hai chiều (nút ⇄ đổi chiều), có nút dán, sao chép và chia sẻ; bên dưới là 3 bản dịch gần nhất, chạm để xem và chép lại.
@@ -66,7 +78,8 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 - Giữ phím cách rồi kéo để di chuyển con trỏ.
 - Chạm hai lần Shift để khóa chữ hoa; chạm hai lần phím cách để thêm dấu chấm.
 - Giữ phím xóa: xóa từng chữ, giữ lâu thì xóa cả từ.
-- Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên. Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`.
+- Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên. Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`.
+- Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm.
 
 ## 6. Mỗi 7 ngày
 
@@ -99,7 +112,7 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 
 ## Cần thử trên máy thật
 
-- Bàn phím đọc được bao nhiêu chữ trong ô nhập của Zalo, Messenger, WeChat (iOS có thể chỉ trả một phần).
+- Bàn phím đọc được bao nhiêu chữ trong ô nhập của Messenger, WeChat (iOS có thể chỉ trả một phần).
 
 ## Sau này nếu có tài khoản Apple Developer trả phí
 

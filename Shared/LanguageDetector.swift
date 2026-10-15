@@ -33,3 +33,16 @@ enum LanguageDetector {
         return recognizer.dominantLanguage
     }
 }
+
+extension Language {
+    /// The language to write to the partner in: the one chosen, or with "Tự động" the partner's
+    /// own (from the conversation, else the one seen last).
+    static func target(code: String, context: [ChatLine]) -> Language {
+        guard code == autoCode else { return named(code) ?? all[0] }
+        if let detected = LanguageDetector.partnerLanguage(in: context) {
+            if named(detected.code) != nil { SharedStore.lastPartnerCode = detected.code }
+            return detected
+        }
+        return named(SharedStore.lastPartnerCode) ?? all[0]
+    }
+}

@@ -76,6 +76,8 @@ final class KeyboardLayoutView: UIView {
     private weak var trackpadTouch: UITouch?
     private weak var accentTouch: UITouch?
     private var accentPicker: AccentPicker?
+    /// Pop-ups not on screen, kept for the next key: building one on every press costs time.
+    private var sparePopups: [KeyPopup] = []
     private let haptics = UIImpactFeedbackGenerator(style: .light)
 
     static let cornerRadius: CGFloat = {
@@ -551,13 +553,17 @@ final class KeyboardLayoutView: UIView {
         removePopup(track)
         guard let s = track.key.character else { return }
         let text = shift != .off && page == .letters ? s.uppercased() : s
-        let popup = KeyPopup(keyFrame: track.key.cap.frame, width: bounds.width, text: text, traits: traitCollection)
-        addSubview(popup)
+        let popup = sparePopups.popLast() ?? KeyPopup(frame: .zero)
+        if popup.superview !== self { addSubview(popup) }
+        popup.show(keyFrame: track.key.cap.frame, width: bounds.width, text: text, traits: traitCollection)
+        bringSubviewToFront(popup)
         track.popup = popup
     }
 
     private func removePopup(_ track: Track) {
-        track.popup?.removeFromSuperview()
+        guard let popup = track.popup else { return }
+        popup.isHidden = true
+        sparePopups.append(popup)
         track.popup = nil
     }
 
@@ -661,16 +667,38 @@ enum KeyColor {
 // MARK: - Key pop-up
 
 /// The enlarged letter shown above a key while it is held, shaped like the system one.
+/// One is reused from key to key; `show` reshapes it.
 private final class KeyPopup: UIView {
-    init(keyFrame k: CGRect, width: CGFloat, text: String, traits: UITraitCollection) {
+    private let shape = CAShapeLayer()
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isHidden = true
+        shape.shadowColor = UIColor.black.cgColor
+        shape.shadowOpacity = 0.25
+        shape.shadowRadius = 2
+        shape.shadowOffset = CGSize(width: 0, height: 1)
+        layer.addSublayer(shape)
+
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 34)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.5
+        label.textColor = .label
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func show(keyFrame k: CGRect, width: CGFloat, text: String, traits: UITraitCollection) {
         let balloonWidth = max(k.width + 22, 48)
         let balloonHeight = k.height + 14
         let balloonX = min(max(k.midX - balloonWidth / 2, 0), width - balloonWidth)
         let balloonY = k.minY - balloonHeight - 6
         let minX = min(balloonX, k.minX)
         let box = CGRect(x: minX, y: balloonY, width: max(balloonX + balloonWidth, k.maxX) - minX, height: k.maxY - balloonY)
-        super.init(frame: box)
-        isUserInteractionEnabled = false
 
         let balloon = CGRect(x: balloonX - box.minX, y: 0, width: balloonWidth, height: balloonHeight)
         let keyRect = k.offsetBy(dx: -box.minX, dy: -box.minY)
@@ -684,27 +712,19 @@ private final class KeyPopup: UIView {
         path.append(neck)
         path.append(UIBezierPath(roundedRect: keyRect, cornerRadius: KeyboardLayoutView.cornerRadius))
 
-        let shape = CAShapeLayer()
+        // No implicit animation: the pop-up must appear at once, on the new key.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = box
         shape.path = path.cgPath
-        shape.fillColor = KeyColor.popup.resolvedColor(with: traits).cgColor
-        shape.shadowColor = UIColor.black.cgColor
-        shape.shadowOpacity = 0.25
-        shape.shadowRadius = 2
-        shape.shadowOffset = CGSize(width: 0, height: 1)
         shape.shadowPath = path.cgPath
-        layer.addSublayer(shape)
+        shape.fillColor = KeyColor.popup.resolvedColor(with: traits).cgColor
+        CATransaction.commit()
 
-        let label = UILabel(frame: balloon.insetBy(dx: 2, dy: 2))
+        label.frame = balloon.insetBy(dx: 2, dy: 2)
         label.text = text
-        label.textAlignment = .center
-        label.font = .systemFont(ofSize: 34)
-        label.adjustsFontSizeToFitWidth = true
-        label.minimumScaleFactor = 0.5
-        label.textColor = .label
-        addSubview(label)
+        isHidden = false
     }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
 
 // MARK: - Accent picker

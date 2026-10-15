@@ -40,10 +40,21 @@ enum Telex {
     static func process(_ raw: String) -> (text: String, lastWasUndo: Bool) {
         var word = ""
         var undo = false
+        // The last key was a `w` that became ư on its own: another `w` gives the letter w back (as UniKey).
+        var bareW = false
         for key in raw {
+            let k = lower(key)
+            if bareW, k == "w", let last = word.last, lower(last) == "ư" {
+                word = String(word.dropLast()) + (last.isUppercase ? "W" : "w")
+                undo = true
+                bareW = false
+                continue
+            }
+            let hadVowel = word.contains { vowel($0) != nil }
             let step = self.step(word, key)
             word = step.text
             undo = step.undo
+            bareW = k == "w" && !hadVowel
         }
         return (word, undo)
     }
@@ -85,6 +96,11 @@ enum Telex {
     private static func step(_ word: String, _ key: Character) -> (text: String, undo: Bool) {
         let k = lower(key)
         var ch = Array(word)
+        // "ưo" is never Vietnamese: once the word goes on, it is "ươ" (nguwoif → người).
+        if k != "o" && k != "w", let i = ch.indices.dropLast().first(where: { vowel(ch[$0])?.base == "ư" && vowel(ch[$0 + 1])?.base == "o" }) {
+            ch[i + 1] = make(ch[i + 1], "ơ", vowel(ch[i + 1])!.tone)
+            return step(retone(&ch), key)
+        }
         let plain = (word + String(key), false)
         let hasVowel = ch.contains { vowel($0) != nil }
 
@@ -118,12 +134,26 @@ enum Telex {
                     return (retone(&ch), false)
                 }
             }
+            // The horn goes on the last vowel that takes one, unless an earlier one makes a Vietnamese
+            // syllable and the last does not (chuaw → chưa, not chuă).
+            var fallback: (String, Bool)?
             for i in ch.indices.reversed() {
                 guard let v = vowel(ch[i]) else { continue }
-                if let h = horns[v.base] { ch[i] = make(ch[i], h, v.tone); return (retone(&ch), false) }
-                if let p = unhorns[v.base] { ch[i] = make(ch[i], p, v.tone); return (retone(&ch) + String(key), true) }
+                if let h = horns[v.base] {
+                    var horned = ch
+                    horned[i] = make(horned[i], h, v.tone)
+                    let text = retone(&horned)
+                    if isPlausible(text) { return (text, false) }
+                    if fallback == nil { fallback = (text, false) }
+                    continue
+                }
+                if let p = unhorns[v.base] {
+                    if let fallback { return fallback }
+                    ch[i] = make(ch[i], p, v.tone)
+                    return (retone(&ch) + String(key), true)
+                }
             }
-            return plain
+            return fallback ?? plain
         }
 
         return plain

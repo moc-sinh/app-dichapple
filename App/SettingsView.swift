@@ -9,7 +9,6 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.gender, store: SharedStore.defaults) private var gender = 0
     @AppStorage(SharedStore.Key.addressing, store: SharedStore.defaults) private var addressing = ""
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
-    @AppStorage(SharedStore.Key.autoIncoming, store: SharedStore.defaults) private var autoIncoming = true
     @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = false
     @AppStorage(SharedStore.Key.haptics, store: SharedStore.defaults) private var haptics = true
     @AppStorage(SharedStore.keepHistoryKey, store: SharedStore.defaults) private var keepHistory = true
@@ -27,6 +26,7 @@ struct SettingsView: View {
                 outgoingSection
                 aboutYouSection
                 incomingSection
+                zaloSection
                 keyboardSection
                 dataSection
                 aboutSection
@@ -133,23 +133,37 @@ struct SettingsView: View {
 
     private var incomingSection: some View {
         Section {
-            Toggle("Dịch tin vừa sao chép", isOn: $autoIncoming)
-            if autoIncoming {
-                Toggle("Dịch ngay khi mở bàn phím", isOn: $instantIncoming)
-            }
-            if autoIncoming && instantIncoming {
+            Toggle("Dịch ngay khi mở bàn phím", isOn: $instantIncoming)
+            if instantIncoming {
                 Button("Cho phép dán trong Cài đặt iPhone", action: openSystemSettings)
             }
         } header: {
             Text("Tin đối tác gửi")
         } footer: {
-            if !autoIncoming {
-                Text("Đang tắt: khi cần, bấm nút “Tin copy” trên thanh dịch.")
-            } else if instantIncoming {
-                Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
+            if instantIncoming {
+                Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay trên thanh dịch, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
             } else {
-                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
+                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: thanh dịch hiện nút “Tin copy · Dịch”, chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
             }
+        }
+    }
+
+    /// Zalo turns off other keyboards in its own screens; the copy-and-Back-Tap shortcut works there.
+    private var zaloSection: some View {
+        Section {
+            StepRow(done: nil, title: "1. Tạo phím tắt",
+                    detail: "App Phím tắt › + › thêm thao tác “Dịch tin đã sao chép” của MSTrans › Xong.")
+            StepRow(done: nil, title: "2. Gán vào chạm lưng iPhone",
+                    detail: "Cài đặt › Trợ năng › Cảm ứng › Chạm vào mặt sau › Chạm hai lần › chọn phím tắt vừa tạo.")
+            StepRow(done: nil, title: "Đọc tin đối tác",
+                    detail: "Giữ tin › Sao chép › gõ hai lần vào lưng iPhone: bản dịch tiếng Việt hiện lên.")
+            StepRow(done: nil, title: "Trả lời",
+                    detail: "Gõ tiếng Việt bằng bàn phím iPhone › chọn hết › Cắt › gõ hai lần vào lưng iPhone › giữ ô chat › Dán.")
+            Button("Mở app Phím tắt", action: openShortcutsApp)
+        } header: {
+            Text("Dùng trong Zalo")
+        } footer: {
+            Text("Zalo không cho bàn phím ngoài hiện trong app của họ, nên khi giữ quả địa cầu sẽ không thấy MSTrans. Cùng một lần chạm lưng: tin của đối tác được dịch sang tiếng Việt, câu tiếng Việt của bạn được dịch sang tiếng đối tác và chép sẵn để dán.")
         }
     }
 
@@ -159,7 +173,7 @@ struct SettingsView: View {
         } header: {
             Text("Bàn phím")
         } footer: {
-            Text("Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem ngữ cảnh đang dùng.")
+            Text("Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
         }
     }
 

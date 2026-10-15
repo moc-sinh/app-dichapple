@@ -26,9 +26,9 @@ jobs:
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
 
-      - name: Telex tests
+      - name: Typing tests
         run: |
-          swiftc -O Keyboard/Telex.swift Tests/main.swift -o telex-tests
+          swiftc -O Keyboard/Telex.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests
           ./telex-tests
 
       - name: Generate project

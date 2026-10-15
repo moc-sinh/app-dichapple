@@ -1,4 +1,6 @@
-// Telex checks, run in CI with: swiftc Keyboard/Telex.swift Tests/main.swift -o telex-tests && ./telex-tests
+// Typing checks, run in CI with:
+// swiftc Keyboard/Telex.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests && ./telex-tests
+import Foundation
 
 let cases: [(String, String)] = [
     // Vietnamese
@@ -10,6 +12,10 @@ let cases: [(String, String)] = [
     ("baos", "báo"), ("nhw", "như"), ("w", "ư"), ("tw", "tư"), ("gif", "gì"),
     ("quoocs", "quốc"), ("dduocwj", "được"), ("nguoiwf", "người"), ("khuyeen", "khuyên"),
     ("giuwax", "giữa"), ("Vieejt", "Việt"), ("NAM", "NAM"), ("DDAAY", "ĐÂY"), ("xooong", "xoong"),
+    // w: on its own it is ư, twice it is w (as UniKey); the horn goes where it makes a syllable
+    ("ww", "w"), ("Ww", "W"), ("WW", "W"), ("tww", "tw"), ("www", "ww"), ("chuaw", "chưa"), ("muaw", "mưa"),
+    ("ngwoif", "người"), ("nguwoif", "người"), ("twowng", "tương"), ("hoaw", "hoă"), ("quaw", "quă"),
+    ("tuw", "tư"), ("uwow", "ươ"), ("Uw", "Ư"),
     // Undo by repeating a modifier
     ("ass", "as"), ("aaa", "aa"), ("tesst", "test"), ("sorrry", "sorry"), ("passs", "pass"),
     // English and brand names stay as typed
@@ -40,6 +46,100 @@ for w in words {
     }
 }
 
-let total = cases.count + words.count
+// Typing fast into an app that shows each edit a few keys late, as iOS apps do.
+struct LaggingField {
+    var text = ""
+    var states = [""]
+    /// Reports never go back past one already made.
+    var reported = 0
+
+    mutating func apply(_ edits: [Composer.Edit]) {
+        for edit in edits {
+            switch edit {
+            case .delete(let count): text = String(text.dropLast(count))
+            case .insert(let s): text += s
+            }
+            states.append(text)
+        }
+    }
+
+    /// What the keyboard is told, `lag` edits behind.
+    mutating func seen(lag: Int) -> String {
+        reported = max(reported, states.count - 1 - lag)
+        return states[reported]
+    }
+
+    /// The app changes the text itself (clears it after sending) and says so at once.
+    mutating func replace(with new: String) {
+        text = new
+        states.append(new)
+        reported = states.count - 1
+    }
+}
+
+func typeFast(_ keys: String, lag: Int, into field: inout LaggingField, composer: inout Composer, now: inout Double) {
+    for key in keys {
+        // The app reports its (late) text before most keys.
+        _ = composer.fieldChanged(before: field.seen(lag: lag), after: "", now: now)
+        field.apply(key == " " ? composer.space(now: now) : composer.letter(key, now: now))
+        now += 0.06
+    }
+}
+
+var fastChecks = 0
+let sentences = [
+    ("Tooi khoong bieets laf banj thees naof", "Tôi không biết là bạn thế nào"),
+    ("ww we will work wow", "w we will work ươ"),
+    ("nguwowif nuwowcs ngoaif muaw chuaw", "người nước ngoài mưa chưa"),
+]
+for (keys, want) in sentences {
+    for lag in 0...4 {
+        fastChecks += 1
+        var field = LaggingField()
+        var composer = Composer()
+        var now = 0.0
+        composer.start(before: "", after: "", now: now)
+        typeFast(keys, lag: lag, into: &field, composer: &composer, now: &now)
+        if field.text != want {
+            failed += 1
+            print("FAIL fast typing (lag \(lag)): \(keys) -> \(field.text), want \(want)")
+        }
+    }
+}
+
+// The app clears the field after sending; the next message starts afresh.
+do {
+    fastChecks += 1
+    var field = LaggingField()
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    typeFast("ok", lag: 2, into: &field, composer: &composer, now: &now)
+    now += 2
+    field.replace(with: "")
+    _ = composer.fieldChanged(before: "", after: "", now: now)
+    typeFast("chaof banj", lag: 2, into: &field, composer: &composer, now: &now)
+    if field.text != "chào bạn" {
+        failed += 1
+        print("FAIL after sending: \(field.text), want chào bạn")
+    }
+}
+
+// Two spaces make ". ", even while the app is behind.
+do {
+    fastChecks += 1
+    var field = LaggingField()
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    typeFast("ok  vaang", lag: 3, into: &field, composer: &composer, now: &now)
+    if field.text != "ok. vâng" {
+        failed += 1
+        print("FAIL double space: \(field.text), want ok. vâng")
+    }
+}
+
+let total = cases.count + words.count + fastChecks
 print(failed == 0 ? "Telex: \(total) checks passed" : "Telex: \(failed) of \(total) failed")
-if failed > 0 { fatalError("Telex tests failed") }
+fflush(stdout)
+if failed > 0 { exit(1) }
