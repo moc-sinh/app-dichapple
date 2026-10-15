@@ -368,11 +368,14 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
+    /// Runs after this touch's pop-up has been handed to the screen, so the key never waits
+    /// for the click or the haptic engine.
     private func feedback() {
-        UIDevice.current.playInputClick()
-        if hapticsEnabled {
-            haptics.impactOccurred(intensity: 0.5)
-            haptics.prepare()
+        DispatchQueue.main.async { [weak self] in
+            UIDevice.current.playInputClick()
+            guard let self, self.hapticsEnabled else { return }
+            self.haptics.impactOccurred(intensity: 0.5)
+            self.haptics.prepare()
         }
     }
 

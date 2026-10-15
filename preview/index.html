@@ -89,17 +89,17 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
 .send { width: 44px; height: 44px; flex-shrink: 0; border: none; border-radius: 22px; background: var(--accent); display: grid; place-items: center; }
 
 .kb { flex-shrink: 0; background: var(--kb); color: var(--key-fg); position: relative; }
-.line { flex: 1; min-width: 0; height: 34px; border: none; background: transparent; display: flex; align-items: center; gap: 6px; padding: 0 4px; font-size: 15px; text-align: left; color: var(--key-fg); }
-.line span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.line svg { flex-shrink: 0; }
-.line.incoming svg { color: var(--incoming); }
-.line.ok svg { color: var(--ok); }
-.line.warn svg { color: var(--warn); }
-.line.err svg { color: var(--err); }
+.info { width: 100%; height: 30px; box-sizing: border-box; border: none; background: transparent; display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 15px; text-align: left; color: var(--kb-muted); }
+.info span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.info.incoming, .info.ok, .info.warn, .info.err { color: var(--key-fg); }
+.info.incoming svg { color: var(--incoming); }
+.info.ok svg { color: var(--ok); }
+.info.warn svg { color: var(--warn); }
+.info.err svg { color: var(--err); }
 .logo { width: 36px; height: 36px; flex-shrink: 0; border: none; background: transparent; padding: 6px; display: grid; place-items: center; }
 .logo svg { width: 24px; height: 24px; }
 .logo .g { fill: var(--logo-green); }
-.bar { height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.bar { height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
 .bar .grow { flex: 1; }
 .chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
@@ -123,7 +123,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
 .accents span { display: grid; place-items: center; border-radius: 6px; font-size: 24px; color: var(--key-fg); }
 .accents span.sel { background: var(--pick); color: #FFFFFF; }
 
-.panel { position: absolute; left: 6px; right: 6px; top: 48px; bottom: 44px; box-sizing: border-box; border-radius: 12px; background: var(--popup); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel { position: absolute; left: 6px; right: 6px; top: 76px; bottom: 44px; box-sizing: border-box; border-radius: 12px; background: var(--popup); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .panel[hidden] { display: none; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .panel-body .cap { font-size: 13px; font-weight: 500; color: var(--kb-muted); margin-top: 4px; }
@@ -139,7 +139,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
 <main class="wrap">
   <header class="intro">
     <h1>MSTrans</h1>
-    <p>Bàn phím gõ tiếng Việt chuẩn iPhone, chỉ một thanh Dịch ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ của đối tác; tin đối tác bạn sao chép hiện bằng tiếng Việt ngay trên thanh đó.</p>
+    <p>Bàn phím gõ tiếng Việt chuẩn iPhone, có thanh Dịch ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ của đối tác; tin đối tác gửi tự hiện bằng tiếng Việt ở dòng trên cùng.</p>
   </header>
 
   <div class="stage">
@@ -159,6 +159,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
             </button>
           </div>
           <div class="kb" id="kb">
+            <button class="info" id="info" data-act="info"></button>
             <div class="bar" id="bar"></div>
             <div class="keys" id="keys"></div>
             <div class="sys" aria-hidden="true">
@@ -176,9 +177,9 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       <h2>Thử nhanh</h2>
       <ol>
         <li>Gõ trên bàn phím như iPhone. Kiểu Telex: <kbd>aa</kbd> ra â, <kbd>w</kbd> ra ư (<kbd>ww</kbd> ra w), <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Từ tiếng Anh như <kbd>facebook</kbd>, <kbd>order</kbd> giữ nguyên. Giữ một nguyên âm để chọn dấu. Gõ bằng bàn phím máy tính cũng được.</li>
-        <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Thanh dịch hiện <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
-        <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó: thanh dịch hiện nút cam <b>Tin copy · Dịch</b>, chạm vào là bản dịch tiếng Việt hiện ngay trên thanh. Bấm <b>Đối tác gửi tin mới</b> bên dưới để có thêm tin.</li>
-        <li>Chạm logo Mộc Sinh bên trái thanh Dịch để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi và các tin đang dùng làm ngữ cảnh.</li>
+        <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Dòng trên cùng hiện <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
+        <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm vào là có bản dịch. Bấm <b>Đối tác gửi tin mới</b> bên dưới để có thêm tin.</li>
+        <li>Chạm logo Mộc Sinh bên trái thanh Dịch để xem các tin đang dùng làm ngữ cảnh.</li>
         <li>Không thấy MSTrans trong một app (ví dụ Zalo đã mở từ trước khi cài): gạt app đó khỏi màn hình đa nhiệm rồi mở lại.</li>
       </ol>
       <div class="sim">
@@ -385,7 +386,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
   /* ---------- State ---------- */
   var S, busyTimer, incomingTimer;
   function fresh() {
-    return { draft: DRAFT, target: 'auto', bar: 'normal', info: { kind: 'idle' }, panel: null, original: '', lastTarget: null, lastIn: null, lastOut: null,
+    return { draft: DRAFT, target: 'auto', bar: 'normal', info: { kind: 'idle' }, panel: null, original: '', lastTarget: null,
       shift: 'off', lastShiftTap: 0, page: 'letters', msgs: START.slice(), nextId: 4, next: 0, copiedId: null,
       ctxFrom: 0, word: new Word(), lastSpace: 0 };
   }
@@ -411,7 +412,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
   function trailingWord(text) { var m = text.match(/[\p{L}]*$/u); return m ? m[0] : ''; }
   function afterEdit() {
     if (S.bar === 'done' || S.bar === 'failed') S.bar = 'normal';
-    if (S.info.kind === 'error') S.info = { kind: 'idle' };
+    if (S.info.kind === 'outgoing' || S.info.kind === 'error') S.info = { kind: 'idle' };
     if (S.shift !== 'locked' && S.page === 'letters') {
       var d = S.draft;
       S.shift = (d === '' || /\n$/.test(d) || /[.!?]\s+$/.test(d)) ? 'once' : 'off';
@@ -461,18 +462,14 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     clearTimeout(busyTimer);
     busyTimer = setTimeout(function () {
       S.original = S.draft; S.draft = result.text; S.word = new Word();
-      S.bar = 'done'; S.info = { kind: 'idle' }; S.lastOut = { t: result, original: S.original, lang: target };
+      S.bar = 'done'; S.info = { kind: 'outgoing', t: result, original: S.original, lang: target };
       render();
     }, 1100);
   }
   function showIncoming(msg) {
     S.info = { kind: 'incomingBusy' }; render();
     clearTimeout(incomingTimer);
-    incomingTimer = setTimeout(function () {
-      S.lastIn = { src: msg.text, vi: msg.vi, note: msg.note || null };
-      S.info = { kind: 'incoming', src: msg.text, vi: msg.vi, note: msg.note || null };
-      render();
-    }, 700);
+    incomingTimer = setTimeout(function () { S.info = { kind: 'incoming', src: msg.text, vi: msg.vi, note: msg.note || null }; render(); }, 700);
   }
 
   /* ---------- Render ---------- */
@@ -503,24 +500,30 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     f.innerHTML = S.draft ? esc(S.draft) + '<span class="caret" aria-hidden="true"></span>' : '<span class="caret" aria-hidden="true"></span><span class="ph">Nhập tin nhắn</span>';
     f.scrollTop = f.scrollHeight;
   }
-  function line(act, cls, icon, text, label) {
-    return '<button class="line ' + cls + '" data-act="' + act + '" aria-label="' + esc(label || text) + '. Chạm để xem đầy đủ">' + icon + '<span>' + esc(text) + '</span></button>';
-  }
-  /* What the bar shows next to the logo: the partner's side in orange, or the language. */
-  function attention() {
-    var i = S.info;
-    if (i.kind === 'copied') return '<button class="pill incoming" data-act="copied" aria-label="Có tin vừa sao chép. Dịch sang tiếng Việt">' + ICON.clip + 'Tin copy · Dịch</button><span class="grow"></span>';
-    if (i.kind === 'incomingBusy') return '<div class="status dim" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch tin đối tác…</div>';
-    if (i.kind === 'incoming') return line('incoming', 'incoming', i.note ? ICON.warn : ICON.bubble, i.vi, 'Tin đối tác, bằng tiếng Việt: ' + i.vi);
-    if (i.kind === 'error') return line('dismiss', 'err', ICON.warn, i.text);
-    return '';
+  function renderInfo() {
+    var i = S.info, cls = '', icon = ICON.eye, text = '';
+    if (i.kind === 'idle') {
+      var n = ctxLines().length;
+      text = n ? 'Ngữ cảnh: ' + n + ' tin gần đây' : 'Chưa có ngữ cảnh';
+    } else if (i.kind === 'copied') { cls = 'incoming'; icon = ICON.clip; text = 'Có tin vừa sao chép · chạm để dịch'; }
+    else if (i.kind === 'incomingBusy') { text = 'Đang dịch tin mới của đối tác…'; }
+    else if (i.kind === 'incoming') { cls = 'incoming'; icon = i.note ? ICON.warn : ICON.bubble; text = i.vi; }
+    else if (i.kind === 'outgoing') {
+      if (i.t.note) { cls = 'warn'; icon = ICON.warn; text = 'Lưu ý: ' + i.t.note; }
+      else if (i.t.meaning) { cls = 'ok'; icon = ICON.check; text = 'Nghĩa: ' + i.t.meaning; }
+      else { cls = 'ok'; icon = ICON.check; text = 'Đã dịch sang ' + i.lang.name; }
+    } else if (i.kind === 'error') { cls = 'err'; icon = ICON.warn; text = i.text; }
+    var b = $('info');
+    b.className = 'info ' + cls;
+    b.innerHTML = icon + '<span>' + esc(text) + '</span>';
+    b.setAttribute('aria-label', text + '. Chạm để xem chi tiết');
   }
   function renderBar() {
     var h = '', t = resolvedTarget();
-    var logo = '<button class="logo" data-act="ctx" aria-label="MSTrans: xem tin đối tác, câu vừa dịch và ngữ cảnh">' + ICON.logo + '</button>';
     if (S.bar === 'normal') {
       var title = S.target === 'auto' ? 'Tự động · ' + t.label : 'Việt → ' + t.label;
-      h = logo + (attention() || '<button class="pill" data-act="lang" aria-label="Ngôn ngữ dịch: ' + t.name + '">' + esc(title) + ICON.down + '</button><span class="grow"></span>') +
+      h = '<button class="logo" data-act="ctx" aria-label="MSTrans: xem ngữ cảnh đang dùng">' + ICON.logo + '</button>' +
+        '<button class="pill" data-act="lang" aria-label="Ngôn ngữ dịch: ' + t.name + '">' + esc(title) + ICON.down + '</button><span class="grow"></span>' +
         '<button class="pill primary" data-act="translate">' + ICON.tr + 'Dịch</button>';
     } else if (S.bar === 'picking') {
       h = '<div class="chips">' + [['auto', 'Tự động']].concat(LANGS.map(function (l) { return [l[0], l[1]]; })).map(function (o) {
@@ -529,11 +532,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     } else if (S.bar === 'busy') {
       h = '<div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Đang dịch sang ' + esc(S.lastTarget.name) + '…</div><button class="pill" data-act="cancel">Hủy</button>';
     } else if (S.bar === 'done') {
-      var o = S.lastOut, summary;
-      if (o && o.t.note) summary = line('check', 'warn', ICON.warn, 'Lưu ý: ' + o.t.note);
-      else if (o && o.t.meaning) summary = line('check', 'ok', ICON.check, 'Nghĩa: ' + o.t.meaning);
-      else summary = line('check', 'ok', ICON.check, 'Đã dịch sang ' + S.lastTarget.name);
-      h = logo + summary + '<button class="pill" data-act="undo">Hoàn tác</button>';
+      h = '<div class="status" role="status" style="color:var(--ok)">' + ICON.check + 'Đã dịch sang ' + esc(S.lastTarget.name) + '</div><button class="pill" data-act="undo">Hoàn tác</button>';
     } else if (S.bar === 'failed') {
       h = '<div class="status err" role="status">' + esc(S.failText) + '</div><button class="pill" data-act="close">Đóng</button>';
     } else if (S.bar === 'panel') {
@@ -596,7 +595,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       return '<button class="' + cls + '" data-k="' + i + '"' + aria + ' style="left:' + k.x + 'px;top:' + k.y + 'px;width:' + k.w + 'px;height:' + k.h + 'px">' + inner + '</button>';
     }).join('');
   }
-  function render() { renderMsgs(); renderField(); renderBar(); renderKeys(); renderPanel(); }
+  function render() { renderMsgs(); renderField(); renderInfo(); renderBar(); renderKeys(); renderPanel(); }
 
   /* ---------- Key touches: pop-up on press, type on release, accents on hold ---------- */
   var press = null, holdTimer = null, delTimer = null, delCount = 0;
@@ -655,7 +654,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       S.page = k.extra; if (S.page !== 'letters') S.shift = 'off'; renderKeys(); press = null;
     } else if (k.kind === 'back') {
       del(false); afterEdit(); render(); delCount = 0;
-      delTimer = setTimeout(function rep() { delCount++; del(delCount > 16); afterEdit(); renderField(); renderBar(); delTimer = setTimeout(rep, delCount > 16 ? 180 : 90); }, 450);
+      delTimer = setTimeout(function rep() { delCount++; del(delCount > 16); afterEdit(); renderField(); renderInfo(); renderBar(); delTimer = setTimeout(rep, delCount > 16 ? 180 : 90); }, 450);
     } else {
       var el = document.querySelector('[data-k="' + i + '"]'); if (el) el.classList.add('down');
     }
@@ -713,13 +712,10 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     else if (act === 'close') { S.bar = 'normal'; render(); }
     else if (act === 'translate') translateDraft();
     else if (act === 'cancel') { clearTimeout(busyTimer); S.bar = 'normal'; render(); }
-    else if (act === 'undo') { S.draft = S.original; S.bar = 'normal'; S.lastOut = null; render(); }
-    else if (act === 'copied') showIncoming(S.info.msg);
-    else if (act === 'incoming') openIncoming();
-    else if (act === 'check') openCheck();
-    else if (act === 'dismiss') { S.info = { kind: 'idle' }; render(); }
-    else if (act === 'ctx') openOverview();
-    else if (act === 'closepanel') { var done = S.panel.done; S.bar = 'normal'; if (done) done(); render(); }
+    else if (act === 'undo') { S.draft = S.original; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); }
+    else if (act === 'info') openInfo();
+    else if (act === 'ctx') openContext();
+    else if (act === 'closepanel') { S.bar = 'normal'; render(); }
     else if (act === 'panelbtn') { S.panel.action(); }
     else if (act === 'msg') {
       var id = Number(el.getAttribute('data-id'));
@@ -735,43 +731,29 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       $('msgs').scrollTop = $('msgs').scrollHeight;
     }
   });
-  function openIncoming() {
+  function openInfo() {
     var i = S.info;
-    var parts = [[i.src, true], ['→ ' + i.vi, false]];
-    if (i.note) parts.push(['Lưu ý: ' + i.note, true]);
-    // Once read, the bar goes back to the language; the logo still has it.
-    S.panel = { title: 'Tin đối tác → Tiếng Việt', parts: parts, button: 'Sao chép bản dịch',
-      done: function () { S.info = { kind: 'idle' }; },
-      action: function () { S.panel.button = 'Đã sao chép'; renderPanel(); } };
+    if (i.kind === 'incomingBusy') return;
+    if (i.kind === 'copied') { showIncoming(i.msg); return; }
+    if (i.kind === 'incoming') {
+      var parts = [[i.src, true], ['→ ' + i.vi, false]];
+      if (i.note) parts.push(['Lưu ý: ' + i.note, true]);
+      S.panel = { title: 'Tin đối tác → Tiếng Việt', parts: parts, button: 'Sao chép bản dịch', action: function () { S.panel.button = 'Đã sao chép'; renderPanel(); } };
+    } else if (i.kind === 'outgoing') {
+      var o = [['Bạn viết', true], [i.original, false], ['Đã đổi sang ' + i.lang.name, true], [i.t.text, false]];
+      if (i.t.meaning) o.push(['Nghĩa khi dịch ngược', true], [i.t.meaning, false]);
+      if (i.t.note) o.push(['Lưu ý', true], [i.t.note, false]);
+      S.panel = { title: 'Kiểm tra bản dịch', parts: o, button: 'Hoàn tác, lấy lại câu gốc', action: function () { S.draft = S.original; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); } };
+    } else {
+      return openContext();
+    }
     S.bar = 'panel'; render();
   }
-  function openCheck() {
-    var o = S.lastOut; if (!o) return;
-    var parts = [['Bạn viết', true], [o.original, false], ['Đã đổi sang ' + o.lang.name, true], [o.t.text, false]];
-    if (o.t.meaning) parts.push(['Nghĩa khi dịch ngược', true], [o.t.meaning, false]);
-    if (o.t.note) parts.push(['Lưu ý', true], [o.t.note, false]);
-    S.panel = { title: 'Kiểm tra bản dịch', parts: parts, button: 'Hoàn tác, lấy lại câu gốc',
-      done: function () { S.bar = 'done'; },
-      action: function () { S.draft = S.original; S.bar = 'normal'; S.lastOut = null; render(); } };
-    S.bar = 'panel'; render();
-  }
-  /* Behind the logo: the partner's last message, the check of what was sent, and the context. */
-  function openOverview() {
-    var parts = [];
-    if (S.lastIn) {
-      parts.push(['Tin đối tác', true], [S.lastIn.src, true], ['→ ' + S.lastIn.vi, false]);
-      if (S.lastIn.note) parts.push(['Lưu ý: ' + S.lastIn.note, true]);
-    }
-    if (S.lastOut) {
-      parts.push(['Bạn gửi (' + S.lastOut.lang.name + ')', true], [S.lastOut.original, true], ['→ ' + S.lastOut.t.text, false]);
-      if (S.lastOut.t.meaning) parts.push(['Nghĩa: ' + S.lastOut.t.meaning, true]);
-      if (S.lastOut.t.note) parts.push(['Lưu ý: ' + S.lastOut.t.note, true]);
-    }
+  function openContext() {
     var lines = ctxLines();
-    parts.push([lines.length ? 'Ngữ cảnh: ' + lines.length + ' tin gần đây' : 'Ngữ cảnh: chưa có tin nào', true]);
-    lines.forEach(function (l) { parts.push([(l.dir === 'in' ? 'Đối tác: ' : 'Tôi: ') + l.text, false]); });
-    S.panel = { title: 'MSTrans', parts: parts, button: 'Cuộc mới (xóa ngữ cảnh)',
-      action: function () { S.ctxFrom = S.msgs.length; S.lastIn = null; S.lastOut = null; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); } };
+    S.panel = { title: 'Ngữ cảnh đang dùng',
+      parts: lines.length ? lines.map(function (l) { return [(l.dir === 'in' ? 'Đối tác: ' : 'Tôi: ') + l.text, l.dir !== 'in']; }) : [['Chưa có tin nào làm ngữ cảnh.', true]],
+      button: 'Cuộc mới (xóa ngữ cảnh)', action: function () { S.ctxFrom = S.msgs.length; S.bar = 'normal'; S.info = { kind: 'idle' }; render(); } };
     S.bar = 'panel'; render();
   }
 

@@ -1,10 +1,12 @@
 import UIKit
 
-/// The translation keyboard: one translate bar above an iOS-style Telex keyboard.
+/// The translation keyboard: an info line, a translate bar and an iOS-style Telex keyboard.
 ///
-/// - Bar: the Mộc Sinh mark (opens everything at once: the partner's last message, the check of
-///   what was sent, the context), then what needs attention (a copied message, its translation,
-///   the meaning of what was just translated) or the target language, and "Dịch".
+/// - Info line: the Vietnamese translation of the partner's message the user just copied,
+///   or the meaning of what was just sent.
+/// - Translate bar: the Mộc Sinh mark (opens everything at once: the partner's last message, the
+///   check of what was sent, the context), the target language ("Tự động" follows the partner),
+///   "Dịch", undo.
 /// - Keys: `KeyboardLayoutView`; typing goes through `Composer`.
 final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDelegate {
 
@@ -12,19 +14,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case normal, picking, busy, done, failed(String), panel(String)
     }
 
-    /// What the bar shows next to the mark, in place of the language, while typing.
     private enum Info {
         case idle
         /// Something new was copied; reading it waits for a tap (see `checkPasteboard`).
         case copied
         case incomingBusy
         case incoming(source: String, translation: Translation)
+        case outgoing(Translation, original: String)
         case message(String)
     }
 
     private var mode: Mode = .normal { didSet { renderBar() } }
-    private var info: Info = .idle { didSet { renderBar() } }
+    private var info: Info = .idle { didSet { renderInfo() } }
 
+    private let infoButton = UIButton(configuration: .plain())
     private let bar = UIStackView()
     private let keyboard = KeyboardLayoutView()
     private let panel = UIStackView()
@@ -34,6 +37,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// Runs when "Xong" closes the panel.
     private var panelDone: (() -> Void)?
 
+    private var infoHeight: NSLayoutConstraint?
     private var barHeight: NSLayoutConstraint?
     private var keysHeight: NSLayoutConstraint?
 
@@ -76,6 +80,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
 
+        infoButton.contentHorizontalAlignment = .leading
+        infoButton.addAction(UIAction { [weak self] _ in self?.openInfo() }, for: .touchUpInside)
+
         bar.axis = .horizontal
         bar.spacing = 6
         bar.alignment = .center
@@ -85,16 +92,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.delegate = self
         buildPanel()
 
-        for v in [bar, keyboard, panel] as [UIView] {
+        for v in [infoButton, bar, keyboard, panel] as [UIView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
-        let barHeight = bar.heightAnchor.constraint(equalToConstant: 44)
+        let infoHeight = infoButton.heightAnchor.constraint(equalToConstant: 30)
+        let barHeight = bar.heightAnchor.constraint(equalToConstant: 42)
         let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: 216)
         let bottom = keyboard.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         bottom.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: view.topAnchor),
+            infoButton.topAnchor.constraint(equalTo: view.topAnchor),
+            infoButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            infoButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            infoHeight,
+            bar.topAnchor.constraint(equalTo: infoButton.bottomAnchor),
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             barHeight,
@@ -108,6 +120,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
             panel.bottomAnchor.constraint(equalTo: keyboard.bottomAnchor, constant: -4),
         ])
+        self.infoHeight = infoHeight
         self.barHeight = barHeight
         self.keysHeight = keysHeight
     }
@@ -134,6 +147,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        // iOS holds back touches near the screen edges (q, a, z, p, l, delete, space) while it
+        // checks for a system swipe, so those keys answered late when typing fast.
+        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -147,7 +163,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
-        barHeight?.constant = compact ? 38 : 44
+        infoHeight?.constant = compact ? 26 : 30
+        barHeight?.constant = compact ? 36 : 42
         keysHeight?.constant = compact ? 160 : 216
         keyboard.showsGlobe = needsInputModeSwitchKey
     }
@@ -243,7 +260,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .done, .failed: mode = .normal
         default: break
         }
-        if case .message = info { info = .idle }
+        switch info {
+        case .outgoing, .message: info = .idle
+        default: break
+        }
         updateAutoCapitalization()
         configureReturn()
     }
@@ -299,13 +319,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         switch mode {
         case .normal:
             bar.addArrangedSubview(logoButton())
-            if let attention = attentionView() {
-                bar.addArrangedSubview(attention)
-                if case .incoming = info {} else { bar.addArrangedSubview(spacer()) }
-            } else {
-                bar.addArrangedSubview(languagePill())
-                bar.addArrangedSubview(spacer())
-            }
+            bar.addArrangedSubview(languagePill())
+            bar.addArrangedSubview(spacer())
             bar.addArrangedSubview(pill("Dịch", image: "translate", style: .primary) { [weak self] in self?.translateDraft() })
         case .picking:
             bar.addArrangedSubview(languageChips())
@@ -317,8 +332,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 self?.mode = .normal
             })
         case .done:
-            bar.addArrangedSubview(logoButton())
-            bar.addArrangedSubview(outgoingSummary())
+            bar.addArrangedSubview(status("Đã dịch sang \(activeTarget?.name ?? "ngôn ngữ đích")", symbol: "checkmark.circle.fill"))
             bar.addArrangedSubview(pill("Hoàn tác") { [weak self] in self?.undo() })
         case .failed(let message):
             bar.addArrangedSubview(status(message, symbol: "exclamationmark.circle.fill", tint: .systemRed))
@@ -344,41 +358,91 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         return language
     }
 
-    /// The partner's side, in orange: a copied message to translate, the translation, or a problem.
-    private func attentionView() -> UIView? {
+    // MARK: Info line
+
+    /// The icon carries the colour (orange: partner, green: you, gold: check this, red: problem);
+    /// the text stays in label colours so it reads on the keyboard background.
+    private func renderInfo() {
+        var c = UIButton.Configuration.plain()
+        c.titleLineBreakMode = .byTruncatingTail
+        c.imagePadding = 7
+        c.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)
+        c.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        let title: String
+        let symbol: String
+        let tint: UIColor
+        var text = UIColor.label
         switch info {
         case .idle:
-            return nil
+            let count = SharedStore.context().count
+            title = count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh"
+            symbol = "eye"
+            tint = .secondaryLabel
+            text = .secondaryLabel
         case .copied:
-            let offer = pill("Tin copy · Dịch", image: "doc.on.clipboard", style: .incoming) { [weak self] in self?.translateCopied() }
-            offer.accessibilityLabel = "Có tin vừa sao chép. Dịch sang tiếng Việt"
-            return offer
+            title = "Có tin vừa sao chép · chạm để dịch"
+            symbol = "doc.on.clipboard.fill"
+            tint = Brand.orange
         case .incomingBusy:
-            return status("Đang dịch tin đối tác…", color: .secondaryLabel, spinner: true)
-        case .incoming(let source, let translation):
-            let symbol = translation.note == nil ? "bubble.left.fill" : "exclamationmark.bubble.fill"
-            return line(translation.text, symbol: symbol, tint: Brand.orange,
-                        accessibility: "Tin đối tác, bằng tiếng Việt: \(translation.text)") { [weak self] in
-                self?.presentIncoming(source: source, translation: translation)
+            title = "Đang dịch tin mới của đối tác…"
+            symbol = "ellipsis.bubble.fill"
+            tint = Brand.orange
+            text = .secondaryLabel
+        case .incoming(_, let translation):
+            title = translation.text
+            symbol = translation.note == nil ? "bubble.left.fill" : "exclamationmark.bubble.fill"
+            tint = Brand.orange
+        case .outgoing(let translation, _):
+            if let note = translation.note {
+                title = "Lưu ý: \(note)"
+                symbol = "exclamationmark.triangle.fill"
+                tint = Brand.gold
+            } else if let meaning = translation.meaning {
+                title = "Nghĩa: \(meaning)"
+                symbol = "checkmark.circle.fill"
+                tint = Brand.green
+            } else {
+                title = "Đã dịch sang \(translation.language.name)"
+                symbol = "checkmark.circle.fill"
+                tint = Brand.green
             }
         case .message(let message):
-            return line(message, symbol: "exclamationmark.circle.fill", tint: .systemRed) { [weak self] in self?.info = .idle }
+            title = message
+            symbol = "exclamationmark.circle.fill"
+            tint = .systemRed
         }
+        c.title = title
+        c.image = UIImage(systemName: symbol)
+        c.baseForegroundColor = text
+        c.imageColorTransformer = UIConfigurationColorTransformer { _ in tint }
+        // VoiceOver hears whose message it is; sighted users get it from the icon and its colour.
+        if case .incoming = info {
+            infoButton.accessibilityLabel = "Tin đối tác, bằng tiếng Việt: \(title)"
+        } else {
+            infoButton.accessibilityLabel = title
+        }
+        c.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var a = attributes
+            a.font = .systemFont(ofSize: 15)
+            return a
+        }
+        infoButton.configuration = c
+        infoButton.accessibilityHint = "Chạm để xem chi tiết"
     }
 
-    /// After Dịch: what the partner will read, put back into Vietnamese, or the note to check.
-    private func outgoingSummary() -> UIView {
-        guard let translation = lastOutgoing?.translation else {
-            return status("Đã dịch", symbol: "checkmark.circle.fill")
+    private func openInfo() {
+        switch info {
+        case .idle, .message:
+            openOverview()
+        case .copied:
+            translateCopied()
+        case .incomingBusy:
+            break
+        case .incoming(let source, let translation):
+            presentIncoming(source: source, translation: translation)
+        case .outgoing:
+            openOutgoingCheck()
         }
-        let open: () -> Void = { [weak self] in self?.openOutgoingCheck() }
-        if let note = translation.note {
-            return line("Lưu ý: \(note)", symbol: "exclamationmark.triangle.fill", tint: Brand.gold, action: open)
-        }
-        if let meaning = translation.meaning {
-            return line("Nghĩa: \(meaning)", symbol: "checkmark.circle.fill", tint: Brand.green, action: open)
-        }
-        return line("Đã dịch sang \(translation.language.name)", symbol: "checkmark.circle.fill", tint: Brand.green, action: open)
     }
 
     private func languageChips() -> UIView {
@@ -447,34 +511,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
         b.setContentHuggingPriority(.required, for: .horizontal)
         b.setContentCompressionResistancePriority(.required, for: .horizontal)
-        return b
-    }
-
-    /// One line of text after a coloured icon, cut to fit; a tap opens the details.
-    /// The icon carries the colour (orange: partner, green: you, gold: check this, red: problem);
-    /// the text stays in the label colour so it reads on the keyboard background.
-    private func line(_ text: String, symbol: String, tint: UIColor, accessibility: String? = nil,
-                      action: @escaping () -> Void) -> UIButton {
-        var c = UIButton.Configuration.plain()
-        c.title = text
-        c.titleLineBreakMode = .byTruncatingTail
-        c.image = UIImage(systemName: symbol)
-        c.imagePadding = 6
-        c.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
-        c.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        c.baseForegroundColor = .label
-        c.imageColorTransformer = UIConfigurationColorTransformer { _ in tint }
-        c.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var a = attributes
-            a.font = .systemFont(ofSize: 15)
-            return a
-        }
-        let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
-        b.contentHorizontalAlignment = .leading
-        b.accessibilityLabel = accessibility ?? text
-        b.accessibilityHint = "Chạm để xem đầy đủ"
-        b.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        b.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return b
     }
 
@@ -636,16 +672,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         var parts = [("Bạn viết", true), (outgoing.original, false), ("Đã đổi sang \(t.language.name)", true), (t.text, false)]
         if let meaning = t.meaning { parts += [("Nghĩa khi dịch ngược", true), (meaning, false)] }
         if let note = t.note { parts += [("Lưu ý", true), (note, false)] }
-        showPanel("Kiểm tra bản dịch", parts, button: "Hoàn tác, lấy lại câu gốc",
-                  done: { [weak self] in self?.mode = .done }) { [weak self] in self?.undo() }
+        showPanel("Kiểm tra bản dịch", parts, button: "Hoàn tác, lấy lại câu gốc") { [weak self] in self?.undo() }
     }
 
     private func presentIncoming(source: String, translation: Translation) {
         var parts = [(source, true), ("→ " + translation.text, false)]
         if let note = translation.note { parts.append(("Lưu ý: " + note, true)) }
-        // Once read, the bar goes back to the language; the mark still has it.
-        showPanel("Tin đối tác → Tiếng Việt", parts, button: "Sao chép bản dịch",
-                  done: { [weak self] in self?.info = .idle }) { [weak self] in
+        showPanel("Tin đối tác → Tiếng Việt", parts, button: "Sao chép bản dịch") { [weak self] in
             UIPasteboard.general.string = translation.text
             SharedStore.handledPasteboard = UIPasteboard.general.changeCount
             self?.panelButton.configuration?.title = "Đã sao chép"
@@ -655,14 +688,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// A long translation of the partner's message opens in full while nothing has been typed
     /// yet: reading comes before replying, and one tap closes it.
     private func expandIfLong(source: String, translation: Translation) {
-        guard mode == .normal, !textDocumentProxy.hasText, !fitsBar(translation.text) else { return }
+        guard mode == .normal, !textDocumentProxy.hasText, !fitsInfoLine(translation.text) else { return }
         presentIncoming(source: source, translation: translation)
     }
 
-    /// Room next to the mark and the Dịch button.
-    private func fitsBar(_ text: String) -> Bool {
+    private func fitsInfoLine(_ text: String) -> Bool {
         guard !text.contains("\n") else { return false }
-        let available = bar.bounds.width - 190
+        let available = infoButton.bounds.width - 64
         guard available > 0 else { return true }
         return (text as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 15)]).width <= available
     }
@@ -740,9 +772,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                         SharedStore.addHistory(HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
                                                            meaning: result.meaning, note: result.note))
                         self?.lastOutgoing = (result, text)
-                        // The partner's message has been answered.
-                        self?.info = .idle
                         self?.mode = .done
+                        self?.info = .outgoing(result, original: text)
                     }
                 } catch is CancellationError {
                 } catch {
@@ -756,6 +787,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         replaceDocument(with: original) { [weak self] in
             self?.lastOutgoing = nil
             self?.mode = .normal
+            self?.info = .idle
         }
     }
 
@@ -854,8 +886,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// done off the main thread, and not while the user is typing: the keys always come first.
     /// The change count and `hasStrings` never ask for paste permission; only reading the text does.
     private func checkPasteboard(waitForTyping: Bool) {
-        guard hasFullAccess, !checkingPasteboard, SharedStore.apiKey != nil else { return }
+        // Typing comes first: nothing is asked while keys are being pressed.
         if waitForTyping && CACurrentMediaTime() - lastKeyAt < 1.5 { return }
+        guard hasFullAccess, !checkingPasteboard, SharedStore.apiKey != nil else { return }
         checkingPasteboard = true
         let handled = SharedStore.handledPasteboard
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -874,7 +907,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// tap unless the user chose instant mode.
     private func pasteboardChecked(changeCount: Int, fresh: Bool) {
         switch info {
-        case .idle, .incoming:
+        case .idle, .incoming, .outgoing:
             guard fresh else { return }
             if SharedStore.instantIncoming, attemptedPasteboard != changeCount {
                 attemptedPasteboard = changeCount
@@ -908,11 +941,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             info = .message("Chưa đọc được tin đã sao chép. Khi iOS hỏi, chọn “Cho phép dán”.")
             return
         }
+        // Whatever was copied is translated into Vietnamese: no guessing whether it already is
+        // (a foreign message that names a Vietnamese person read as Vietnamese).
         SharedStore.handledPasteboard = changeCount
-        guard !LanguageDetector.isVietnamese(copied) else {
-            info = .message("Tin vừa sao chép đã là tiếng Việt.")
-            return
-        }
         SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
         translateIncoming(copied)
     }

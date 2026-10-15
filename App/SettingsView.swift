@@ -141,9 +141,9 @@ struct SettingsView: View {
             Text("Tin đối tác gửi")
         } footer: {
             if instantIncoming {
-                Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay trên thanh dịch, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
+                Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay ở dòng trên cùng của bàn phím, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
             } else {
-                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: thanh dịch hiện nút “Tin copy · Dịch”, chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
+                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
             }
         }
     }

@@ -3,7 +3,7 @@
 Bàn phím iPhone của **Mộc Sinh** để nhắn tin với đối tác nước ngoài:
 
 - **Gõ tiếng Việt như bàn phím Apple** (Telex), có thanh **Dịch** ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ đối tác; **Tự động** trả lời đúng ngôn ngữ đối tác đang dùng (14 ngôn ngữ).
-- **Kiểm tra trước khi gửi**: thanh dịch hiện nghĩa dịch ngược và lưu ý khi câu gốc dễ hiểu sai; có Hoàn tác.
+- **Kiểm tra trước khi gửi**: dòng trên cùng hiện nghĩa dịch ngược và lưu ý khi câu gốc dễ hiểu sai; có Hoàn tác.
 - **Chạm lưng iPhone**: sao chép rồi gõ hai lần vào lưng máy là dịch được cả hai chiều, ở mọi app, không cần mở bàn phím.
 - **Đọc tin đối tác**: sao chép tin rồi chạm vào ô trả lời, bản dịch hiện ngay trên bàn phím (hoặc gõ hai lần vào lưng iPhone để dịch không cần mở bàn phím).
 - **Dịch có ngữ cảnh**: dùng các tin gần nhất của cuộc chat, hồ sơ, cách xưng hô và thuật ngữ của bạn. Mặc định dùng GPT-6.1 Sol để có bản dịch chuẩn nhất.

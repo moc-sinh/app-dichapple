@@ -178,7 +178,12 @@ struct TypedText {
     func explains(before field: String, after fieldAfter: String, now: Double) -> Bool {
         guard let before, fieldAfter == after else { return false }
         if Self.matches(before, field) { return true }
-        return recent.contains { now - $0.at < Self.lag && Self.matches($0.text, field) }
+        // Newest first: an app that is behind is usually only a few keys behind.
+        for snapshot in recent.reversed() {
+            guard now - snapshot.at < Self.lag else { break }
+            if Self.matches(snapshot.text, field) { return true }
+        }
+        return false
     }
 
     /// The field often hands over only part of the text (the current paragraph or sentence).
