@@ -148,9 +148,12 @@ struct SettingsView: View {
         }
     }
 
-    /// Zalo turns off other keyboards in its own screens; the copy-and-Back-Tap shortcut works there.
+    /// An app opened before MSTrans was installed keeps its old list of keyboards until it restarts.
+    /// The copy-and-Back-Tap shortcut works everywhere, even where the keyboard can't be used.
     private var zaloSection: some View {
         Section {
+            StepRow(done: nil, title: "Không thấy MSTrans khi giữ quả địa cầu",
+                    detail: "App đã mở từ trước khi cài MSTrans (hay gặp với Zalo) vẫn giữ danh sách bàn phím cũ. Vuốt lên từ cạnh dưới, gạt app đó đi rồi mở lại. Vẫn chưa có thì khởi động lại iPhone.")
             StepRow(done: nil, title: "1. Tạo phím tắt",
                     detail: "App Phím tắt › + › thêm thao tác “Dịch tin đã sao chép” của MSTrans › Xong.")
             StepRow(done: nil, title: "2. Gán vào chạm lưng iPhone",
@@ -161,9 +164,9 @@ struct SettingsView: View {
                     detail: "Gõ tiếng Việt bằng bàn phím iPhone › chọn hết › Cắt › gõ hai lần vào lưng iPhone › giữ ô chat › Dán.")
             Button("Mở app Phím tắt", action: openShortcutsApp)
         } header: {
-            Text("Dùng trong Zalo")
+            Text("Zalo và các app khác")
         } footer: {
-            Text("Zalo không cho bàn phím ngoài hiện trong app của họ, nên khi giữ quả địa cầu sẽ không thấy MSTrans. Cùng một lần chạm lưng: tin của đối tác được dịch sang tiếng Việt, câu tiếng Việt của bạn được dịch sang tiếng đối tác và chép sẵn để dán.")
+            Text("Chạm lưng iPhone dịch được ở mọi app, cả khi không mở bàn phím: tin của đối tác được dịch sang tiếng Việt, câu tiếng Việt của bạn được dịch sang tiếng đối tác và chép sẵn để dán.")
         }
     }
 

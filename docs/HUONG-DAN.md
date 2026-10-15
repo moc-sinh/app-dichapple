@@ -48,7 +48,7 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 ## 5. Dùng hằng ngày
 
 **Trả lời đối tác**
-1. Trong WhatsApp, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex). Zalo không cho dùng bàn phím ngoài: xem mục **Dùng trong Zalo** bên dưới.
+1. Trong Zalo, WhatsApp, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex).
 2. Bấm **Dịch** (nút xanh): cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, bàn phím tự trả lời đúng ngôn ngữ đối tác đang dùng.
 3. Thanh dịch hiện **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, thanh hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
 
@@ -56,15 +56,19 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 - Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên thanh dịch, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: thanh dịch hiện nút **Tin copy · Dịch**, chạm một lần.
 - Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa, lưu ý) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
 
-**Dùng trong Zalo**
+**Không thấy MSTrans trong một app (ví dụ Zalo)**
 
-Zalo không cho bàn phím ngoài hiện trong app của họ: giữ quả địa cầu trong Zalo sẽ không thấy MSTrans (WhatsApp, Messenger… vẫn dùng được). Trong Zalo, dùng chạm lưng iPhone, một lần thiết lập:
+App đã mở từ trước khi cài (hoặc cài lại) MSTrans vẫn giữ danh sách bàn phím cũ, nên giữ quả địa cầu không thấy MSTrans. Vuốt lên từ cạnh dưới màn hình, gạt app đó đi rồi mở lại. Vẫn chưa có thì khởi động lại iPhone.
+
+**Dịch bằng chạm lưng iPhone** (mọi app, không cần mở bàn phím)
+
+Một lần thiết lập:
 1. Mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › Xong.
 2. Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt vừa tạo.
 
 Từ đó, cùng một cái chạm làm cả hai chiều:
 - **Đọc**: giữ tin đối tác › Sao chép › gõ hai lần vào lưng iPhone: bản dịch tiếng Việt hiện lên.
-- **Trả lời**: gõ tiếng Việt bằng bàn phím iPhone (Tiếng Việt Telex) › chạm giữ ô chat › **Chọn tất cả** › **Cắt** › gõ hai lần vào lưng iPhone: MSTrans dịch sang tiếng đối tác và chép sẵn bản dịch › chạm giữ ô chat › **Dán** › gửi.
+- **Trả lời**: gõ tiếng Việt bằng bàn phím bất kỳ › chạm giữ ô chat › **Chọn tất cả** › **Cắt** › gõ hai lần vào lưng iPhone: MSTrans dịch sang tiếng đối tác và chép sẵn bản dịch › chạm giữ ô chat › **Dán** › gửi.
 
 Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím tắt vừa tạo, thêm thao tác **Lấy bảng tạm** lên trước thao tác MSTrans. Nếu báo “chưa tự chép được”: thêm thao tác **Sao chép vào bảng tạm** sau thao tác MSTrans.
 

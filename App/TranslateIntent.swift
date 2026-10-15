@@ -4,11 +4,11 @@ import UIKit
 /// "Dịch tin đã sao chép", both ways, for Back Tap or the Action button:
 /// - a partner's message → read it in Vietnamese, without opening the keyboard;
 /// - your own Vietnamese → translated into the partner's language and put on the clipboard,
-///   ready to paste. That is how to reply in apps that turn off other keyboards, such as Zalo.
+///   ready to paste. That works in any app, even where the MSTrans keyboard can't be opened.
 struct TranslateCopiedIntent: AppIntent {
     static let title: LocalizedStringResource = "Dịch tin đã sao chép"
     static let description = IntentDescription(
-        "Tin của đối tác: dịch sang tiếng Việt. Câu tiếng Việt của bạn: dịch sang tiếng của đối tác và chép sẵn để dán (dùng cho Zalo).")
+        "Tin của đối tác: dịch sang tiếng Việt. Câu tiếng Việt của bạn: dịch sang tiếng của đối tác và chép sẵn để dán.")
     static let openAppWhenRun = false
 
     @Parameter(title: "Tin nhắn", description: "Để trống để dùng tin vừa sao chép")
