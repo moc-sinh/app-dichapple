@@ -43,6 +43,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var task: Task<Void, Never>?
     private var incomingTask: Task<Void, Never>?
     private var pollTimer: Timer?
+    /// The clipboard already read (or asked about) in instant mode, so iOS isn't asked twice.
+    private var attemptedPasteboard: Int?
 
     // Telex: the word at the cursor while it is being typed.
     private var word = TelexWord()
@@ -130,8 +132,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         mode = .normal
         info = .idle
         refreshIncoming()
+        if hasFullAccess, SharedStore.apiKey != nil { Translator.warmUp() }
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(timeInterval: 1.5, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
+        pollTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -401,14 +404,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .incomingBusy:
             break
         case .incoming(let source, let translation):
-            var parts = [(source, true), ("→ " + translation.text, false)]
-            if let note = translation.note { parts.append(("Lưu ý: " + note, true)) }
-            showPanel(parts, button: "Sao chép bản dịch") { [weak self] in
-                UIPasteboard.general.string = translation.text
-                SharedStore.handledPasteboard = UIPasteboard.general.changeCount
-                self?.panelButton.configuration?.title = "Đã sao chép"
-            }
-            mode = .panel("Tin đối tác → Tiếng Việt")
+            presentIncoming(source: source, translation: translation)
         case .outgoing(let translation, let original):
             var parts = [("Bạn viết", true), (original, false), ("Đã đổi sang \(translation.language.name)", true), (translation.text, false)]
             if let meaning = translation.meaning { parts += [("Nghĩa khi dịch ngược", true), (meaning, false)] }
@@ -416,6 +412,31 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             showPanel(parts, button: "Hoàn tác, lấy lại câu gốc") { [weak self] in self?.undo() }
             mode = .panel("Kiểm tra bản dịch")
         }
+    }
+
+    private func presentIncoming(source: String, translation: Translation) {
+        var parts = [(source, true), ("→ " + translation.text, false)]
+        if let note = translation.note { parts.append(("Lưu ý: " + note, true)) }
+        showPanel(parts, button: "Sao chép bản dịch") { [weak self] in
+            UIPasteboard.general.string = translation.text
+            SharedStore.handledPasteboard = UIPasteboard.general.changeCount
+            self?.panelButton.configuration?.title = "Đã sao chép"
+        }
+        mode = .panel("Tin đối tác → Tiếng Việt")
+    }
+
+    /// A long translation of the partner's message opens in full while nothing has been typed
+    /// yet: reading comes before replying, and one tap closes it.
+    private func expandIfLong(source: String, translation: Translation) {
+        guard mode == .normal, !textDocumentProxy.hasText, !fitsInfoLine(translation.text) else { return }
+        presentIncoming(source: source, translation: translation)
+    }
+
+    private func fitsInfoLine(_ text: String) -> Bool {
+        guard !text.contains("\n") else { return false }
+        let available = infoButton.bounds.width - 64
+        guard available > 0 else { return true }
+        return (text as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 15)]).width <= available
     }
 
     private func openContext() {
@@ -702,52 +723,129 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private func translateDraft() {
         guard let apiKey = readyKey() else { return }
-        let proxy = textDocumentProxy
-        let text = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "") + (proxy.documentContextAfterInput ?? "")
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            mode = .failed(TranslateError.empty.errorDescription ?? "")
-            return
-        }
         let context = SharedStore.context()
         let target = resolvedTarget(context: context)
         activeTarget = target
         mode = .busy
         task?.cancel()
-        task = Task { [weak self] in
-            do {
-                let result = try await Translator(apiKey: apiKey)
-                    .translate(text, to: target, context: context, checkMeaning: SharedStore.checkMeaning)
-                guard let self, !Task.isCancelled else { return }
-                self.original = text
-                self.replaceAll(with: result.text)
-                SharedStore.remember(ChatLine(side: .me, text: result.text, date: Date()))
-                SharedStore.addHistory(HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
-                                                   meaning: result.meaning, note: result.note))
-                self.mode = .done
-                self.info = .outgoing(result, original: text)
-            } catch is CancellationError {
-            } catch {
-                self?.mode = .failed(error.localizedDescription)
+        readDocument { [weak self] text in
+            guard let self, self.mode == .busy, self.view.window != nil else { return }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.mode = .failed(TranslateError.empty.errorDescription ?? "")
+                return
+            }
+            self.task = Task { [weak self] in
+                do {
+                    let result = try await Translator(apiKey: apiKey)
+                        .translate(text, to: target, context: context, checkMeaning: SharedStore.checkMeaning)
+                    guard let self, !Task.isCancelled else { return }
+                    self.original = text
+                    self.replaceDocument(with: result.text) { [weak self] in
+                        SharedStore.remember(ChatLine(side: .me, text: result.text, date: Date()))
+                        SharedStore.addHistory(HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
+                                                           meaning: result.meaning, note: result.note))
+                        self?.mode = .done
+                        self?.info = .outgoing(result, original: text)
+                    }
+                } catch is CancellationError {
+                } catch {
+                    self?.mode = .failed(error.localizedDescription)
+                }
             }
         }
     }
 
-    /// Replaces everything in the text field.
-    private func replaceAll(with text: String) {
-        let proxy = textDocumentProxy
-        if let selected = proxy.selectedText, !selected.isEmpty { proxy.deleteBackward() }
-        let before = proxy.documentContextBeforeInput ?? ""
-        let after = proxy.documentContextAfterInput ?? ""
-        if !after.isEmpty { proxy.adjustTextPosition(byCharacterOffset: after.utf16.count) }
-        for _ in 0..<(before.count + after.count) { proxy.deleteBackward() }
-        proxy.insertText(text)
-        resetComposing()
+    private func undo() {
+        replaceDocument(with: original) { [weak self] in
+            self?.mode = .normal
+            self?.info = .idle
+        }
     }
 
-    private func undo() {
-        replaceAll(with: original)
-        mode = .normal
-        info = .idle
+    // MARK: The whole text field
+
+    /// iOS hands a keyboard only the text near the cursor, usually the current paragraph, and
+    /// reports a cursor move only after the current turn of the run loop. So the cursor walks to
+    /// the end of the field, back over it a paragraph at a time, and to the end again.
+    private func readDocument(_ completion: @escaping (String) -> Void) {
+        let proxy = textDocumentProxy
+        var collected = ""
+        var steps = 0
+
+        func back() {
+            steps += 1
+            let before = proxy.documentContextBeforeInput ?? ""
+            if !before.isEmpty, steps < 80 {
+                collected = before + collected
+                proxy.adjustTextPosition(byCharacterOffset: -before.utf16.count)
+                return tick(back)
+            }
+            // Nothing before the cursor means the start of the field, or of a paragraph: step
+            // over one character and see whether the field moved.
+            let after = proxy.documentContextAfterInput ?? ""
+            proxy.adjustTextPosition(byCharacterOffset: -1)
+            tick {
+                let moved = !(proxy.documentContextBeforeInput ?? "").isEmpty || (proxy.documentContextAfterInput ?? "") != after
+                if moved, steps < 80 {
+                    collected = "\n" + collected
+                    return back()
+                }
+                proxy.adjustTextPosition(byCharacterOffset: collected.utf16.count)
+                tick { completion(collected) }
+            }
+        }
+
+        moveToEnd {
+            steps = 0
+            back()
+        }
+    }
+
+    private func moveToEnd(_ completion: @escaping () -> Void) {
+        let proxy = textDocumentProxy
+        var steps = 0
+        func forward() {
+            steps += 1
+            let after = proxy.documentContextAfterInput ?? ""
+            if !after.isEmpty, steps < 80 {
+                proxy.adjustTextPosition(byCharacterOffset: after.utf16.count)
+                return tick(forward)
+            }
+            let before = proxy.documentContextBeforeInput ?? ""
+            proxy.adjustTextPosition(byCharacterOffset: 1)
+            tick {
+                let moved = (proxy.documentContextBeforeInput ?? "") != before || (proxy.documentContextAfterInput ?? "") != after
+                if moved, steps < 80 { return forward() }
+                completion()
+            }
+        }
+        forward()
+    }
+
+    /// Replaces the whole field: from the end, deletes a paragraph at a time until the field
+    /// says it is empty, then inserts.
+    private func replaceDocument(with text: String, completion: @escaping () -> Void) {
+        let proxy = textDocumentProxy
+        var steps = 0
+        var emptyRounds = 0
+        func clear() {
+            steps += 1
+            let before = proxy.documentContextBeforeInput ?? ""
+            let after = proxy.documentContextAfterInput ?? ""
+            emptyRounds = before.isEmpty && after.isEmpty ? emptyRounds + 1 : 0
+            guard proxy.hasText, emptyRounds < 3, steps < 80 else {
+                proxy.insertText(text)
+                resetComposing()
+                return completion()
+            }
+            for _ in 0..<max(1, before.count) { proxy.deleteBackward() }
+            tick(clear)
+        }
+        moveToEnd(clear)
+    }
+
+    private func tick(_ work: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: work)
     }
 
     // MARK: Translating the partner's messages
@@ -766,7 +864,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         guard SharedStore.autoIncoming, hasFullAccess, SharedStore.apiKey != nil else { return }
         // Offered whenever the line is free, so pressing Dịch first or a denied paste doesn't lose it.
         switch info {
-        case .idle where hasNewCopy: info = .copied
+        case .idle where hasNewCopy:
+            // Instant mode reads each copy once by itself; after that the offer stays for a tap.
+            let changeCount = UIPasteboard.general.changeCount
+            if SharedStore.instantIncoming, attemptedPasteboard != changeCount {
+                attemptedPasteboard = changeCount
+                translateCopied()
+            } else {
+                info = .copied
+            }
         case .copied where !hasNewCopy: info = .idle
         default: break
         }
@@ -802,7 +908,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private func translateIncoming(_ text: String) {
         if let cached = SharedStore.cachedIncoming(text) {
-            info = .incoming(source: text, translation: Translation(text: cached, meaning: nil, note: nil, language: .vietnamese))
+            let translation = Translation(text: cached, meaning: nil, note: nil, language: .vietnamese)
+            info = .incoming(source: text, translation: translation)
+            expandIfLong(source: text, translation: translation)
             return
         }
         guard let apiKey = SharedStore.apiKey else { return }
@@ -818,6 +926,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                                                    note: result.note))
                 guard let self, !Task.isCancelled else { return }
                 self.info = .incoming(source: text, translation: result)
+                self.expandIfLong(source: text, translation: result)
             } catch is CancellationError {
             } catch {
                 self?.info = .message(error.localizedDescription)

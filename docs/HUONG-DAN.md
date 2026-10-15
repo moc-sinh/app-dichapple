@@ -38,7 +38,8 @@ Mở MSTrans › tab **Cài đặt**, mục **Bắt đầu** có sẵn từng b�
 1. Thêm bàn phím MSTrans: Cài đặt › Cài đặt chung › Bàn phím › Bàn phím › Thêm bàn phím mới › MSTrans. Chạm MSTrans trong danh sách, bật **Cho phép truy cập đầy đủ**.
 2. Dán API key OpenAI ở mục **OpenAI**, bấm **Kiểm tra kết nối**.
 3. Mục **Về bạn**: chọn giới tính, ghi cách xưng hô (ví dụ “tôi xưng em, gọi đối tác là anh”) và vài dòng về công việc. Tab **Thuật ngữ**: thêm tên sản phẩm, thuật ngữ ngành để bản dịch luôn dùng đúng từ.
-4. Lần đầu dịch tin đã sao chép, iOS hỏi “Cho phép dán”: chọn **Cho phép dán**. Để không bị hỏi lại: Cài đặt › MSTrans › **Dán từ ứng dụng khác** › **Cho phép**.
+4. Cài đặt iPhone › MSTrans › **Dán từ ứng dụng khác** › **Cho phép**. Không đặt thì lần đầu dịch tin đã sao chép iOS hỏi “Cho phép dán”, và chạm vào ô trả lời là phải chạm thêm một lần nữa.
+5. Trong app, mục **Tin đối tác gửi**, bật **Dịch ngay khi mở bàn phím**: từ đó sao chép tin rồi chạm vào ô trả lời là bản dịch hiện ngay.
 
 Bước “Cho phép truy cập đầy đủ” được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu.
 
@@ -52,7 +53,7 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 3. Dòng trên cùng hiện **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, dòng này hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”: chạm một lần là có bản dịch.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần.
 - **Đọc mà không mở bàn phím**: mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › đặt tên. Rồi vào Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt đó. Từ đó: sao chép tin, gõ hai lần vào lưng iPhone là bản dịch hiện lên.
 
 **Trong app MSTrans**
@@ -92,7 +93,9 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
-- Bàn phím không bao giờ tự đọc bộ nhớ tạm, nên không bị iOS chặn lúc mở; chỉ đọc khi bạn chạm để dịch, và đọc ở luồng nền.
+- Bàn phím đọc bộ nhớ tạm ở luồng nền (khi bạn chạm để dịch, hoặc ngay lúc mở nếu bật Dịch ngay), nên dù iOS có hỏi quyền dán thì phím vẫn hiện và gõ được.
+- Mở bàn phím là kết nối tới OpenAI được mở sẵn, nên lần bấm Dịch đầu tiên không mất thêm thời gian bắt tay mạng. Mạng rớt hay máy chủ bận thì tự thử lại một lần.
+- Bấm Dịch là dịch cả tin, kể cả khi tin có nhiều dòng (iOS chỉ đưa cho bàn phím đoạn đang gõ, bàn phím tự đọc hết các đoạn còn lại).
 
 ## Cần thử trên máy thật
 

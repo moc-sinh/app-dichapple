@@ -181,6 +181,9 @@ if group_dir:
         with open(path, "rb") as f:
             values = plistlib.load(f)
     values["apiKey"] = "sk-ci-smoke-test"
+    # Instant mode reads the clipboard as the keyboard opens; iOS then asks for paste permission.
+    # The keys must still draw while that prompt waits (the main thread stays free).
+    values["instantIncoming"] = True
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)

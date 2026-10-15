@@ -1,7 +1,7 @@
 import Foundation
 
 enum TranslateError: LocalizedError {
-    case noKey, noFullAccess, empty, network, formatUnsupported, server(String)
+    case noKey, noFullAccess, empty, network, busy, formatUnsupported, server(String)
 
     var errorDescription: String? {
         switch self {
@@ -9,8 +9,17 @@ enum TranslateError: LocalizedError {
         case .noFullAccess: return "Bật “Cho phép truy cập đầy đủ” cho bàn phím MSTrans."
         case .empty: return "Ô nhập đang trống."
         case .network: return "Không kết nối được. Kiểm tra mạng rồi thử lại."
+        case .busy: return "Máy chủ OpenAI đang bận. Thử lại."
         case .formatUnsupported: return "Model không hỗ trợ kiểu trả lời này."
         case .server(let message): return message
+        }
+    }
+
+    /// Worth one more try without bothering the user.
+    var isTransient: Bool {
+        switch self {
+        case .network, .busy: return true
+        default: return false
         }
     }
 }
@@ -71,7 +80,29 @@ struct Translator {
         return Self.parse(output, language: target)
     }
 
+    /// Opens the connection to OpenAI before it is needed, so the first Dịch doesn't also wait
+    /// for DNS and TLS. A HEAD without a key is refused at once and costs nothing.
+    private static var warmedAt = Date.distantPast
+    static func warmUp() {
+        guard Date().timeIntervalSince(warmedAt) > 45 else { return }
+        warmedAt = Date()
+        var request = URLRequest(url: Config.endpoint)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 10
+        session.dataTask(with: request).resume()
+    }
+
+    /// One quick retry covers a dropped connection or a busy server without the user noticing.
     private func send(_ body: [String: Any]) async throws -> [String: Any] {
+        do {
+            return try await sendOnce(body)
+        } catch let error as TranslateError where error.isTransient {
+            try await Task.sleep(nanoseconds: 700_000_000)
+            return try await sendOnce(body)
+        }
+    }
+
+    private func sendOnce(_ body: [String: Any]) async throws -> [String: Any] {
         var request = URLRequest(url: Config.endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -94,6 +125,7 @@ struct Translator {
                ["text.format", "json_schema", "response_format"].contains(where: { message.contains($0) }) {
                 throw TranslateError.formatUnsupported
             }
+            if (500...599).contains(status) { throw TranslateError.busy }
             throw TranslateError.server(explain(status: status, message: message))
         }
         return json
@@ -129,7 +161,6 @@ struct Translator {
         case 401: return "API key không đúng. Kiểm tra lại trong app MSTrans."
         case 404: return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
         case 429: return "Hết hạn mức hoặc gọi quá nhanh. Thử lại sau ít phút."
-        case 500...599: return "Máy chủ OpenAI đang bận. Thử lại."
         default:
             if message.localizedCaseInsensitiveContains("model") {
                 return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."

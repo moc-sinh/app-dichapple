@@ -24,6 +24,7 @@ enum SharedStore {
         static let glossary = "glossary"
         static let checkMeaning = "checkMeaning"
         static let autoIncoming = "autoIncoming"
+        static let instantIncoming = "instantIncoming"
         static let haptics = "haptics"
         static let memory = "memory"
         static let incomingCache = "incomingCache"
@@ -68,6 +69,9 @@ enum SharedStore {
     static var glossary: String { defaults.string(forKey: Key.glossary) ?? "" }
     static var checkMeaning: Bool { defaults.object(forKey: Key.checkMeaning) as? Bool ?? true }
     static var autoIncoming: Bool { defaults.object(forKey: Key.autoIncoming) as? Bool ?? true }
+    /// Read the copied message as the keyboard opens, no tap. Needs paste permission set to
+    /// "Allow" for MSTrans, or iOS asks every time.
+    static var instantIncoming: Bool { defaults.bool(forKey: Key.instantIncoming) }
     static var haptics: Bool { defaults.object(forKey: Key.haptics) as? Bool ?? true }
 
     // MARK: State
