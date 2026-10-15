@@ -97,7 +97,13 @@ run_phase() {
     pid=$(keyboard_pid)
     if [ -n "$pid" ]; then
         echo "Keyboard process: running (pid $pid)"
-        limit 20 footprint "$pid" 2>&1 | head -12
+        limit 20 footprint "$pid" 2>&1 | head -12 | tee "$OUT/$name-footprint.txt"
+        # iOS stops keyboards at roughly 48-70 MB; keep well under.
+        mb=$(sed -n 's/.*Footprint: \([0-9]*\) MB.*/\1/p' "$OUT/$name-footprint.txt" | head -1)
+        if [ "${mb:-0}" -ge 45 ]; then
+            FAILED=1
+            echo "::error::The keyboard uses $mb MB in phase '$name'"
+        fi
     else
         echo "Keyboard process: not running"
     fi
