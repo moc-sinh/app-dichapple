@@ -172,6 +172,7 @@ struct TranslateView: View {
                     }
                     .labelStyle(.titleAndIcon)
                     .buttonBorderShape(.capsule)
+                    .tint(.brandGreenFill)
                 } else {
                     Button {
                         text = ""

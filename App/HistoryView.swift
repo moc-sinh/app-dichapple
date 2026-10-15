@@ -55,7 +55,7 @@ struct HistoryView: View {
                                     Button { toggleStar(item) } label: {
                                         Label(item.starred ? "Bỏ đánh dấu" : "Đánh dấu", systemImage: item.starred ? "star.slash" : "star.fill")
                                     }
-                                    .tint(.brandGold)
+                                    .tint(.brandGoldFill)
                                 }
                                 .contextMenu {
                                     Button { Clipboard.copy(item.translation) } label: { Label("Chép bản dịch", systemImage: "doc.on.doc") }

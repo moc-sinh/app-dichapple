@@ -34,9 +34,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Cài đặt")
         }
-        .onAppear { setup = .current }
+        .onAppear(perform: refresh)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { setup = .current }
+            if phase == .active { refresh() }
         }
         .onChange(of: apiKey) { _, _ in
             setup = .current
@@ -198,6 +198,11 @@ struct SettingsView: View {
     }
 
     // MARK: Actions
+
+    private func refresh() {
+        setup = .current
+        contextCleared = false
+    }
 
     private func test() {
         testing = true

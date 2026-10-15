@@ -40,13 +40,18 @@ extension SharedStore {
     }
 
     static func history() -> [HistoryItem] {
+        (try? storedHistory()) ?? []
+    }
+
+    /// Throws when saved history cannot be read, so the writers below leave it untouched
+    /// instead of replacing it with an empty list.
+    private static func storedHistory() throws -> [HistoryItem] {
         guard let data = defaults.data(forKey: historyKey) else { return [] }
-        return (try? JSONDecoder().decode([HistoryItem].self, from: data)) ?? []
+        return try JSONDecoder().decode([HistoryItem].self, from: data)
     }
 
     static func addHistory(_ item: HistoryItem) {
-        guard keepHistory else { return }
-        var items = history()
+        guard keepHistory, var items = try? storedHistory() else { return }
         if let first = items.first, first.source == item.source, first.translation == item.translation { return }
         items.insert(item, at: 0)
         // Starred items are never dropped to make room.
@@ -61,13 +66,13 @@ extension SharedStore {
     }
 
     static func updateHistory(_ item: HistoryItem) {
-        var items = history()
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        guard var items = try? storedHistory(), let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index] = item
         saveHistory(items)
     }
 
     static func removeHistory(id: UUID) {
-        saveHistory(history().filter { $0.id != id })
+        guard let items = try? storedHistory() else { return }
+        saveHistory(items.filter { $0.id != id })
     }
 }

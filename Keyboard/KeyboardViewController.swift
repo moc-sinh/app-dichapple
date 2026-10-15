@@ -44,7 +44,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var incomingTask: Task<Void, Never>?
     private var pollTimer: Timer?
     private var lastIncoming = ""
-    private var lastPasteboardCheck = -1
 
     // Telex: the word at the cursor while it is being typed.
     private var word = TelexWord()
@@ -367,6 +366,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         c.image = UIImage(systemName: symbol)
         c.baseForegroundColor = text
         c.imageColorTransformer = UIConfigurationColorTransformer { _ in tint }
+        // VoiceOver hears whose message it is; sighted users get it from the icon and its colour.
+        if case .incoming = info {
+            infoButton.accessibilityLabel = "Tin đối tác, bằng tiếng Việt: \(title)"
+        } else {
+            infoButton.accessibilityLabel = title
+        }
         c.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var a = attributes
             a.font = .systemFont(ofSize: 15)
@@ -428,6 +433,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             let title = targetCode == Language.autoCode ? "Tự động · \(target.label)" : "Việt → \(target.label)"
             let language = pill(title, image: "chevron.down", trailingImage: true) { [weak self] in self?.mode = .picking }
             language.accessibilityLabel = "Ngôn ngữ dịch: \(target.name)"
+            // On narrow iPhones this pill gives way (and truncates) before the Dịch button does.
+            language.configuration?.titleLineBreakMode = .byTruncatingTail
+            language.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             bar.addArrangedSubview(language)
             bar.addArrangedSubview(spacer())
             if !SharedStore.autoIncoming && hasNewCopy {
@@ -477,11 +485,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         ])
         let options = [(Language.autoCode, "Tự động")] + Language.all.map { ($0.code, $0.label) }
         for (code, label) in options {
-            stack.addArrangedSubview(pill(label, style: code == targetCode ? .primary : .plain) { [weak self] in
+            let chip = pill(label, style: code == targetCode ? .primary : .plain) { [weak self] in
                 self?.targetCode = code
                 SharedStore.targetCode = code
                 self?.mode = .normal
-            })
+            }
+            if code == targetCode { chip.accessibilityTraits.insert(.selected) }
+            stack.addArrangedSubview(chip)
         }
         scroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
         scroll.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -702,9 +712,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     // MARK: Translating the partner's messages
 
+    /// Text was copied and not translated yet. The change count and `hasStrings` never ask for
+    /// paste permission; only reading the text does.
     private var hasNewCopy: Bool {
-        hasFullAccess && UIPasteboard.general.hasStrings
-            && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
+        hasFullAccess && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
+            && UIPasteboard.general.hasStrings
     }
 
     /// Translates the partner's newest message on screen as soon as it appears; each message once.
@@ -713,12 +725,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// keyboard from ever drawing (iOS then switched back to the Apple keyboard).
     private func refreshIncoming() {
         guard SharedStore.autoIncoming, hasFullAccess, SharedStore.apiKey != nil else { return }
-        let changeCount = UIPasteboard.general.changeCount
-        if changeCount != lastPasteboardCheck {
-            lastPasteboardCheck = changeCount
-            if hasNewCopy {
-                if case .incomingBusy = info {} else { info = .copied }
-            }
+        // Offered whenever the line is free, so pressing Dịch first or a denied paste doesn't lose it.
+        switch info {
+        case .idle where hasNewCopy: info = .copied
+        case .copied where !hasNewCopy: info = .idle
+        default: break
         }
         guard let line = SharedStore.screenLines().last(where: { $0.side == .partner }),
               !similar(line.text, lastIncoming), !LanguageDetector.isVietnamese(line.text) else { return }
@@ -730,20 +741,22 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// responsive while iOS asks for paste permission.
     private func translateCopied() {
         guard readyKey() != nil else { return }
-        SharedStore.handledPasteboard = UIPasteboard.general.changeCount
+        let changeCount = UIPasteboard.general.changeCount
         mode = .normal
         info = .incomingBusy
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            DispatchQueue.main.async { self?.received(copied: copied) }
+            DispatchQueue.main.async { self?.received(copied: copied, changeCount: changeCount) }
         }
     }
 
-    private func received(copied: String) {
+    private func received(copied: String, changeCount: Int) {
+        // Nothing read usually means paste was not allowed; keep offering it so it can be retried.
         guard !copied.isEmpty else {
             info = .message("Chưa đọc được tin đã sao chép. Khi iOS hỏi, chọn “Cho phép dán”.")
             return
         }
+        SharedStore.handledPasteboard = changeCount
         guard !LanguageDetector.isVietnamese(copied) else {
             info = .message("Tin vừa sao chép đã là tiếng Việt.")
             return

@@ -16,6 +16,8 @@ enum Brand {
     static let orange = UIColor(light: 0xB9461A, dark: 0xF07A47)
     /// Notes worth a second look. #8F6200 on white 5.4:1; #E8B04A on #1C1C1E 8.7:1.
     static let gold = UIColor(light: 0x8F6200, dark: 0xE8B04A)
+    /// Behind white labels (swipe actions). White on #8F6200 5.4:1 in both appearances.
+    static let goldFill = UIColor(rgb: 0x8F6200)
     /// Soft backgrounds behind green, orange or gold content.
     static let greenWash = UIColor(light: 0xE7F2EC, dark: 0x16271E)
     static let orangeWash = UIColor(light: 0xFCEDE6, dark: 0x2E1C14)

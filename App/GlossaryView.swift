@@ -130,6 +130,10 @@ struct TermEditor: View {
                         .autocorrectionDisabled()
                 } header: {
                     Text("Từ hoặc cụm từ")
+                } footer: {
+                    if term.source.contains("=") {
+                        Text("Từ gốc không được chứa dấu “=”.").foregroundStyle(.red)
+                    }
                 }
                 Section {
                     TextField("Ví dụ: trục chính", text: $term.target)
@@ -153,7 +157,8 @@ struct TermEditor: View {
                         onSave(term)
                         dismiss()
                     }
-                    .disabled(term.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    // "=" separates the term from its translation in the saved list.
+                    .disabled(term.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || term.source.contains("="))
                 }
             }
             .onAppear { focused = isNew }

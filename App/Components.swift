@@ -6,6 +6,7 @@ extension Color {
     static let brandGreenFill = Color(uiColor: Brand.greenFill)
     static let brandOrange = Color(uiColor: Brand.orange)
     static let brandGold = Color(uiColor: Brand.gold)
+    static let brandGoldFill = Color(uiColor: Brand.goldFill)
     static let greenWash = Color(uiColor: Brand.greenWash)
     static let orangeWash = Color(uiColor: Brand.orangeWash)
     static let goldWash = Color(uiColor: Brand.goldWash)
