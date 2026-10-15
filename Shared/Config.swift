@@ -27,8 +27,6 @@ enum Config {
     static let contextCharacterLimit = 2_500
     /// Remembered (copied or sent) messages expire after this.
     static let memoryMaxAge: TimeInterval = 45 * 60
-    /// Text read from the screen counts as current for this long.
-    static let screenMaxAge: TimeInterval = 2 * 60
 }
 
 /// Which OpenAI model translates.
@@ -83,29 +81,27 @@ struct Language: Equatable {
     let name: String
     /// English name, used in prompts.
     let englishName: String
-    /// Vision OCR language for messages written in this language.
-    let ocrCode: String?
 
     /// Translate into whatever language the partner writes in.
     static let autoCode = "auto"
 
-    static let vietnamese = Language(code: "vi", label: "Tiếng Việt", name: "tiếng Việt", englishName: "Vietnamese", ocrCode: "vi-VT")
+    static let vietnamese = Language(code: "vi", label: "Tiếng Việt", name: "tiếng Việt", englishName: "Vietnamese")
 
     static let all = [
-        Language(code: "zh", label: "中文", name: "tiếng Trung", englishName: "Simplified Chinese (Mainland China)", ocrCode: "zh-Hans"),
-        Language(code: "zh-Hant", label: "繁體中文", name: "tiếng Trung phồn thể", englishName: "Traditional Chinese (Taiwan)", ocrCode: "zh-Hant"),
-        Language(code: "en", label: "English", name: "tiếng Anh", englishName: "English", ocrCode: "en-US"),
-        Language(code: "ko", label: "한국어", name: "tiếng Hàn", englishName: "Korean", ocrCode: "ko-KR"),
-        Language(code: "ja", label: "日本語", name: "tiếng Nhật", englishName: "Japanese", ocrCode: "ja-JP"),
-        Language(code: "th", label: "ไทย", name: "tiếng Thái", englishName: "Thai", ocrCode: "th-TH"),
-        Language(code: "id", label: "Indonesia", name: "tiếng Indonesia", englishName: "Indonesian", ocrCode: "id-ID"),
-        Language(code: "ms", label: "Melayu", name: "tiếng Mã Lai", englishName: "Malay", ocrCode: "ms-MY"),
-        Language(code: "ru", label: "Русский", name: "tiếng Nga", englishName: "Russian", ocrCode: "ru-RU"),
-        Language(code: "fr", label: "Français", name: "tiếng Pháp", englishName: "French", ocrCode: "fr-FR"),
-        Language(code: "de", label: "Deutsch", name: "tiếng Đức", englishName: "German", ocrCode: "de-DE"),
-        Language(code: "es", label: "Español", name: "tiếng Tây Ban Nha", englishName: "Spanish", ocrCode: "es-ES"),
-        Language(code: "hi", label: "हिन्दी", name: "tiếng Hindi", englishName: "Hindi", ocrCode: nil),
-        Language(code: "ar", label: "العربية", name: "tiếng Ả Rập", englishName: "Arabic", ocrCode: "ar-SA"),
+        Language(code: "zh", label: "中文", name: "tiếng Trung", englishName: "Simplified Chinese (Mainland China)"),
+        Language(code: "zh-Hant", label: "繁體中文", name: "tiếng Trung phồn thể", englishName: "Traditional Chinese (Taiwan)"),
+        Language(code: "en", label: "English", name: "tiếng Anh", englishName: "English"),
+        Language(code: "ko", label: "한국어", name: "tiếng Hàn", englishName: "Korean"),
+        Language(code: "ja", label: "日本語", name: "tiếng Nhật", englishName: "Japanese"),
+        Language(code: "th", label: "ไทย", name: "tiếng Thái", englishName: "Thai"),
+        Language(code: "id", label: "Indonesia", name: "tiếng Indonesia", englishName: "Indonesian"),
+        Language(code: "ms", label: "Melayu", name: "tiếng Mã Lai", englishName: "Malay"),
+        Language(code: "ru", label: "Русский", name: "tiếng Nga", englishName: "Russian"),
+        Language(code: "fr", label: "Français", name: "tiếng Pháp", englishName: "French"),
+        Language(code: "de", label: "Deutsch", name: "tiếng Đức", englishName: "German"),
+        Language(code: "es", label: "Español", name: "tiếng Tây Ban Nha", englishName: "Spanish"),
+        Language(code: "hi", label: "हिन्दी", name: "tiếng Hindi", englishName: "Hindi"),
+        Language(code: "ar", label: "العربية", name: "tiếng Ả Rập", englishName: "Arabic"),
     ]
 
     static func named(_ code: String) -> Language? { all.first { $0.code == code } }

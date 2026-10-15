@@ -1,4 +1,3 @@
-import ReplayKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -11,7 +10,6 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.addressing, store: SharedStore.defaults) private var addressing = ""
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
     @AppStorage(SharedStore.Key.autoIncoming, store: SharedStore.defaults) private var autoIncoming = true
-    @AppStorage(SharedStore.Key.useScreen, store: SharedStore.defaults) private var useScreen = true
     @AppStorage(SharedStore.Key.haptics, store: SharedStore.defaults) private var haptics = true
     @AppStorage(SharedStore.keepHistoryKey, store: SharedStore.defaults) private var keepHistory = true
     @Environment(\.scenePhase) private var scenePhase
@@ -48,7 +46,7 @@ struct SettingsView: View {
 
     private var setupSection: some View {
         Section {
-            StepRow(done: setup.keyboardReady, title: "Thêm bàn phím MSTrans",
+            StepRow(done: setup.keyboardAdded || setup.keyboardReady, title: "Thêm bàn phím MSTrans",
                     detail: "Cài đặt › Cài đặt chung › Bàn phím › Bàn phím › Thêm bàn phím mới › MSTrans")
             StepRow(done: setup.keyboardReady, title: "Bật “Cho phép truy cập đầy đủ”",
                     detail: "Chạm MSTrans trong danh sách bàn phím rồi bật. Cần để gửi câu bạn bấm Dịch tới OpenAI.")
@@ -64,7 +62,7 @@ struct SettingsView: View {
         } header: {
             Text("Bắt đầu")
         } footer: {
-            Text("Bước 1 và 2 được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu. Bàn phím không hiện? Mở Chẩn đoán bàn phím và gửi báo cáo.")
+            Text("Bước 2 được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu. Bàn phím không hiện? Mở Chẩn đoán bàn phím và gửi báo cáo.")
         }
     }
 
@@ -134,22 +132,11 @@ struct SettingsView: View {
 
     private var incomingSection: some View {
         Section {
-            Toggle("Tự dịch tin mới của đối tác", isOn: $autoIncoming)
-            Toggle("Đọc màn hình làm ngữ cảnh", isOn: $useScreen)
-            if useScreen {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Bật đọc màn hình")
-                        Text("Chạm nút ghi rồi chọn Bắt đầu phát").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    BroadcastButton().frame(width: 44, height: 44)
-                }
-            }
+            Toggle("Mời dịch tin vừa sao chép", isOn: $autoIncoming)
         } header: {
             Text("Tin đối tác gửi")
         } footer: {
-            Text("Khi đọc màn hình đang bật, bản dịch tin mới nhất của đối tác hiện ngay trên bàn phím. Tin bạn vừa sao chép: bàn phím mời bạn chạm để dịch. Đọc màn hình chạy trên máy, không lưu ảnh.")
+            Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”. Khi tắt, dùng nút “Tin copy” trên thanh dịch.")
         }
     }
 
@@ -245,30 +232,5 @@ struct StepRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(done == true ? "Đã xong" : (done == nil ? "" : "Chưa xong"))
-    }
-}
-
-/// The system button that starts the screen broadcast into the screen-reading extension.
-private struct BroadcastButton: UIViewRepresentable {
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-        picker.preferredExtension = Self.screenExtensionID()
-        picker.showsMicrophoneButton = false
-        return picker
-    }
-
-    func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
-
-    /// The broadcast extension's real bundle ID (sideloading tools may rename it).
-    private static func screenExtensionID() -> String? {
-        guard let plugins = Bundle.main.builtInPlugInsURL,
-              let items = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil) else { return nil }
-        for url in items where url.pathExtension == "appex" {
-            guard let bundle = Bundle(url: url),
-                  let ext = bundle.object(forInfoDictionaryKey: "NSExtension") as? [String: Any],
-                  ext["NSExtensionPointIdentifier"] as? String == "com.apple.broadcast-services-upload" else { continue }
-            return bundle.bundleIdentifier
-        }
-        return nil
     }
 }

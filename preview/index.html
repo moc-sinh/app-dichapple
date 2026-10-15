@@ -178,13 +178,11 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       <ol>
         <li>Gõ trên bàn phím như iPhone. Kiểu Telex: <kbd>aa</kbd> ra â, <kbd>w</kbd> ra ư, <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Từ tiếng Anh như <kbd>facebook</kbd>, <kbd>order</kbd> giữ nguyên. Giữ một nguyên âm để chọn dấu. Gõ bằng bàn phím máy tính cũng được.</li>
         <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Dòng trên cùng hiện <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
-        <li>Bấm <b>Đối tác gửi tin mới</b> bên dưới: với đọc màn hình đang bật, bản dịch tiếng Việt hiện ngay ở dòng trên cùng, không cần sao chép.</li>
-        <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm vào là có bản dịch.</li>
+        <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm vào là có bản dịch. Bấm <b>Đối tác gửi tin mới</b> bên dưới để có thêm tin.</li>
         <li>Chạm logo Mộc Sinh bên trái thanh Dịch để xem các tin đang dùng làm ngữ cảnh.</li>
       </ol>
       <div class="sim">
         <button class="btn" id="newmsg" type="button">Đối tác gửi tin mới</button>
-        <button class="btn" id="screen" type="button" aria-pressed="true">Đọc màn hình</button>
         <button class="btn" id="reset" type="button">Làm lại từ đầu</button>
       </div>
       <p class="fine">Đây là bản xem trước trên web, dịch bằng câu mẫu có sẵn (câu soạn sẵn, “xin chào”, “cảm ơn”, “giá bao nhiêu”, “bao giờ giao hàng”). App thật dịch mọi câu bằng GPT-6.1 Sol, dùng ngữ cảnh cuộc chat.</p>
@@ -358,7 +356,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
   function fresh() {
     return { draft: DRAFT, target: 'auto', bar: 'normal', info: { kind: 'idle' }, panel: null, original: '', lastTarget: null,
       shift: 'off', lastShiftTap: 0, page: 'letters', msgs: START.slice(), nextId: 4, next: 0, copiedId: null,
-      screen: true, ctxFrom: 0, word: new Word(), lastSpace: 0 };
+      ctxFrom: 0, word: new Word(), lastSpace: 0 };
   }
   S = fresh();
   var $ = function (id) { return document.getElementById(id); };
@@ -474,7 +472,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     var i = S.info, cls = '', icon = ICON.eye, text = '';
     if (i.kind === 'idle') {
       var n = ctxLines().length;
-      text = S.screen ? 'Đang đọc màn hình · ' + n + ' tin ngữ cảnh' : (n ? 'Ngữ cảnh: ' + n + ' tin gần đây' : 'Chưa có ngữ cảnh');
+      text = n ? 'Ngữ cảnh: ' + n + ' tin gần đây' : 'Chưa có ngữ cảnh';
     } else if (i.kind === 'copied') { cls = 'incoming'; icon = ICON.clip; text = 'Có tin vừa sao chép · chạm để dịch'; }
     else if (i.kind === 'incomingBusy') { text = 'Đang dịch tin mới của đối tác…'; }
     else if (i.kind === 'incoming') { cls = 'incoming'; icon = i.note ? ICON.warn : ICON.bubble; text = i.vi; }
@@ -748,13 +746,9 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
     var msg = { id: S.nextId++, dir: 'in', text: m.text, vi: m.vi, note: m.note };
     S.msgs = S.msgs.concat([msg]); render();
     $('msgs').scrollTop = $('msgs').scrollHeight;
-    if (S.screen) showIncoming(msg);
-  });
-  $('screen').addEventListener('click', function () {
-    S.screen = !S.screen; this.setAttribute('aria-pressed', String(S.screen)); render();
   });
   $('reset').addEventListener('click', function () {
-    clearTimeout(busyTimer); clearTimeout(incomingTimer); S = fresh(); $('screen').setAttribute('aria-pressed', 'true'); afterEdit(); render();
+    clearTimeout(busyTimer); clearTimeout(incomingTimer); S = fresh(); afterEdit(); render();
   });
 
   /* ---------- Fit the phone to the window ---------- */

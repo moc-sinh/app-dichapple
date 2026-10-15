@@ -22,7 +22,7 @@ enum LanguageDetector {
         if let known = Language.named(code) { return known }
         let name = Locale(identifier: "vi").localizedString(forLanguageCode: code) ?? code
         let englishName = Locale(identifier: "en").localizedString(forLanguageCode: code) ?? code
-        return Language(code: code, label: name.capitalized, name: name, englishName: englishName, ocrCode: nil)
+        return Language(code: code, label: name.capitalized, name: name, englishName: englishName)
     }
 
     static func isVietnamese(_ text: String) -> Bool { dominant(text) == .vietnamese }

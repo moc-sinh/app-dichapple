@@ -253,6 +253,11 @@ if ! grep -q "Bàn phím chạy lần cuối: bước 4" "$OUT/diagnostics.txt";
     FAILED=1
     echo "::error::The diagnostics did not see the keyboard reach step 4"
 fi
+# Apple's codesign sets the flag on both executables; the parser must find it (iOS 26 needs it).
+if [ "$(grep -c "Cờ chữ ký main binary: có" "$OUT/diagnostics.txt")" != 2 ]; then
+    FAILED=1
+    echo "::error::The diagnostics did not read the main-binary signing flag of the app and keyboard"
+fi
 endgroup
 
 limit 120 xcrun simctl shutdown "$UDID" >/dev/null 2>&1

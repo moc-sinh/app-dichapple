@@ -1,30 +1,35 @@
 # Cài và dùng MSTrans (không cần Mac, không cần tài khoản trả phí)
 
-Dùng cá nhân thì chỉ cần **Apple ID miễn phí** và một **máy tính Windows**. GitHub tự build file cài `.ipa`; công cụ **Sideloadly** trên Windows ký file đó bằng Apple ID của bạn rồi cài vào iPhone.
+Dùng cá nhân thì chỉ cần **Apple ID miễn phí** và một **máy tính Windows** (hoặc Mac). GitHub tự build file cài `.ipa`; **AltStore** ký file đó bằng Apple ID của bạn rồi cài vào iPhone.
 
-> Đã cài bản cũ tên **Dịch Apple**? Cứ cài MSTrans đè lên như bình thường: app được cập nhật tại chỗ, giữ nguyên API key và cài đặt. Bàn phím trong danh sách sẽ đổi tên thành MSTrans.
+> **Không dùng Sideloadly hay Feather để cài MSTrans.** Trên iOS 26, hai công cụ này ký lại phần bàn phím thiếu cờ “main binary” và không kèm hồ sơ ký riêng. iOS tắt bàn phím ngay khi mở (nhật ký lỗi ghi `CODESIGNING · Invalid Page`) rồi quay về bàn phím Apple, dù app vẫn mở được. AltStore và SideStore ký đúng.
 
 ## Giới hạn của Apple ID miễn phí
 
-- App hết hạn sau **7 ngày**, phải ký lại (Sideloadly làm lại trong khoảng một phút, hoặc tự làm nếu bật làm mới tự động).
-- Tối đa **3 app** cài kiểu này trên một máy và **10 mã ứng dụng mỗi 7 ngày**. MSTrans dùng 3 mã (app, bàn phím, đọc màn hình).
+- App hết hạn sau **7 ngày**, phải làm mới trong AltStore (máy tính chạy AltServer cùng mạng Wi-Fi).
+- Tối đa **3 app** cài kiểu này đang hoạt động trên một máy (AltStore tính là 1) và **10 mã ứng dụng mỗi 7 ngày**. MSTrans dùng 2 mã (app và bàn phím).
 - Không dùng được TestFlight.
 
 ## 1. Lấy file cài
 
 GitHub › repo `app-dichapple` › **Actions** › **iOS** › chọn lần chạy mới nhất có dấu xanh › mục **Artifacts** › tải **MSTrans-ipa**. File tải về là `.zip`, giải nén ra `MSTrans.ipa`.
 
-## 2. Cài Sideloadly trên Windows
+## 2. Cài AltStore
 
-1. Cài **iTunes** và **iCloud** bản tải từ trang Apple (không dùng bản Microsoft Store) để Windows nhận iPhone.
-2. Tải Sideloadly tại <https://sideloadly.io> và cài.
+1. Trên Windows, cài **iTunes** và **iCloud** bản tải từ trang Apple (không dùng bản Microsoft Store).
+2. Tải **AltServer** (AltStore Classic) tại <https://altstore.io>, cài rồi mở. AltServer nằm ở khay hệ thống, góc dưới bên phải.
+3. Cắm iPhone bằng cáp, mở khóa, chọn **Tin cậy**. Trong iTunes, chọn iPhone, bật **Đồng bộ với iPhone này qua Wi-Fi** để sau này làm mới không cần cáp.
+4. Bấm biểu tượng AltServer › **Install AltStore** › chọn iPhone, nhập Apple ID. Nên dùng một Apple ID phụ.
+5. Trên iPhone: bật **Chế độ nhà phát triển** (Cài đặt › Quyền riêng tư & Bảo mật › Chế độ nhà phát triển, rồi khởi động lại máy) và tin cậy Apple ID (Cài đặt › Cài đặt chung › **VPN & Quản lý thiết bị** › chọn Apple ID › **Tin cậy**).
 
-## 3. Cài app vào iPhone
+## 3. Cài MSTrans
 
-1. Cắm iPhone vào máy tính bằng cáp, mở khóa iPhone, chọn **Tin cậy**.
-2. Mở Sideloadly, kéo `MSTrans.ipa` vào, nhập Apple ID, bấm **Start**. Nên dùng một Apple ID phụ.
-3. Trên iPhone, bật **Chế độ nhà phát triển**: Cài đặt › Quyền riêng tư & Bảo mật › Chế độ nhà phát triển › bật, rồi khởi động lại máy.
-4. Cài đặt › Cài đặt chung › **VPN & Quản lý thiết bị** › chọn Apple ID của bạn › **Tin cậy**.
+1. Đã cài MSTrans hoặc Dịch Apple bằng Sideloadly: **xóa app đó trước** (giữ biểu tượng › Xóa app), rồi khởi động lại iPhone.
+2. Chép `MSTrans.ipa` vào iPhone, vào app **Tệp** (ví dụ qua iCloud Drive, hoặc gửi file cho chính mình rồi chọn Lưu vào Tệp).
+3. Mở **AltStore** › tab **My Apps** › nút **+** góc trên › chọn `MSTrans.ipa`. Máy tính chạy AltServer phải bật, cùng mạng Wi-Fi.
+4. Nếu AltStore hỏi có gỡ app extension không: chọn **giữ lại**. Bàn phím chính là app extension.
+
+SideStore cũng ký đúng (dùng bản phát hành từ tháng 9/2026 trở đi) và làm mới được không cần máy tính, nhưng cài lần đầu phức tạp hơn: <https://sidestore.io>.
 
 ## 4. Thiết lập trong app
 
@@ -35,7 +40,9 @@ Mở MSTrans › tab **Cài đặt**, mục **Bắt đầu** có sẵn từng b�
 3. Mục **Về bạn**: chọn giới tính, ghi cách xưng hô (ví dụ “tôi xưng em, gọi đối tác là anh”) và vài dòng về công việc. Tab **Thuật ngữ**: thêm tên sản phẩm, thuật ngữ ngành để bản dịch luôn dùng đúng từ.
 4. Lần đầu dịch tin đã sao chép, iOS hỏi “Cho phép dán”: chọn **Cho phép dán**. Để không bị hỏi lại: Cài đặt › MSTrans › **Dán từ ứng dụng khác** › **Cho phép**.
 
-Hai bước đầu được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu.
+Bước “Cho phép truy cập đầy đủ” được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu.
+
+Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phím chưa dùng chung dữ liệu (công cụ cài bỏ mất App Group). Sao chép API key, rồi bấm **Dán API key** ngay trên bàn phím.
 
 ## 5. Dùng hằng ngày
 
@@ -45,8 +52,7 @@ Hai bước đầu được đánh dấu xong sau khi bạn mở bàn phím MSTr
 3. Dòng trên cùng hiện **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, dòng này hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- **Bật đọc màn hình** (tab Cài đặt, mục *Tin đối tác gửi*, chạm nút ghi rồi **Bắt đầu phát**): mỗi khi bạn chạm vào ô trả lời, bản dịch tin mới nhất của đối tác hiện ngay ở dòng trên cùng của bàn phím. Khi phát, góc màn hình có chấm đỏ; chạm chấm đỏ để tắt.
-- **Không bật đọc màn hình**: nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”: chạm một lần là có bản dịch.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”: chạm một lần là có bản dịch.
 - **Đọc mà không mở bàn phím**: mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › đặt tên. Rồi vào Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt đó. Từ đó: sao chép tin, gõ hai lần vào lưng iPhone là bản dịch hiện lên.
 
 **Trong app MSTrans**
@@ -63,17 +69,17 @@ Hai bước đầu được đánh dấu xong sau khi bạn mở bàn phím MSTr
 
 ## 6. Mỗi 7 ngày
 
-Cắm iPhone (hoặc cùng mạng Wi-Fi nếu đã bật làm mới tự động của Sideloadly) và bấm **Start** lại với cùng file. Cài đè giữ nguyên API key, cài đặt và lịch sử.
+Mở AltStore › **My Apps** › **Refresh All** khi máy tính đang chạy AltServer cùng mạng Wi-Fi. Làm mới giữ nguyên API key, cài đặt và lịch sử.
 
-Có bản mới: tải artifact mới ở bước 1 và cài đè.
+Có bản mới: tải artifact mới ở bước 1, rồi trong AltStore bấm **+** và chọn file mới để cài đè.
 
 ## Khi bàn phím không hiện
 
-Chọn MSTrans mà iPhone tự quay về bàn phím Apple: bản trước 15/10/2026 bị lỗi này khi đã bật truy cập đầy đủ và trong bộ nhớ tạm có chữ (bàn phím đọc bộ nhớ tạm lúc mở, iOS chặn lại để hỏi quyền dán). Bản MSTrans đã sửa. Nếu vẫn gặp:
+Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 
-1. Cài bản mới nhất (bước 1 và 3).
+1. Mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**. Dòng có dấu ✗ là chỗ lỗi. Nếu có dòng “thiếu cờ main binary”, “không có hồ sơ ký riêng” hoặc “ký bằng mã của app chính”, công cụ cài đã ký sai: xóa app rồi cài lại bằng AltStore (bước 2 và 3).
 2. Cài đặt › Cài đặt chung › Bàn phím › Bàn phím: xóa MSTrans, thêm lại, bật lại **Cho phép truy cập đầy đủ**. Khởi động lại iPhone.
-3. Vẫn lỗi: Cài đặt › Quyền riêng tư & Bảo mật › Phân tích & Cải tiến › **Dữ liệu phân tích**, tìm mục bắt đầu bằng `MSTransKeyboard`, chạm vào rồi chia sẻ nội dung để gửi kèm khi báo lỗi.
+3. Vẫn lỗi: bấm **Sao chép báo cáo** trong Chẩn đoán bàn phím, và gửi kèm nhật ký lỗi ở Cài đặt › Quyền riêng tư & Bảo mật › Phân tích & Cải tiến › **Dữ liệu phân tích** (mục bắt đầu bằng `MSTransKeyboard`; cần bật **Chia sẻ phân tích iPhone** trước).
 
 ## Chất lượng và chi phí
 
@@ -87,14 +93,11 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple: bản trước 15/10/
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
 - Bàn phím không bao giờ tự đọc bộ nhớ tạm, nên không bị iOS chặn lúc mở; chỉ đọc khi bạn chạm để dịch, và đọc ở luồng nền.
-- Đọc màn hình chỉ chạy khi bàn phím MSTrans đang mở, tối đa 1 khung hình mỗi 1,5 giây, bỏ qua khi màn hình không đổi, chỉ đọc vùng khung chat. Không lưu ảnh, chỉ giữ chữ của vài tin cuối.
 
 ## Cần thử trên máy thật
 
 - Bàn phím đọc được bao nhiêu chữ trong ô nhập của Zalo, Messenger, WeChat (iOS có thể chỉ trả một phần).
-- Vision có nhận chữ tiếng Việt không (tiếng Trung, Anh, Hàn, Nhật được hỗ trợ).
-- Bộ nhớ của phần đọc màn hình dưới giới hạn khoảng 50 MB.
 
 ## Sau này nếu có tài khoản Apple Developer trả phí
 
-App hết hạn sau 1 năm thay vì 7 ngày và cài được qua TestFlight. Cần thêm 4 secret `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `TEAM_ID` trong Settings › Secrets and variables › Actions của repo, rồi chạy **Run workflow** với tùy chọn **Upload to TestFlight**.
+App hết hạn sau 1 năm thay vì 7 ngày, cài được qua TestFlight, và Apple ký đúng mọi phần nên không phụ thuộc công cụ cài. Cần thêm 4 secret `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `TEAM_ID` trong Settings › Secrets and variables › Actions của repo, rồi chạy **Run workflow** với tùy chọn **Upload to TestFlight**.

@@ -2,8 +2,8 @@ import UIKit
 
 /// The translation keyboard: an info line, a translate bar and an iOS-style Telex keyboard.
 ///
-/// - Info line: the Vietnamese translation of the partner's newest message (read from the
-///   screen or from a fresh copy), or the meaning of what was just sent.
+/// - Info line: the Vietnamese translation of the partner's message the user just copied,
+///   or the meaning of what was just sent.
 /// - Translate bar: target language ("Tự động" follows the partner), "Dịch", undo.
 /// - Keys: `KeyboardLayoutView`.
 final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDelegate {
@@ -43,7 +43,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var task: Task<Void, Never>?
     private var incomingTask: Task<Void, Never>?
     private var pollTimer: Timer?
-    private var lastIncoming = ""
 
     // Telex: the word at the cursor while it is being typed.
     private var word = TelexWord()
@@ -120,10 +119,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         SharedStore.noteKeyboard(hasFullAccess ? "3 sắp hiện (có truy cập đầy đủ)" : "3 sắp hiện (chưa có truy cập đầy đủ)")
-        if hasFullAccess {
-            SharedStore.keyboardHasFullAccess = true
-            SharedStore.keyboardVisible = true
-        }
+        if hasFullAccess { SharedStore.keyboardHasFullAccess = true }
         targetCode = SharedStore.targetCode
         keyboard.hapticsEnabled = hasFullAccess && SharedStore.haptics
         keyboard.showsGlobe = needsInputModeSwitchKey
@@ -145,7 +141,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if hasFullAccess { SharedStore.keyboardVisible = false }
         pollTimer?.invalidate()
         pollTimer = nil
         task?.cancel()
@@ -342,10 +337,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         switch info {
         case .idle:
             let count = SharedStore.context().count
-            let screen = SharedStore.screenUpdatedAt != nil
-            title = screen ? "Đang đọc màn hình · \(count) tin ngữ cảnh"
-                : (count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh")
-            symbol = screen ? "eye.fill" : "eye"
+            title = count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh"
+            symbol = "eye"
             tint = .secondaryLabel
             text = .secondaryLabel
         case .copied:
@@ -432,7 +425,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             : lines.map { (($0.side == .partner ? "Đối tác: " : "Tôi: ") + $0.text, $0.side == .me) }
         showPanel(parts, button: "Cuộc mới (xóa ngữ cảnh)") { [weak self] in
             SharedStore.clearContext()
-            self?.lastIncoming = ""
             self?.mode = .normal
             self?.info = .idle
         }
@@ -660,10 +652,40 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             return nil
         }
         guard let key = SharedStore.apiKey else {
-            mode = .failed(TranslateError.noKey.errorDescription ?? "")
+            offerKeyPaste()
             return nil
         }
         return key
+    }
+
+    /// The keyboard reads the key the app saved only when both share an App Group, which some
+    /// installers leave out. Then the key can be pasted here instead; it stays with the keyboard.
+    private func offerKeyPaste() {
+        showPanel([("Bàn phím chưa có API key OpenAI.", true),
+                   ("Sao chép API key (bắt đầu bằng sk-) rồi bấm nút bên dưới.", false),
+                   ("Đã dán key trong app MSTrans mà vẫn thấy dòng này: app và bàn phím chưa dùng chung dữ liệu (do cách cài). Dán ở đây là đủ.", true)],
+                  button: "Dán API key") { [weak self] in self?.pasteKey() }
+        mode = .panel("Cần API key")
+    }
+
+    /// Off the main thread: reading the clipboard can wait on iOS's paste prompt.
+    private func pasteKey() {
+        panelButton.configuration?.title = "Đang đọc…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let changeCount = UIPasteboard.general.changeCount
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard copied.hasPrefix("sk-"), copied.count > 20, !copied.contains(where: \.isWhitespace) else {
+                    self.panelButton.configuration?.title = copied.isEmpty ? "Chưa đọc được, thử lại" : "Không phải API key, thử lại"
+                    return
+                }
+                SharedStore.apiKey = copied
+                SharedStore.handledPasteboard = changeCount
+                self.showPanel([("Đã lưu API key cho bàn phím.", true), ("Bấm Dịch để dịch câu bạn đang viết.", false)],
+                               button: "Xong") { [weak self] in self?.mode = .normal }
+            }
+        }
     }
 
     /// "Tự động" answers in the partner's language; otherwise the chosen one.
@@ -737,10 +759,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             && UIPasteboard.general.hasStrings
     }
 
-    /// Translates the partner's newest message on screen as soon as it appears; each message once.
-    /// A fresh copy is only offered: reading the clipboard makes iOS ask for paste permission and
-    /// blocks the caller until it is answered, so reading it while the keyboard opens stopped the
-    /// keyboard from ever drawing (iOS then switched back to the Apple keyboard).
+    /// Offers to translate a fresh copy. Only offered: reading the clipboard makes iOS ask for
+    /// paste permission and blocks the caller until it is answered, so reading it while the
+    /// keyboard opens stopped the keyboard from ever drawing.
     private func refreshIncoming() {
         guard SharedStore.autoIncoming, hasFullAccess, SharedStore.apiKey != nil else { return }
         // Offered whenever the line is free, so pressing Dịch first or a denied paste doesn't lose it.
@@ -749,10 +770,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .copied where !hasNewCopy: info = .idle
         default: break
         }
-        guard let line = SharedStore.screenLines().last(where: { $0.side == .partner }),
-              !similar(line.text, lastIncoming), !LanguageDetector.isVietnamese(line.text) else { return }
-        lastIncoming = line.text
-        translateIncoming(line.text)
     }
 
     /// Translates the copied message. Only after a tap, and off the main thread, so the keys stay
@@ -780,7 +797,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             return
         }
         SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
-        lastIncoming = copied
         translateIncoming(copied)
     }
 
@@ -807,22 +823,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 self?.info = .message(error.localizedDescription)
             }
         }
-    }
-
-    /// Screen reading returns slightly different text from frame to frame; treat near-equal as equal.
-    private func similar(_ a: String, _ b: String) -> Bool {
-        let x = Array(a.lowercased().filter { !$0.isWhitespace })
-        let y = Array(b.lowercased().filter { !$0.isWhitespace })
-        if x == y { return true }
-        guard !x.isEmpty, !y.isEmpty else { return false }
-        var counts: [Character: Int] = [:]
-        for c in x { counts[c, default: 0] += 1 }
-        var common = 0
-        for c in y where counts[c, default: 0] > 0 {
-            counts[c, default: 0] -= 1
-            common += 1
-        }
-        return Double(common) / Double(max(x.count, y.count)) >= 0.85
     }
 }
 

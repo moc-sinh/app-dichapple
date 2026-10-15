@@ -8,7 +8,7 @@ struct ChatLine: Codable, Equatable {
     var date: Date
 }
 
-/// Settings and context shared by the app, the keyboard and the screen reader (App Group).
+/// Settings and context shared by the app and the keyboard (App Group).
 enum SharedStore {
     static let defaults = UserDefaults(suiteName: Config.appGroup) ?? .standard
 
@@ -25,13 +25,8 @@ enum SharedStore {
         static let checkMeaning = "checkMeaning"
         static let autoIncoming = "autoIncoming"
         static let haptics = "haptics"
-        static let useScreen = "useScreen"
         static let memory = "memory"
         static let incomingCache = "incomingCache"
-        static let screenLines = "screenLines"
-        static let screenUpdatedAt = "screenUpdatedAt"
-        static let screenActive = "screenActive"
-        static let keyboardVisible = "keyboardVisible"
         static let keyboardHasFullAccess = "keyboardHasFullAccess"
         static let handledPasteboard = "handledPasteboard"
         static let keyboardStage = "keyboardStage"
@@ -42,8 +37,11 @@ enum SharedStore {
 
     /// The OpenAI key, kept in the App Group container on this iPhone only.
     static var apiKey: String? {
-        let key = defaults.string(forKey: Key.apiKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return key.isEmpty ? nil : key
+        get {
+            let key = defaults.string(forKey: Key.apiKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return key.isEmpty ? nil : key
+        }
+        set { defaults.set(newValue, forKey: Key.apiKey) }
     }
 
     static var model: TranslationModel {
@@ -71,18 +69,9 @@ enum SharedStore {
     static var checkMeaning: Bool { defaults.object(forKey: Key.checkMeaning) as? Bool ?? true }
     static var autoIncoming: Bool { defaults.object(forKey: Key.autoIncoming) as? Bool ?? true }
     static var haptics: Bool { defaults.object(forKey: Key.haptics) as? Bool ?? true }
-    static var useScreen: Bool { defaults.object(forKey: Key.useScreen) as? Bool ?? true }
 
     // MARK: State
 
-    static var screenActive: Bool {
-        get { defaults.bool(forKey: Key.screenActive) }
-        set { defaults.set(newValue, forKey: Key.screenActive) }
-    }
-    static var keyboardVisible: Bool {
-        get { defaults.bool(forKey: Key.keyboardVisible) }
-        set { defaults.set(newValue, forKey: Key.keyboardVisible) }
-    }
     static var keyboardHasFullAccess: Bool {
         get { defaults.bool(forKey: Key.keyboardHasFullAccess) }
         set { defaults.set(newValue, forKey: Key.keyboardHasFullAccess) }
@@ -113,29 +102,9 @@ enum SharedStore {
         save(Array(lines.suffix(Config.contextLimit)), Key.memory)
     }
 
-    /// Lines the screen reader saw on screen.
-    static func saveScreen(_ lines: [ChatLine]) {
-        save(lines, Key.screenLines)
-        defaults.set(Date(), forKey: Key.screenUpdatedAt)
-    }
-
-    /// When the screen reader last saw the chat, if recently.
-    static var screenUpdatedAt: Date? {
-        guard let at = defaults.object(forKey: Key.screenUpdatedAt) as? Date,
-              Date().timeIntervalSince(at) < Config.screenMaxAge else { return nil }
-        return at
-    }
-
-    /// Chat lines currently on screen, if the screen reader is running.
-    static func screenLines() -> [ChatLine] {
-        guard useScreen, screenUpdatedAt != nil else { return [] }
-        return load(Key.screenLines)
-    }
-
-    /// The best context available now: what is on screen, else what the keyboard remembers.
+    /// What the keyboard remembers of the chat, trimmed for a request.
     static func context() -> [ChatLine] {
-        var lines = screenLines()
-        if lines.isEmpty { lines = recentMemory() }
+        let lines = recentMemory()
         // Keep the newest lines within the character budget.
         var kept: [ChatLine] = []
         var characters = 0
@@ -149,8 +118,6 @@ enum SharedStore {
 
     static func clearContext() {
         defaults.removeObject(forKey: Key.memory)
-        defaults.removeObject(forKey: Key.screenLines)
-        defaults.removeObject(forKey: Key.screenUpdatedAt)
     }
 
     // MARK: Incoming translations (never pay twice for the same message)

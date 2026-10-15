@@ -280,7 +280,8 @@ struct TranslateView: View {
                 .font(.headline)
             Text(setup.keyboardReady
                  ? "Dán API key OpenAI để bàn phím dịch được."
-                 : "Thêm bàn phím MSTrans, bật “Cho phép truy cập đầy đủ”" + (setup.hasKey ? "." : " và dán API key OpenAI."))
+                 : (setup.keyboardAdded ? "Bật “Cho phép truy cập đầy đủ” cho MSTrans rồi mở bàn phím một lần"
+                    : "Thêm bàn phím MSTrans, bật “Cho phép truy cập đầy đủ”") + (setup.hasKey ? "." : " và dán API key OpenAI."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Button("Hoàn tất cài đặt", action: showSettings)

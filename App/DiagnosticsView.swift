@@ -4,6 +4,10 @@ import UIKit
 /// What the app can see about how iOS installed it and its keyboard: the signing profiles,
 /// the entitlements each part was signed with, the App Group, and how far the keyboard got the
 /// last time iOS started it. Meant to be copied and sent when the keyboard never opens.
+///
+/// The usual culprit: re-signing tools that sign an extension without its own profile or without
+/// the "main binary" flag. iOS 26 then kills the keyboard before any of its code runs (crash log:
+/// CODESIGNING, Invalid Page) and switches back to the Apple keyboard.
 enum Diagnostics {
     static func report() -> String {
         var out: [String] = []
@@ -20,12 +24,18 @@ enum Diagnostics {
         let appexes = items.filter { $0.pathExtension == "appex" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         if appexes.isEmpty {
             out.append("")
-            out.append("✗ Không có phần mở rộng nào trong app: bàn phím đã bị bỏ khi ký/cài (Sideloadly: tắt “Remove app extensions”).")
+            out.append("✗ Không có phần mở rộng nào trong app: bàn phím đã bị bỏ khi ký/cài (khi cài, chọn giữ app extensions).")
         }
+        let keyboardIDs = InstalledKeyboard.bundles.compactMap(\.bundleIdentifier)
+        var keyboardSignedBadly = false
         for url in appexes {
             out.append("")
             if let bundle = Bundle(url: url) {
-                out += describe(bundle: bundle, label: url.deletingPathExtension().lastPathComponent, appTeam: team(appProfile))
+                let lines = describe(bundle: bundle, label: url.deletingPathExtension().lastPathComponent, appTeam: team(appProfile))
+                if keyboardIDs.contains(bundle.bundleIdentifier ?? ""), lines.contains(where: { $0.hasPrefix("✗") }) {
+                    keyboardSignedBadly = true
+                }
+                out += lines
             } else {
                 out.append("✗ \(url.lastPathComponent): không đọc được")
             }
@@ -33,10 +43,10 @@ enum Diagnostics {
 
         out.append("")
         out.append("App Group app đang dùng: \(Config.appGroup)")
+        if let appProfile, ((appProfile["Entitlements"] as? [String: Any])?["com.apple.security.application-groups"] as? [String] ?? []).isEmpty {
+            out.append("✗ Hồ sơ của app không có App Group: app và bàn phím không dùng chung dữ liệu, bàn phím sẽ hỏi dán API key riêng")
+        }
         let enabled = (UserDefaults.standard.array(forKey: "AppleKeyboards") as? [String]) ?? []
-        let keyboardIDs = appexes.compactMap { Bundle(url: $0) }
-            .filter { ($0.object(forInfoDictionaryKey: "NSExtension") as? [String: Any])?["NSExtensionPointIdentifier"] as? String == "com.apple.keyboard-service" }
-            .compactMap(\.bundleIdentifier)
         for id in keyboardIDs {
             out.append(enabled.contains(id) ? "✓ Bàn phím \(id) đã được thêm trong Cài đặt" : "✗ Bàn phím \(id) chưa có trong danh sách bàn phím")
         }
@@ -46,6 +56,11 @@ enum Diagnostics {
             out.append("✗ Bàn phím chưa từng chạy được (hoặc không dùng chung App Group với app)")
         }
         out.append("Đã thấy truy cập đầy đủ: \(SharedStore.keyboardHasFullAccess ? "có" : "chưa")")
+        if keyboardSignedBadly {
+            out.append("")
+            out.append("→ Kết luận: bàn phím bị ký sai khi cài nên iOS tắt nó ngay khi mở. Không phải lỗi cài đặt trên iPhone. "
+                       + "Cài lại MSTrans bằng AltStore hoặc SideStore (không dùng Sideloadly, Feather).")
+        }
         return out.joined(separator: "\n")
     }
 
@@ -66,10 +81,30 @@ enum Diagnostics {
         let size = (try? executable.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
         out.append(size.map { "  Tệp chạy: \(executableName), \($0 / 1024) KB" } ?? "✗ Thiếu tệp chạy \(executableName)")
 
+        switch mainBinaryFlag(executable: executable) {
+        case true?: out.append("  Cờ chữ ký main binary: có")
+        case false?: out.append("✗ Chữ ký thiếu cờ main binary: iOS 26 tắt phần này ngay khi mở (CODESIGNING · Invalid Page)")
+        case nil: out.append("? Không đọc được chữ ký của tệp chạy")
+        }
+
         let signed = signedEntitlements(executable: executable)
+        let isExtension = bundle.bundleURL.pathExtension == "appex"
         guard let provisioning = profile(in: bundle.bundleURL) else {
-            out.append("✗ Không có hồ sơ ký (embedded.mobileprovision)")
+            #if targetEnvironment(simulator)
+            out.append("  Không có hồ sơ ký (bình thường trên máy ảo)")
             if let signed { out.append("  Quyền đã ký: " + summary(signed)) }
+            return out
+            #endif
+            out.append(isExtension
+                       ? "✗ Không có hồ sơ ký riêng (embedded.mobileprovision): công cụ cài đã ký phần này không đúng, iOS sẽ không chạy nó"
+                       : "✗ Không có hồ sơ ký (embedded.mobileprovision)")
+            if let signed {
+                out.append("  Quyền đã ký: " + summary(signed))
+                let signedID = signed["application-identifier"] as? String ?? "?"
+                if isExtension, !signedID.hasSuffix("." + (bundle.bundleIdentifier ?? "")) {
+                    out.append("✗ Ký bằng mã của app chính (\(signedID)), không phải mã của phần này")
+                }
+            }
             return out
         }
         let profileEntitlements = provisioning["Entitlements"] as? [String: Any] ?? [:]
@@ -77,7 +112,7 @@ enum Diagnostics {
         let profileTeam = team(provisioning)
         out.append("  Hồ sơ: \(provisioning["Name"] as? String ?? "?") · team \(profileTeam ?? "?")"
                    + (expiry.map { " · hết hạn \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""))
-        if let expiry, expiry < Date() { out.append("✗ Hồ sơ ký đã hết hạn: ký lại bằng Sideloadly") }
+        if let expiry, expiry < Date() { out.append("✗ Hồ sơ ký đã hết hạn: làm mới app trong AltStore") }
         if let appTeam, let profileTeam, profileTeam != appTeam { out.append("✗ Khác team với app (\(profileTeam) ≠ \(appTeam))") }
 
         let profileID = profileEntitlements["application-identifier"] as? String ?? "?"
@@ -140,6 +175,47 @@ enum Diagnostics {
         return plists(in: data).first { $0["application-identifier"] != nil || $0["get-task-allow"] != nil }
     }
 
+    /// CS_EXECSEG_MAIN_BINARY in the executable's code directory. Apple's tools set it on every
+    /// app and extension executable; iOS 26 refuses to run an extension without it.
+    private static func mainBinaryFlag(executable: URL) -> Bool? {
+        guard let data = try? Data(contentsOf: executable, options: .mappedIfSafe) else { return nil }
+        func u32(_ at: Int, bigEndian: Bool) -> UInt32? {
+            guard at >= 0, at + 4 <= data.count else { return nil }
+            let raw = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: at, as: UInt32.self) }
+            return bigEndian ? UInt32(bigEndian: raw) : UInt32(littleEndian: raw)
+        }
+        // A universal binary: look at its first slice.
+        var base = 0
+        if u32(0, bigEndian: true) == 0xCAFE_BABE {
+            guard let offset = u32(16, bigEndian: true) else { return nil }
+            base = Int(offset)
+        }
+        guard u32(base, bigEndian: false) == 0xFEED_FACF, let commands = u32(base + 16, bigEndian: false) else { return nil }
+        var at = base + 32
+        for _ in 0..<commands {
+            guard let command = u32(at, bigEndian: false), let size = u32(at + 4, bigEndian: false), size > 0 else { return nil }
+            if command == 0x1D {  // LC_CODE_SIGNATURE
+                guard let offset = u32(at + 8, bigEndian: false) else { return nil }
+                let blob = base + Int(offset)
+                guard u32(blob, bigEndian: true) == 0xFADE_0CC0, let count = u32(blob + 8, bigEndian: true) else { return nil }
+                for index in 0..<Int(count) {
+                    guard let type = u32(blob + 12 + index * 8, bigEndian: true),
+                          let entry = u32(blob + 16 + index * 8, bigEndian: true) else { return nil }
+                    // The code directory, or an alternate one for another hash type.
+                    guard type == 0 || (0x1000..<0x1005).contains(type) else { continue }
+                    let directory = blob + Int(entry)
+                    guard u32(directory, bigEndian: true) == 0xFADE_0C02,
+                          let version = u32(directory + 8, bigEndian: true) else { continue }
+                    guard version >= 0x20400, let flags = u32(directory + 84, bigEndian: true) else { return false }
+                    return flags & 1 != 0
+                }
+                return nil
+            }
+            at += Int(size)
+        }
+        return nil
+    }
+
     private static func plists(in data: Data) -> [[String: Any]] {
         let open = Data("<?xml".utf8)
         let close = Data("</plist>".utf8)
@@ -172,7 +248,7 @@ struct DiagnosticsView: View {
     var body: some View {
         List {
             Section {
-                Text("Mở một ô nhập bất kỳ, chọn bàn phím MSTrans một lần (dù nó không hiện), rồi quay lại đây và bấm Sao chép báo cáo để gửi cho người hỗ trợ.")
+                Text("Mở một ô nhập bất kỳ, chọn bàn phím MSTrans một lần (dù nó không hiện), rồi quay lại đây và bấm Sao chép báo cáo để gửi cho người hỗ trợ. Dòng ✗ là chỗ có lỗi.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Button {

@@ -93,6 +93,7 @@ struct NoteBox: View {
 
 /// How far setup has got. The keyboard records Full Access the first time it opens with it.
 struct SetupStatus {
+    var keyboardAdded: Bool
     var keyboardReady: Bool
     var hasKey: Bool
 
@@ -100,7 +101,27 @@ struct SetupStatus {
     var remaining: Int { (keyboardReady ? 0 : 1) + (hasKey ? 0 : 1) }
 
     static var current: SetupStatus {
-        SetupStatus(keyboardReady: SharedStore.keyboardHasFullAccess, hasKey: SharedStore.apiKey != nil)
+        SetupStatus(keyboardAdded: InstalledKeyboard.isAdded, keyboardReady: SharedStore.keyboardHasFullAccess,
+                    hasKey: SharedStore.apiKey != nil)
+    }
+}
+
+/// The keyboard inside this app, as iOS knows it (installers may rename its bundle ID).
+enum InstalledKeyboard {
+    static var bundles: [Bundle] {
+        guard let plugins = Bundle.main.builtInPlugInsURL,
+              let items = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil) else { return [] }
+        return items.compactMap { Bundle(url: $0) }.filter {
+            ($0.object(forInfoDictionaryKey: "NSExtension") as? [String: Any])?["NSExtensionPointIdentifier"] as? String
+                == "com.apple.keyboard-service"
+        }
+    }
+
+    /// Added under Settings › Keyboards. Read from the system's list, so it is known even if the
+    /// keyboard has never run.
+    static var isAdded: Bool {
+        let enabled = UserDefaults.standard.array(forKey: "AppleKeyboards") as? [String] ?? []
+        return bundles.contains { enabled.contains($0.bundleIdentifier ?? "") }
     }
 }
 

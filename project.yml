@@ -54,7 +54,6 @@ targets:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
     dependencies:
       - target: MSTransKeyboard
-      - target: MSTransScreen
     scheme: {}
 
   # Translation keyboard. UIKit only: keyboards get a small memory budget.
@@ -83,31 +82,5 @@ targets:
             RequestsOpenAccess: true
     entitlements:
       path: Support/MSTransKeyboard.entitlements
-      properties:
-        com.apple.security.application-groups: [group.com.mocsinh.dichapple]
-
-  # Screen reading: a ReplayKit broadcast extension that reads chat text on-device.
-  MSTransScreen:
-    type: app-extension
-    platform: iOS
-    sources:
-      - Screen
-      - path: Shared/Config.swift
-      - path: Shared/SharedStore.swift
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mocsinh.dichapple.screen
-    info:
-      path: Support/MSTransScreen-Info.plist
-      properties:
-        CFBundleDisplayName: MSTrans
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
-          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
-          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
-    entitlements:
-      path: Support/MSTransScreen.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mocsinh.dichapple]
