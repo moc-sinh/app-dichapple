@@ -791,7 +791,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     return back()
                 }
                 proxy.adjustTextPosition(byCharacterOffset: collected.utf16.count)
-                tick { completion(collected) }
+                self.tick { completion(collected) }
             }
         }
 
