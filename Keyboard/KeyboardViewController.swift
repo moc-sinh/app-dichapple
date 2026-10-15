@@ -2,8 +2,8 @@ import UIKit
 
 /// The translation keyboard: an info line, a translate bar and an iOS-style Telex keyboard.
 ///
-/// - Info line: the Vietnamese translation of the partner's message the user just copied,
-///   or the meaning of what was just sent.
+/// - Info line, only while there is something to read: the Vietnamese translation of the
+///   partner's message the user just copied, or the meaning of what was just sent.
 /// - Translate bar: the Mộc Sinh mark (opens everything at once: the partner's last message, the
 ///   check of what was sent, the context), the target language ("Tự động" follows the partner),
 ///   "Dịch", undo.
@@ -96,7 +96,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
-        let infoHeight = infoButton.heightAnchor.constraint(equalToConstant: 30)
+        let infoHeight = infoButton.heightAnchor.constraint(equalToConstant: 0)
         let barHeight = bar.heightAnchor.constraint(equalToConstant: 42)
         let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: 216)
         let bottom = keyboard.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -163,7 +163,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
-        infoHeight?.constant = compact ? 26 : 30
+        infoHeight?.constant = infoLineHeight
         barHeight?.constant = compact ? 36 : 42
         keysHeight?.constant = compact ? 160 : 216
         keyboard.showsGlobe = needsInputModeSwitchKey
@@ -360,9 +360,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     // MARK: Info line
 
+    /// Nothing to read, no line: the keyboard is just the bar and the keys.
+    private var infoLineHeight: CGFloat {
+        if case .idle = info { return 0 }
+        return traitCollection.verticalSizeClass == .compact ? 26 : 30
+    }
+
     /// The icon carries the colour (orange: partner, green: you, gold: check this, red: problem);
     /// the text stays in label colours so it reads on the keyboard background.
     private func renderInfo() {
+        let height = infoLineHeight
+        infoButton.isHidden = height == 0
+        if infoHeight?.constant != height { infoHeight?.constant = height }
+        guard height > 0 else { return }
+
         var c = UIButton.Configuration.plain()
         c.titleLineBreakMode = .byTruncatingTail
         c.imagePadding = 7
@@ -374,11 +385,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         var text = UIColor.label
         switch info {
         case .idle:
-            let count = SharedStore.context().count
-            title = count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh"
-            symbol = "eye"
-            tint = .secondaryLabel
-            text = .secondaryLabel
+            return
         case .copied:
             title = "Có tin vừa sao chép · chạm để dịch"
             symbol = "doc.on.clipboard.fill"

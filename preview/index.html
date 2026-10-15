@@ -139,7 +139,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
 <main class="wrap">
   <header class="intro">
     <h1>MSTrans</h1>
-    <p>Bàn phím gõ tiếng Việt chuẩn iPhone, có thanh Dịch ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ của đối tác; tin đối tác gửi tự hiện bằng tiếng Việt ở dòng trên cùng.</p>
+    <p>Bàn phím gõ tiếng Việt chuẩn iPhone, có thanh Dịch ở trên. Bấm Dịch là cả đoạn đổi sang ngôn ngữ của đối tác; tin đối tác bạn sao chép hiện bằng tiếng Việt ở một dòng phía trên, dòng này chỉ hiện khi có bản dịch.</p>
   </header>
 
   <div class="stage">
@@ -177,7 +177,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       <h2>Thử nhanh</h2>
       <ol>
         <li>Gõ trên bàn phím như iPhone. Kiểu Telex: <kbd>aa</kbd> ra â, <kbd>w</kbd> ra ư (<kbd>ww</kbd> ra w), <kbd>dd</kbd> ra đ, <kbd>s f r x j</kbd> là sắc, huyền, hỏi, ngã, nặng. Từ tiếng Anh như <kbd>facebook</kbd>, <kbd>order</kbd> giữ nguyên. Giữ một nguyên âm để chọn dấu. Gõ bằng bàn phím máy tính cũng được.</li>
-        <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Dòng trên cùng hiện <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
+        <li>Bấm <b>Dịch</b>: cả đoạn đổi sang ngôn ngữ đối tác (đang để <b>Tự động</b>). Một dòng hiện lên trên thanh Dịch với <b>Nghĩa</b> dịch ngược để bạn kiểm tra; chạm vào để xem đầy đủ hoặc <b>Hoàn tác</b>.</li>
         <li>Chạm vào một tin màu trắng để giả lập sao chép tin đó: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm vào là có bản dịch. Bấm <b>Đối tác gửi tin mới</b> bên dưới để có thêm tin.</li>
         <li>Chạm logo Mộc Sinh bên trái thanh Dịch để xem các tin đang dùng làm ngữ cảnh.</li>
         <li>Không thấy MSTrans trong một app (ví dụ Zalo đã mở từ trước khi cài): gạt app đó khỏi màn hình đa nhiệm rồi mở lại.</li>
@@ -514,6 +514,9 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
       else { cls = 'ok'; icon = ICON.check; text = 'Đã dịch sang ' + i.lang.name; }
     } else if (i.kind === 'error') { cls = 'err'; icon = ICON.warn; text = i.text; }
     var b = $('info');
+    // Nothing to read, no line: the keyboard is just the bar and the keys.
+    b.hidden = i.kind === 'idle';
+    $('panel').style.top = b.hidden ? '46px' : '76px';
     b.className = 'info ' + cls;
     b.innerHTML = icon + '<span>' + esc(text) + '</span>';
     b.setAttribute('aria-label', text + '. Chạm để xem chi tiết');
