@@ -4,6 +4,8 @@ import UIKit
 /// then prints which keyboard is up. Used by ci/keyboard-smoke.sh.
 final class ViewController: UIViewController {
     private let field = UITextField()
+    /// Only the globe/dictation strip is on screen until the extension draws its keys.
+    private var keyboardHeight: CGFloat = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -14,9 +16,10 @@ final class ViewController: UIViewController {
         view.addSubview(field)
 
         let center = NotificationCenter.default
-        center.addObserver(forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main) { [weak self] note in
+        center.addObserver(forName: UIResponder.keyboardDidChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
             let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
-            self?.report("keyboardDidShow frame=\(frame)")
+            self?.keyboardHeight = frame.height
+            self?.report("keyboardDidChangeFrame frame=\(frame)")
         }
         center.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
             self?.report("keyboardDidHide")
@@ -30,8 +33,13 @@ final class ViewController: UIViewController {
         super.viewDidAppear(animated)
         report("before focus")
         field.becomeFirstResponder()
-        for delay in [1.0, 3.0, 6.0, 10.0, 15.0] {
+        for delay in [1.0, 3.0, 6.0, 10.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.report("t+\(Int(delay))s") }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self else { return }
+            print("KEYBOARD_HEIGHT=\(Int(keyboardHeight))")
+            fflush(stdout)
         }
     }
 

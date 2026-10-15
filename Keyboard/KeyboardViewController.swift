@@ -14,6 +14,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private enum Info {
         case idle
+        /// Something new was copied; reading it waits for a tap (see `refreshIncoming`).
+        case copied
         case incomingBusy
         case incoming(source: String, translation: Translation)
         case outgoing(Translation, original: String)
@@ -325,6 +327,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 : (count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh")
             symbol = screen ? "eye.fill" : "eye"
             color = .secondaryLabel
+        case .copied:
+            title = "Có tin vừa sao chép · chạm để dịch"
+            symbol = "doc.on.clipboard"
+            color = Palette.incoming
         case .incomingBusy:
             title = "Đang dịch tin mới của đối tác…"
             symbol = "ellipsis.bubble"
@@ -368,6 +374,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         switch info {
         case .idle, .message:
             openContext()
+        case .copied:
+            translateCopied()
         case .incomingBusy:
             break
         case .incoming(let source, let translation):
@@ -665,43 +673,50 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
     }
 
-    /// Translates the partner's newest message as soon as it appears: a fresh copy first,
-    /// then the screen. Each message is translated once.
+    /// Translates the partner's newest message on screen as soon as it appears; each message once.
+    /// A fresh copy is only offered: reading the clipboard makes iOS ask for paste permission and
+    /// blocks the caller until it is answered, so reading it while the keyboard opens stopped the
+    /// keyboard from ever drawing (iOS then switched back to the Apple keyboard).
     private func refreshIncoming() {
         guard SharedStore.autoIncoming, hasFullAccess, SharedStore.apiKey != nil else { return }
-        var source: String?
         let changeCount = UIPasteboard.general.changeCount
         if changeCount != lastPasteboardCheck {
             lastPasteboardCheck = changeCount
             if hasNewCopy {
-                SharedStore.handledPasteboard = changeCount
-                if let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !copied.isEmpty, !LanguageDetector.isVietnamese(copied) {
-                    SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
-                    source = copied
-                }
+                if case .incomingBusy = info {} else { info = .copied }
             }
         }
-        if source == nil, let line = SharedStore.screenLines().last(where: { $0.side == .partner }),
-           !LanguageDetector.isVietnamese(line.text) {
-            source = line.text
-        }
-        guard let text = source, !similar(text, lastIncoming) else { return }
-        lastIncoming = text
-        translateIncoming(text)
+        guard let line = SharedStore.screenLines().last(where: { $0.side == .partner }),
+              !similar(line.text, lastIncoming), !LanguageDetector.isVietnamese(line.text) else { return }
+        lastIncoming = line.text
+        translateIncoming(line.text)
     }
 
+    /// Translates the copied message. Only after a tap, and off the main thread, so the keys stay
+    /// responsive while iOS asks for paste permission.
     private func translateCopied() {
         guard readyKey() != nil else { return }
         SharedStore.handledPasteboard = UIPasteboard.general.changeCount
-        guard let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !copied.isEmpty else {
-            mode = .failed("Chưa có tin nào được sao chép.")
+        mode = .normal
+        info = .incomingBusy
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            DispatchQueue.main.async { self?.received(copied: copied) }
+        }
+    }
+
+    private func received(copied: String) {
+        guard !copied.isEmpty else {
+            info = .message("Chưa đọc được tin đã sao chép. Khi iOS hỏi, chọn “Cho phép dán”.")
+            return
+        }
+        guard !LanguageDetector.isVietnamese(copied) else {
+            info = .message("Tin vừa sao chép đã là tiếng Việt.")
             return
         }
         SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
         lastIncoming = copied
         translateIncoming(copied)
-        mode = .normal
     }
 
     private func translateIncoming(_ text: String) {

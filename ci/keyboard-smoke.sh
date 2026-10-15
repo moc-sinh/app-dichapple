@@ -121,9 +121,19 @@ run_phase() {
             echo
         done
     fi
-    if grep -q "current=$KEYBOARD_ID" "$OUT/$name-host.log" && [ -z "$(keyboard_pid)" ]; then
-        FAILED=1
-        echo "::error::Dịch Apple was the current keyboard but its process is gone (phase '$name')"
+    if grep -q "current=$KEYBOARD_ID" "$OUT/$name-host.log"; then
+        if [ -z "$(keyboard_pid)" ]; then
+            FAILED=1
+            echo "::error::Dịch Apple was the current keyboard but its process is gone (phase '$name')"
+        fi
+        # The keys take ~290 pt; below that only the system's globe/dictation strip showed.
+        height=$(sed -n 's/^KEYBOARD_HEIGHT=//p' "$OUT/$name-host.log" | tail -1)
+        if [ "${height:-0}" -lt 250 ]; then
+            FAILED=1
+            echo "::error::The keyboard never drew its keys in phase '$name' (height ${height:-unknown} pt)"
+        else
+            echo "Keyboard drawn: $height pt"
+        fi
     fi
     endgroup
 }
