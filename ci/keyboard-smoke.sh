@@ -20,6 +20,8 @@ group() { echo "::group::$*"; }
 endgroup() { echo "::endgroup::"; }
 crash_reports() { ls "$REPORTS" 2>/dev/null | grep -i -E 'MSTrans' || true; }
 keyboard_pid() { pgrep -f 'MSTransKeyboard.appex/MSTransKeyboard' | head -1; }
+# Runs a command for at most $1 seconds; macOS has no `timeout`.
+limit() { perl -e 'alarm shift @ARGV; exec @ARGV or die "$!"' "$@"; }
 
 group "Host app"
 rm -rf "$HOST" && mkdir -p "$HOST"
@@ -69,8 +71,8 @@ print(phones[0]["udid"] if phones else "")' "$RUNTIME")
 echo "Runtime $RUNTIME, device $UDID"
 DATA=~/Library/Developer/CoreSimulator/Devices/$UDID/data
 defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-xcrun simctl boot "$UDID"
-xcrun simctl bootstatus "$UDID" -b >/dev/null
+limit 180 xcrun simctl boot "$UDID"
+limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
 xcrun simctl install "$UDID" "$APP" || exit 1
 xcrun simctl install "$UDID" "$HOST" || exit 1
 # MSTrans first, so it is the keyboard that comes up.
@@ -89,22 +91,22 @@ run_phase() {
     xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
     pkill -f 'MSTransKeyboard.appex/MSTransKeyboard' >/dev/null 2>&1
     sleep 1
-    xcrun simctl launch --terminate-running-process \
+    limit 60 xcrun simctl launch --terminate-running-process \
         --stdout="$PWD/$OUT/$name-host.log" --stderr="$PWD/$OUT/$name-host.err" "$UDID" "$HOST_ID"
     sleep 8
     pid=$(keyboard_pid)
     if [ -n "$pid" ]; then
         echo "Keyboard process: running (pid $pid)"
-        footprint "$pid" 2>&1 | head -12
+        limit 20 footprint "$pid" 2>&1 | head -12
     else
         echo "Keyboard process: not running"
     fi
     sleep 8
-    xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null 2>&1
+    limit 30 xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null 2>&1
     echo "--- host log"
     cat "$OUT/$name-host.log"
     echo "--- keyboard process after 16 s: $(keyboard_pid || true)"
-    xcrun simctl spawn "$UDID" log show --last 1m --style compact \
+    limit 90 xcrun simctl spawn "$UDID" log show --last 1m --style compact \
         --predicate 'process == "MSTransKeyboard" OR eventMessage CONTAINS[c] "MSTransKeyboard" OR eventMessage CONTAINS[c] "dichapple"' \
         > "$OUT/$name-system.log" 2>&1
     echo "--- system log (errors)"
@@ -145,7 +147,7 @@ GROUP_DIR=$(xcrun simctl get_app_container "$UDID" "$APP_ID" groups 2>/dev/null 
 echo "App Group container: ${GROUP_DIR:-none}"
 TCC=$(find "$DATA" -name TCC.db -path '*Library/TCC/*' 2>/dev/null | head -1)
 echo "TCC database: ${TCC:-none}"
-xcrun simctl shutdown "$UDID"
+limit 120 xcrun simctl shutdown "$UDID"
 python3 - "$TCC" "$GROUP_DIR" <<'EOF'
 import os, plistlib, sqlite3, sys, time
 tcc, group_dir = sys.argv[1], sys.argv[2]
@@ -178,9 +180,9 @@ if group_dir:
         plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)
     print("App Group defaults:", sorted(values))
 EOF
-xcrun simctl boot "$UDID"
-xcrun simctl bootstatus "$UDID" -b >/dev/null
-printf '你好，请问这个型号的价格是多少？' | xcrun simctl pbcopy "$UDID"
+limit 180 xcrun simctl boot "$UDID"
+limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
+printf '你好，请问这个型号的价格是多少？' | limit 30 xcrun simctl pbcopy "$UDID"
 endgroup
 
 run_phase full-access
@@ -189,14 +191,14 @@ group "What the keyboard saved"
 [ -n "$GROUP_DIR" ] && plutil -p "$GROUP_DIR/Library/Preferences/group.com.mocsinh.dichapple.plist" 2>&1 | grep -v -i -E 'apikey|history'
 endgroup
 
-xcrun simctl ui "$UDID" appearance dark
+limit 30 xcrun simctl ui "$UDID" appearance dark
 run_phase dark
-xcrun simctl ui "$UDID" appearance light
+limit 30 xcrun simctl ui "$UDID" appearance light
 
 # Screenshots of each tab of the app, light and dark, with a few sample translations.
 group "App screens"
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
-xcrun simctl shutdown "$UDID"
+limit 120 xcrun simctl shutdown "$UDID"
 python3 - "$GROUP_DIR" <<'EOF'
 import json, os, plistlib, sys, time, uuid
 path = os.path.join(sys.argv[1], "Library/Preferences/group.com.mocsinh.dichapple.plist")
@@ -223,19 +225,19 @@ with open(path, "wb") as f:
     plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)
 print("sample data written")
 EOF
-xcrun simctl boot "$UDID"
-xcrun simctl bootstatus "$UDID" -b >/dev/null
+limit 180 xcrun simctl boot "$UDID"
+limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
 for appearance in light dark; do
-    xcrun simctl ui "$UDID" appearance "$appearance"
+    limit 30 xcrun simctl ui "$UDID" appearance "$appearance"
     for tab in translate history glossary settings; do
-        xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" >/dev/null
+        limit 60 xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" >/dev/null
         sleep 4
-        xcrun simctl io "$UDID" screenshot "$OUT/app-$tab-$appearance.png" >/dev/null 2>&1 && echo "app-$tab-$appearance.png"
+        limit 30 xcrun simctl io "$UDID" screenshot "$OUT/app-$tab-$appearance.png" >/dev/null 2>&1 && echo "app-$tab-$appearance.png"
     done
 done
 new=$(crash_reports)
 [ -n "$new" ] && { FAILED=1; echo "::error::Crash reports: $new"; for f in $new; do head -c 20000 "$REPORTS/$f"; done; }
 endgroup
 
-xcrun simctl shutdown "$UDID" >/dev/null 2>&1
+limit 120 xcrun simctl shutdown "$UDID" >/dev/null 2>&1
 exit $FAILED

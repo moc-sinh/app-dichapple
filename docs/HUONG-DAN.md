@@ -50,7 +50,7 @@ Hai bước đầu được đánh dấu xong sau khi bạn mở bàn phím MSTr
 - **Đọc mà không mở bàn phím**: mở app **Phím tắt** › **+** › thêm thao tác **Dịch tin đã sao chép** (của MSTrans) › đặt tên. Rồi vào Cài đặt › Trợ năng › Cảm ứng › **Chạm vào mặt sau** › **Chạm hai lần** › chọn phím tắt đó. Từ đó: sao chép tin, gõ hai lần vào lưng iPhone là bản dịch hiện lên.
 
 **Trong app MSTrans**
-- **Dịch**: dịch đoạn dài, hai chiều (nút ⇄ đổi chiều), có nút dán, sao chép và chia sẻ.
+- **Dịch**: dịch đoạn dài, hai chiều (nút ⇄ đổi chiều), có nút dán, sao chép và chia sẻ; bên dưới là 3 bản dịch gần nhất, chạm để xem và chép lại.
 - **Lịch sử**: mọi tin đã dịch (xanh là bạn gửi, cam là đối tác), tìm kiếm, vuốt phải để đánh dấu câu hay dùng, vuốt trái để xóa. Tắt lưu lịch sử trong Cài đặt › Dữ liệu nếu không muốn giữ.
 - **Thuật ngữ**: cặp từ luôn dịch cố định, ví dụ 主轴 → trục chính.
 

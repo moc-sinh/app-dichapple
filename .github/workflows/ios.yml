@@ -85,6 +85,7 @@ jobs:
             ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= build | tail -20
 
       - name: Open the keyboard in the simulator
+        timeout-minutes: 15
         run: bash ci/keyboard-smoke.sh
 
       - uses: actions/upload-artifact@v4

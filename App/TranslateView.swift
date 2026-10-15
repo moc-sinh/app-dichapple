@@ -3,6 +3,7 @@ import SwiftUI
 /// Translate anything here; the keyboard does the same inside chat apps.
 struct TranslateView: View {
     var showSettings: () -> Void
+    var showHistory: () -> Void
 
     private enum Direction { case outgoing, incoming }
 
@@ -21,9 +22,12 @@ struct TranslateView: View {
     @State private var task: Task<Void, Never>?
     @State private var copied = false
     @State private var setup = SetupStatus.current
+    @State private var recent: [HistoryItem] = []
+    @State private var selected: HistoryItem?
 
-    init(showSettings: @escaping () -> Void) {
+    init(showSettings: @escaping () -> Void, showHistory: @escaping () -> Void) {
         self.showSettings = showSettings
+        self.showHistory = showHistory
     }
 
     var body: some View {
@@ -36,7 +40,9 @@ struct TranslateView: View {
                     if busy { busyCard }
                     if let error { errorCard(error) }
                     if let result { resultCard(result) }
-                    if result == nil && error == nil && !busy { tipCard }
+                    if result == nil && error == nil && !busy {
+                        if recent.isEmpty { tipCard } else { recentSection }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -48,11 +54,20 @@ struct TranslateView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { BrandTitle() }
             }
+            .sheet(item: $selected) { item in
+                HistoryDetail(item: item, onChange: { SharedStore.updateHistory($0); refresh() },
+                              onDelete: { SharedStore.removeHistory(id: item.id); refresh() })
+            }
         }
-        .onAppear { setup = .current }
+        .onAppear(perform: refresh)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { setup = .current }
+            if phase == .active { refresh() }
         }
+    }
+
+    private func refresh() {
+        setup = .current
+        recent = Array(SharedStore.history().prefix(3))
     }
 
     // MARK: Direction
@@ -144,18 +159,20 @@ struct TranslateView: View {
                     .accessibilityLabel(direction == .outgoing ? "Tin bạn muốn gửi" : "Tin của đối tác")
             }
             HStack(spacing: 10) {
-                // The system paste button reads the clipboard without asking for permission.
-                PasteButton(payloadType: String.self) { strings in
-                    guard let pasted = strings.first else { return }
-                    Task { @MainActor in
-                        text = pasted
-                        result = nil
-                        error = nil
+                // One coloured control at a time: Paste while empty, then Translate.
+                if text.isEmpty {
+                    // The system paste button reads the clipboard without asking for permission.
+                    PasteButton(payloadType: String.self) { strings in
+                        guard let pasted = strings.first else { return }
+                        Task { @MainActor in
+                            text = pasted
+                            result = nil
+                            error = nil
+                        }
                     }
-                }
-                .labelStyle(.iconOnly)
-                .buttonBorderShape(.circle)
-                if !text.isEmpty {
+                    .labelStyle(.titleAndIcon)
+                    .buttonBorderShape(.capsule)
+                } else {
                     Button {
                         text = ""
                         result = nil
@@ -165,6 +182,7 @@ struct TranslateView: View {
                     }
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.circle)
+                    .tint(Color.secondary)
                     .accessibilityLabel("Xóa chữ")
                 }
                 Spacer()
@@ -270,6 +288,33 @@ struct TranslateView: View {
         }
     }
 
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Gần đây").font(.headline)
+                Spacer()
+                Button("Xem tất cả", action: showHistory).font(.subheadline)
+            }
+            .padding(.horizontal, 4)
+            VStack(spacing: 0) {
+                ForEach(recent) { item in
+                    Button { selected = item } label: {
+                        HistoryRow(item: item)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if item.id != recent.last?.id {
+                        Divider().padding(.leading, 32)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+    }
+
     private var tipCard: some View {
         Card {
             Label("Dùng ngay trong Zalo, WeChat, Messenger", systemImage: "keyboard")
@@ -307,6 +352,7 @@ struct TranslateView: View {
                                        languageCode: outgoing ? target.code : sourceLanguage?.code ?? "",
                                        meaning: translation.meaning, note: translation.note)
                 SharedStore.addHistory(item)
+                recent = Array(SharedStore.history().prefix(3))
                 resultSide = item.side
                 resultLanguage = item.languageName
                 result = translation

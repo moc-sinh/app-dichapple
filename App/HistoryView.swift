@@ -130,7 +130,7 @@ struct HistoryView: View {
     private func replace(_ item: HistoryItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index] = item
-        SharedStore.saveHistory(items)
+        SharedStore.updateHistory(item)
     }
 
     private func toggleStar(_ item: HistoryItem) {
@@ -141,7 +141,7 @@ struct HistoryView: View {
 
     private func delete(_ item: HistoryItem) {
         items.removeAll { $0.id == item.id }
-        SharedStore.saveHistory(items)
+        SharedStore.removeHistory(id: item.id)
     }
 
     private func clear() {

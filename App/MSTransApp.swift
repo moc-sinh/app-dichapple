@@ -17,7 +17,7 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            TranslateView(showSettings: { tab = .settings })
+            TranslateView(showSettings: { tab = .settings }, showHistory: { tab = .history })
                 .tabItem { Label("Dịch", systemImage: "translate") }
                 .tag(AppTab.translate)
             HistoryView()

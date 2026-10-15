@@ -59,4 +59,15 @@ extension SharedStore {
     static func saveHistory(_ items: [HistoryItem]) {
         defaults.set(try? JSONEncoder().encode(items), forKey: historyKey)
     }
+
+    static func updateHistory(_ item: HistoryItem) {
+        var items = history()
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index] = item
+        saveHistory(items)
+    }
+
+    static func removeHistory(id: UUID) {
+        saveHistory(history().filter { $0.id != id })
+    }
 }
