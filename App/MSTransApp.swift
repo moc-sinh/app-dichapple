@@ -2,6 +2,14 @@ import SwiftUI
 
 @main
 struct MSTransApp: App {
+    init() {
+        // `-printDiagnostics YES` prints the keyboard diagnostics at launch (used by CI).
+        if UserDefaults.standard.bool(forKey: "printDiagnostics") {
+            print(Diagnostics.report())
+            fflush(stdout)
+        }
+    }
+
     var body: some Scene {
         WindowGroup { RootView() }
     }

@@ -51,6 +51,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     // MARK: Lifecycle
 
+    // Each step is recorded so the app's diagnostics can tell how far the keyboard got.
+    override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
+        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
+        SharedStore.noteKeyboard("1 khởi động")
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        SharedStore.noteKeyboard("1 khởi động")
+    }
+
     override func loadView() {
         let input = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
         input.allowsSelfSizing = true
@@ -59,6 +70,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        SharedStore.noteKeyboard("2 tạo giao diện")
 
         infoButton.contentHorizontalAlignment = .leading
         infoButton.addAction(UIAction { [weak self] _ in self?.openInfo() }, for: .touchUpInside)
@@ -107,6 +119,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        SharedStore.noteKeyboard(hasFullAccess ? "3 sắp hiện (có truy cập đầy đủ)" : "3 sắp hiện (chưa có truy cập đầy đủ)")
         if hasFullAccess {
             SharedStore.keyboardHasFullAccess = true
             SharedStore.keyboardVisible = true
@@ -123,6 +136,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         refreshIncoming()
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(timeInterval: 1.5, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
     }
 
     override func viewWillDisappear(_ animated: Bool) {

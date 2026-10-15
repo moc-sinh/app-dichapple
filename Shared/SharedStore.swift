@@ -34,6 +34,8 @@ enum SharedStore {
         static let keyboardVisible = "keyboardVisible"
         static let keyboardHasFullAccess = "keyboardHasFullAccess"
         static let handledPasteboard = "handledPasteboard"
+        static let keyboardStage = "keyboardStage"
+        static let keyboardStageAt = "keyboardStageAt"
     }
 
     // MARK: Settings
@@ -85,6 +87,18 @@ enum SharedStore {
         get { defaults.bool(forKey: Key.keyboardHasFullAccess) }
         set { defaults.set(newValue, forKey: Key.keyboardHasFullAccess) }
     }
+    /// How far the keyboard got the last time iOS started it, for the app's diagnostics.
+    static func noteKeyboard(_ stage: String) {
+        defaults.set(stage, forKey: Key.keyboardStage)
+        defaults.set(Date(), forKey: Key.keyboardStageAt)
+    }
+
+    static var keyboardStage: (stage: String, at: Date)? {
+        guard let stage = defaults.string(forKey: Key.keyboardStage),
+              let at = defaults.object(forKey: Key.keyboardStageAt) as? Date else { return nil }
+        return (stage, at)
+    }
+
     static var handledPasteboard: Int {
         get { defaults.integer(forKey: Key.handledPasteboard) }
         set { defaults.set(newValue, forKey: Key.handledPasteboard) }

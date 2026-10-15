@@ -245,5 +245,15 @@ new=$(crash_reports)
 [ -n "$new" ] && { FAILED=1; echo "::error::Crash reports: $new"; for f in $new; do head -c 20000 "$REPORTS/$f"; done; }
 endgroup
 
+group "Keyboard diagnostics as the app reports them"
+limit 60 xcrun simctl launch --terminate-running-process --stdout="$PWD/$OUT/diagnostics.txt" "$UDID" "$APP_ID" -printDiagnostics YES >/dev/null
+sleep 4
+cat "$OUT/diagnostics.txt"
+if ! grep -q "Bàn phím chạy lần cuối: bước 4" "$OUT/diagnostics.txt"; then
+    FAILED=1
+    echo "::error::The diagnostics did not see the keyboard reach step 4"
+fi
+endgroup
+
 limit 120 xcrun simctl shutdown "$UDID" >/dev/null 2>&1
 exit $FAILED

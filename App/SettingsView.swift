@@ -56,10 +56,15 @@ struct SettingsView: View {
             StepRow(done: nil, title: "Cho phép dán (nên bật)",
                     detail: "Lần đầu dịch tin đã sao chép, chọn “Cho phép dán”. Để không bị hỏi lại: Cài đặt › MSTrans › Dán từ ứng dụng khác › Cho phép.")
             Button("Mở Cài đặt iPhone", action: openSystemSettings)
+            NavigationLink {
+                DiagnosticsView()
+            } label: {
+                Label("Chẩn đoán bàn phím", systemImage: "stethoscope")
+            }
         } header: {
             Text("Bắt đầu")
         } footer: {
-            Text("Bước 1 và 2 được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu.")
+            Text("Bước 1 và 2 được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu. Bàn phím không hiện? Mở Chẩn đoán bàn phím và gửi báo cáo.")
         }
     }
 
