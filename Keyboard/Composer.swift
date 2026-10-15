@@ -132,6 +132,8 @@ struct TypedText {
 
     /// Nil when unknown: the field's text is read again.
     private(set) var before: String?
+    /// Characters in `before`, kept as it changes: counting a String walks all of it.
+    private var length = 0
     /// The text after the cursor when this was last read; typing never changes it.
     private var after = ""
     private var recent: [Snapshot] = []
@@ -144,6 +146,7 @@ struct TypedText {
     mutating func reset(before: String, after: String, now: Double) {
         let kept = String(before.suffix(Self.keep))
         self.before = kept
+        length = kept.count
         self.after = after
         recent = [Snapshot(text: kept, at: now)]
     }
@@ -156,7 +159,12 @@ struct TypedText {
     mutating func insert(_ s: String, now: Double) {
         guard var b = before else { return }
         b += s
-        if b.count > Self.keep { b = String(b.suffix(Self.keep)) }
+        length += s.count
+        // Trimmed now and then, not on every key.
+        if length > Self.keep + 100 {
+            b = String(b.suffix(Self.keep))
+            length = Self.keep
+        }
         record(b, now)
     }
 
@@ -164,6 +172,7 @@ struct TypedText {
         // Deleting past what is known: read the field again.
         guard var b = before, !b.isEmpty else { return forget() }
         b.removeLast()
+        length = max(0, length - 1)
         record(b, now)
     }
 
@@ -189,6 +198,13 @@ struct TypedText {
     /// The field often hands over only part of the text (the current paragraph or sentence).
     private static func matches(_ mine: String, _ field: String) -> Bool {
         if field.isEmpty { return mine.isEmpty || mine.last == "\n" }
+        // Byte for byte first (the usual case, and fast); then as characters, for an app that
+        // hands back the same text composed differently.
+        if endsWith(mine.utf8, field.utf8) || (mine.utf8.count >= 48 && endsWith(field.utf8, mine.utf8)) { return true }
         return mine.hasSuffix(field) || (mine.count >= 16 && field.hasSuffix(mine))
+    }
+
+    private static func endsWith(_ text: String.UTF8View, _ suffix: String.UTF8View) -> Bool {
+        text.count >= suffix.count && text.suffix(suffix.count).elementsEqual(suffix)
     }
 }

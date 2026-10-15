@@ -110,6 +110,8 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
+- Phím sát mép màn hình (q, a, z, p, l, xóa, phím cách) không bị iOS giữ lại để chờ thao tác vuốt hệ thống; tiếng click và rung chạy sau khi phím đã hiện.
+- Bộ gõ Telex xử lý mỗi phím trong khoảng 0,01 mili giây (đo trên máy chủ build), nhỏ hơn hàng trăm lần một khung hình của màn hình.
 - Bàn phím đọc bộ nhớ tạm ở luồng nền (khi bạn chạm để dịch, hoặc ngay lúc mở nếu bật Dịch ngay), nên dù iOS có hỏi quyền dán thì phím vẫn hiện và gõ được.
 - Mở bàn phím là kết nối tới OpenAI được mở sẵn, nên lần bấm Dịch đầu tiên không mất thêm thời gian bắt tay mạng. Mạng rớt hay máy chủ bận thì tự thử lại một lần.
 - Bấm Dịch là dịch cả tin, kể cả khi tin có nhiều dòng (iOS chỉ đưa cho bàn phím đoạn đang gõ, bàn phím tự đọc hết các đoạn còn lại).

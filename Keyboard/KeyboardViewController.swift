@@ -280,7 +280,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .sentences:
             if before.isEmpty || before.hasSuffix("\n") {
                 on = true
-            } else if before.hasSuffix(" "), let last = before.trimmingCharacters(in: .whitespaces).last {
+            } else if before.hasSuffix(" "), let last = before.last(where: { $0 != " " && $0 != "\t" }) {
                 on = ".!?".contains(last)
             } else {
                 on = false
