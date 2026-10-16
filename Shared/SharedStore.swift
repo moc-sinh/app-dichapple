@@ -32,6 +32,7 @@ enum SharedStore {
         static let keyboardStage = "keyboardStage"
         static let keyboardStageAt = "keyboardStageAt"
         static let contextClearedAt = "contextClearedAt"
+        static let typingLog = "typingLog"
     }
 
     // MARK: Settings
@@ -94,6 +95,12 @@ enum SharedStore {
     static var handledPasteboard: Int {
         get { defaults.integer(forKey: Key.handledPasteboard) }
         set { defaults.set(newValue, forKey: Key.handledPasteboard) }
+    }
+
+    /// The keyboard's recent typing events (see `TypingLog`), for the app's diagnostics.
+    static var typingLog: [String] {
+        get { defaults.stringArray(forKey: Key.typingLog) ?? [] }
+        set { defaults.set(newValue.isEmpty ? nil : newValue, forKey: Key.typingLog) }
     }
 
     // MARK: Context

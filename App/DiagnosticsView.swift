@@ -244,6 +244,8 @@ enum Diagnostics {
 struct DiagnosticsView: View {
     @State private var report = ""
     @State private var copied = false
+    @State private var typingLog: [String] = []
+    @State private var typingLogCopied = false
 
     var body: some View {
         List {
@@ -267,9 +269,37 @@ struct DiagnosticsView: View {
                     .font(.system(.footnote, design: .monospaced))
                     .textSelection(.enabled)
             }
+            Section {
+                Text("Khi gõ bị sai hay mất chữ: gõ tiếp đến khi lỗi hiện ra, quay lại đây bấm Sao chép nhật ký gõ rồi gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ bằng MSTrans. Nó chỉ nằm trên iPhone này.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button {
+                    let info = Bundle.main.infoDictionary
+                    let header = "Nhật ký gõ MSTrans \(info?["CFBundleShortVersionString"] as? String ?? "?") · iOS \(UIDevice.current.systemVersion)"
+                    Clipboard.copy(([header] + typingLog).joined(separator: "\n"))
+                    typingLogCopied = true
+                } label: {
+                    Label(typingLogCopied ? "Đã sao chép nhật ký gõ" : "Sao chép nhật ký gõ (\(typingLog.count) dòng)",
+                          systemImage: typingLogCopied ? "checkmark" : "keyboard")
+                }
+                .disabled(typingLog.isEmpty)
+                Button(role: .destructive) {
+                    SharedStore.typingLog = []
+                    typingLog = []
+                    typingLogCopied = false
+                } label: {
+                    Label("Xóa nhật ký gõ", systemImage: "trash")
+                }
+                .disabled(typingLog.isEmpty)
+            } header: {
+                Text("Nhật ký gõ phím")
+            }
         }
         .navigationTitle("Chẩn đoán bàn phím")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { report = Diagnostics.report() }
+        .onAppear {
+            report = Diagnostics.report()
+            typingLog = SharedStore.typingLog
+        }
     }
 }

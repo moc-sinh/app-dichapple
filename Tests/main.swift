@@ -144,6 +144,96 @@ do {
     }
 }
 
+// Typing fast long after the field was read (reading the partner's reply first): the app's first
+// reports still show the empty field, which must not undo the first keys.
+for lag in 1...4 {
+    fastChecks += 1
+    var field = LaggingField()
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    now = 5
+    typeFast("ddi nguwowif", lag: lag, into: &field, composer: &composer, now: &now)
+    if field.text != "đi người" {
+        failed += 1
+        print("FAIL fast typing after a pause (lag \(lag)): \(field.text), want đi người")
+    }
+}
+
+// Sent right after typing: once the app has shown the message, an empty field means it was sent,
+// even a moment later, and the next message starts afresh.
+do {
+    fastChecks += 1
+    var field = LaggingField()
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    typeFast("ok", lag: 2, into: &field, composer: &composer, now: &now)
+    _ = composer.fieldChanged(before: field.seen(lag: 0), after: "", now: now)
+    now += 0.3
+    field.replace(with: "")
+    _ = composer.fieldChanged(before: "", after: "", now: now)
+    now += 0.3
+    typeFast("chaof", lag: 2, into: &field, composer: &composer, now: &now)
+    if field.text != "chào" {
+        failed += 1
+        print("FAIL sent right after typing: \(field.text), want chào")
+    }
+}
+
+// An app that drops an edit (seen in Spotlight): while it may still be catching up the keyboard
+// waits; once it must have caught up, the field's text is taken.
+do {
+    fastChecks += 1
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    _ = composer.letter("d", now: now)
+    now += 0.06
+    let edits = composer.letter("d", now: now)  // delete "d", insert "đ"; the app drops the insert
+    let waiting = composer.fieldChanged(before: "", after: "", now: now + 0.6)
+    let caughtUp = composer.fieldChanged(before: "", after: "", now: now + 1.6)
+    if edits != [.delete(1), .insert("đ")] || waiting || !caughtUp || composer.before != "" {
+        failed += 1
+        print("FAIL dropped edit: \(edits), waiting \(waiting), caught up \(caughtUp), before \(composer.before ?? "nil")")
+    }
+}
+
+// Many messages typed fast into an app whose reports come late and unevenly, some not at all, with
+// pauses between bursts: every message comes out exactly as typed.
+do {
+    var seed: UInt64 = 42
+    func random(_ n: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int((seed >> 33) % UInt64(n))
+    }
+    let messages = ["hahaha haha ddi ddaau", "Tooi khoong bieets", "ww nguwowif muaw", "dd ddd dddd", "aa aaa uwow"]
+    for round in 0..<200 {
+        fastChecks += 1
+        let keys = messages[round % messages.count]
+        let want = keys.split(separator: " ").map { Telex.output(for: String($0)) }.joined(separator: " ")
+        var field = LaggingField()
+        var composer = Composer()
+        var now = Double(random(10))
+        composer.start(before: "", after: "", now: 0)
+        for key in keys {
+            if random(20) == 0 {
+                // A pause: the app catches up and says so.
+                now += 0.6 + Double(random(20)) / 10
+                _ = composer.fieldChanged(before: field.seen(lag: 0), after: "", now: now)
+            } else if random(3) != 0 {
+                _ = composer.fieldChanged(before: field.seen(lag: random(5)), after: "", now: now)
+            }
+            field.apply(key == " " ? composer.space(now: now) : composer.letter(key, now: now))
+            now += 0.03 + Double(random(12)) / 100
+        }
+        if field.text != want {
+            failed += 1
+            print("FAIL uneven reports (round \(round)): \(keys) -> \(field.text), want \(want)")
+        }
+    }
+}
+
 // Speed: keys through the engine and the composer as the keyboard sends them, one at a time.
 let sample = ["nguwowif", "dduwowcj", "tieesng", "vieetj", "khoong", "aaaaaaaaaaaaaaaaaaaa",
               "hahahahahahahahahahahahahahahahahahahaha", "facebook", "guwir", "baos", "gias", "chuaw", "ngwoif"]

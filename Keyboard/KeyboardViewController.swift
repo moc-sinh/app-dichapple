@@ -56,6 +56,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private var composer = Composer()
     private var lastKeyAt: CFTimeInterval = 0
+    /// A look at the field is due once typing pauses (`checkField`).
+    private var checkPending = false
+    /// A pause this long means the keys typed so far have reached the app.
+    private static let settle: CFTimeInterval = 0.5
     private var benchmark: TypingBenchmark?
 
     // MARK: Lifecycle
@@ -148,6 +152,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.hapticsEnabled = hasFullAccess && SharedStore.haptics
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
+        TypingLog.add("▶ mở: \(TypingLog.tail(composer.before ?? ""))|\(TypingLog.head(textDocumentProxy.documentContextAfterInput ?? ""))")
         matchAppearance()
         configureReturn()
         updateAutoCapitalization()
@@ -194,6 +199,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         pollTimer = nil
         task?.cancel()
         incomingTask?.cancel()
+        TypingLog.add("■ đóng")
+        TypingLog.save()
     }
 
     override func viewWillLayoutSubviews() {
@@ -232,8 +239,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     func keyboardLayoutView(_ view: KeyboardLayoutView, perform action: KeyAction) {
         let now = CACurrentMediaTime()
+        if composer.before == nil {
+            readField()
+        } else if now - lastKeyAt >= Self.settle {
+            // The first key after a pause: the field has caught up, so it is looked at first.
+            reconcile(now: now)
+        }
         lastKeyAt = now
-        if composer.before == nil { readField() }
         let edits: [Composer.Edit]
         switch action {
         case .letter(let c):
@@ -253,7 +265,27 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             edits = []
         }
         apply(edits)
+        TypingLog.add("\(Self.describe(action)) → \(edits.map(Self.describeEdit).joined()) | \(TypingLog.tail(composer.before ?? "?"))")
+        scheduleCheck()
         edited()
+    }
+
+    private static func describe(_ action: KeyAction) -> String {
+        switch action {
+        case .letter(let c): return String(c)
+        case .text(let s): return s
+        case .delete(let word): return word ? "⌫⌫" : "⌫"
+        case .space: return "␣"
+        case .newline: return "⏎"
+        case .moveCursor(let offset): return "↔\(offset)"
+        }
+    }
+
+    private static func describeEdit(_ edit: Composer.Edit) -> String {
+        switch edit {
+        case .delete(let count): return "-\(count)"
+        case .insert(let s): return "+" + s.replacingOccurrences(of: "\n", with: "⏎")
+        }
     }
 
     func keyboardLayoutView(_ view: KeyboardLayoutView, globeTouchedWith event: UIEvent) {
@@ -284,11 +316,61 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// The app reported its text. While it is only catching up with keys typed here nothing
     /// changes; when the text was changed elsewhere (sent, cleared, cursor moved) typing starts
     /// afresh from it.
+    ///
+    /// While keys are going in, reports trail them, and some apps (Spotlight) now and then report
+    /// text that was never there: taking it reset the word being typed and turned Shift on
+    /// mid-sentence. So the keyboard keeps to what it typed and looks at the field once typing
+    /// pauses. Only an emptied field is taken at once: the message was sent, the next one starts
+    /// afresh (with a capital).
     private func fieldReported() {
         let proxy = textDocumentProxy
-        if composer.fieldChanged(before: proxy.documentContextBeforeInput ?? "", after: proxy.documentContextAfterInput ?? "",
-                                 now: CACurrentMediaTime()) {
-            updateAutoCapitalization()
+        let before = proxy.documentContextBeforeInput ?? "", after = proxy.documentContextAfterInput ?? ""
+        let now = CACurrentMediaTime()
+        TypingLog.add("ô \(TypingLog.tail(before))|\(TypingLog.head(after))")
+        guard composer.before != nil else { return updateAutoCapitalization() }
+        if now - lastKeyAt < Self.settle, !(before.isEmpty && after.isEmpty && !proxy.hasText) {
+            return scheduleCheck()
+        }
+        reconcile(before: before, after: after, now: now)
+    }
+
+    private func reconcile(now: CFTimeInterval) {
+        let proxy = textDocumentProxy
+        reconcile(before: proxy.documentContextBeforeInput ?? "", after: proxy.documentContextAfterInput ?? "", now: now)
+    }
+
+    /// Takes the field's text if it was changed elsewhere (see `Composer.fieldChanged`).
+    private func reconcile(before: String, after: String, now: CFTimeInterval) {
+        guard composer.before != nil else { return }
+        // Some apps now and then hand over no text at all although the field has some.
+        if before.isEmpty, after.isEmpty, textDocumentProxy.hasText { return }
+        guard composer.fieldChanged(before: before, after: after, now: now) else { return }
+        TypingLog.add("↺ theo ô: \(TypingLog.tail(before))")
+        updateAutoCapitalization()
+    }
+
+    /// Looks at the field once typing pauses, and again once the app must have caught up: a field
+    /// still behind then means the app dropped an edit, and the keyboard follows the field rather
+    /// than edit text that is not there.
+    private func scheduleCheck() {
+        guard !checkPending else { return }
+        checkPending = true
+        let wait = max(0.05, lastKeyAt + Self.settle - CACurrentMediaTime())
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.checkField() }
+    }
+
+    private func checkField() {
+        checkPending = false
+        let now = CACurrentMediaTime()
+        let idle = now - lastKeyAt
+        if idle < Self.settle { return scheduleCheck() }
+        reconcile(now: now)
+        let caughtUp = TypedText.lag + 0.1
+        if idle < caughtUp {
+            checkPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + (caughtUp - idle)) { [weak self] in self?.checkField() }
+        } else {
+            TypingLog.save()
         }
     }
 

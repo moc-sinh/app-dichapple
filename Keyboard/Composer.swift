@@ -128,6 +128,8 @@ struct TypedText {
     private struct Snapshot {
         let text: String
         let at: Double
+        /// Counts up with every snapshot.
+        let n: Int
     }
 
     /// Nil when unknown: the field's text is read again.
@@ -137,18 +139,25 @@ struct TypedText {
     /// The text after the cursor when this was last read; typing never changes it.
     private var after = ""
     private var recent: [Snapshot] = []
+    private var count = 0
+    /// The oldest snapshot the field can still be showing. An app shows edits in order and never
+    /// goes back, so once it has shown a text, older ones are not lag any more: an empty field
+    /// after the message appeared means it was sent.
+    private var shown = 0
 
     private static let keep = 300
     private static let history = 64
     /// How long an app may take to show an edit.
-    private static let lag = 1.5
+    static let lag = 1.5
 
     mutating func reset(before: String, after: String, now: Double) {
         let kept = String(before.suffix(Self.keep))
         self.before = kept
         length = kept.count
         self.after = after
-        recent = [Snapshot(text: kept, at: now)]
+        count += 1
+        shown = count
+        recent = [Snapshot(text: kept, at: now, n: count)]
     }
 
     mutating func forget() {
@@ -178,21 +187,30 @@ struct TypedText {
 
     private mutating func record(_ b: String, _ now: Double) {
         before = b
-        recent.append(Snapshot(text: b, at: now))
+        count += 1
+        recent.append(Snapshot(text: b, at: now, n: count))
         if recent.count > Self.history { recent.removeFirst(recent.count - Self.history) }
     }
 
     /// Whether the field shows what this keyboard typed, now or a moment ago (the app has not
     /// caught up yet). If not, the text was changed elsewhere.
-    func explains(before field: String, after fieldAfter: String, now: Double) -> Bool {
-        guard let before, fieldAfter == after else { return false }
-        if Self.matches(before, field) { return true }
-        // Newest first: an app that is behind is usually only a few keys behind.
+    mutating func explains(before field: String, after fieldAfter: String, now: Double) -> Bool {
+        guard before != nil, fieldAfter == after else { return false }
+        // Newest first. A text counts while it was on screen less than `lag` ago: until the next
+        // edit replaced it, not since it was typed (the empty field read when the keyboard opened
+        // stays current until the first key, however long that takes). Partial texts can match
+        // several snapshots ("ha" and "haha"); the oldest is kept, so a later report is not
+        // taken for going back.
+        var match: Int?
+        var replacedAt = now
         for snapshot in recent.reversed() {
-            guard now - snapshot.at < Self.lag else { break }
-            if Self.matches(snapshot.text, field) { return true }
+            guard snapshot.n >= shown, now - replacedAt < Self.lag else { break }
+            if Self.matches(snapshot.text, field) { match = snapshot.n }
+            replacedAt = snapshot.at
         }
-        return false
+        guard let match else { return false }
+        shown = match
+        return true
     }
 
     /// The field often hands over only part of the text (the current paragraph or sentence).

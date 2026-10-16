@@ -49,9 +49,17 @@ final class KeyboardLayoutView: UIView {
         var committed = false
         var popup: KeyPopup?
         var anchorX: CGFloat = 0
+        let start: CGPoint
+        let beganAt = CACurrentMediaTime()
 
-        init(key: Key) { self.key = key }
+        init(key: Key, start: CGPoint = .zero) {
+            self.key = key
+            self.start = start
+        }
     }
+
+    /// When a key last went down: while keys are being pressed, taps reach a little higher.
+    private var lastTouchAt: CFTimeInterval = 0
 
     weak var delegate: KeyboardLayoutViewDelegate?
     var hapticsEnabled = true
@@ -437,15 +445,27 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
+    /// Taps a little above the top row still type. The translate bar sits right above it, and a
+    /// thumb typing fast grazed it: the letter was lost and the language list opened. While keys
+    /// are being pressed the reach goes further up, over most of the bar; at rest the bar keeps
+    /// all but its lowest strip.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let reach: CGFloat = CACurrentMediaTime() - lastTouchAt < 0.3 ? 30 : 10
+        return point.x >= 0 && point.x <= bounds.width && point.y >= -reach && point.y <= bounds.height
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        lastTouchAt = CACurrentMediaTime()
         for touch in touches {
-            guard let key = hitKey(at: touch.location(in: self)) else { continue }
+            let point = touch.location(in: self)
+            guard let key = hitKey(at: point) else { continue }
+            if point.y < 0 { TypingLog.add("↑ \(key.character ?? "?") (chạm cao)") }
             // Typing with two thumbs: an earlier letter is committed as soon as the next key goes down.
             for (other, track) in tracks where other !== touch && other !== accentTouch && !track.committed && track.key.character != nil {
                 cancelLongPress(other)
                 commit(track)
             }
-            let track = Track(key: key)
+            let track = Track(key: key, start: point)
             tracks[touch] = track
             begin(track, touch: touch, event: event)
         }
@@ -542,6 +562,15 @@ final class KeyboardLayoutView: UIView {
         cancelLongPress(touch)
         guard let track = tracks.removeValue(forKey: touch) else { return }
         removePopup(track)
+        var cancelled = cancelled
+        if cancelled, track.key.character != nil, !track.committed {
+            // iOS sometimes cancels a quick tap while it checks for a system swipe; a short tap
+            // that barely moved was a key press, and is typed rather than lost.
+            let point = touch.location(in: self)
+            let quick = CACurrentMediaTime() - track.beganAt < 0.35 && hypot(point.x - track.start.x, point.y - track.start.y) < 14
+            TypingLog.add("x \(track.key.character ?? "?") bị iOS hủy, \(quick ? "vẫn gõ" : "bỏ")")
+            if quick { cancelled = false }
+        }
 
         if touch === trackpadTouch {
             trackpadTouch = nil
