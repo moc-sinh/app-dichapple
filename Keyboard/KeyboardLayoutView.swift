@@ -102,6 +102,8 @@ final class KeyboardLayoutView: UIView {
     /// never build 33 keys again (that held up the key after every switch, and punctuation is
     /// on the 123 page, so it happened often).
     private var built: [Page: [[Key]]] = [:]
+    /// The rows of a page built so far while it is prepared a row at a time.
+    private var partial: [Page: [[Key]]] = [:]
     /// The size each page was last laid out for.
     private var laidOut: [Page: CGSize] = [:]
     private var tracks: [UITouch: Track] = [:]
@@ -252,47 +254,76 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func build(_ page: Page) -> [[Key]] {
-        let rows = rowKinds(page).map { $0.map { makeKey($0, on: page) } }
-        for key in rows.joined() {
-            key.cap.isHidden = true
-            insertSubview(key.cap, belowSubview: overlay)
+    /// Builds the page's rows up to `limit`, after those already built; the page is complete
+    /// once all are.
+    @discardableResult
+    private func build(_ page: Page, rows limit: Int = .max) -> [[Key]] {
+        let kinds = rowKinds(page)
+        var rows = partial[page] ?? []
+        while rows.count < min(limit, kinds.count) {
+            let row = kinds[rows.count].map { makeKey($0, on: page) }
+            for key in row {
+                key.cap.isHidden = true
+                insertSubview(key.cap, belowSubview: overlay)
+            }
+            rows.append(row)
         }
-        built[page] = rows
+        if rows.count == kinds.count {
+            partial[page] = nil
+            built[page] = rows
+        } else {
+            partial[page] = rows
+        }
         return rows
     }
 
     /// The bottom row changed (globe key): every page is built again.
     private func rebuildAll() {
-        for key in built.values.joined().joined() { key.cap.removeFromSuperview() }
+        for key in [built, partial].flatMap({ $0.values.joined() }).joined() { key.cap.removeFromSuperview() }
         built.removeAll()
+        partial.removeAll()
         laidOut.removeAll()
         keys = []
         showPage()
     }
 
-    /// Once the keyboard is up and no key is being pressed: builds and lays out the 123 page and
+    /// Once the keyboard is up, in the gaps between keys: builds and lays out the 123 page and
     /// draws the capitals, so the first switch to 123 and the first capital cost nothing then.
-    /// A step at a time (about 20 ms in all in CI), so a key pressed meanwhile never waits for all.
+    /// A row at a time, so a key pressed meanwhile waits for one row at most. It used to wait for
+    /// half a second without keys: typing from the moment the keyboard opened, it never came, and
+    /// the first 123 built the page there and then (25 ms on an iPhone).
     private func prepareHidden(step: Int = 0) {
         guard window != nil, bounds.width > 0 else { return }
-        guard CACurrentMediaTime() - lastTouchAt > 0.5, tracks.isEmpty else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.prepareHidden(step: step) }
+        let idle = CACurrentMediaTime() - lastTouchAt
+        guard idle > Self.prepareGap, tracks.isEmpty else {
+            let wait = tracks.isEmpty ? Self.prepareGap - idle + 0.01 : 0.1
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.prepareHidden(step: step) }
             return
         }
+        let started = CACurrentMediaTime()
         switch step {
-        case 0:
-            if built[.numbers] == nil { _ = build(.numbers) }
-        case 1:
+        case 0..<4:
+            if built[.numbers] == nil { build(.numbers, rows: step + 1) }
+        case 4:
             for p in [Page.letters, .numbers] where laidOut[p] != bounds.size { layout(p) }
-        case 2:
-            for key in (built[.letters] ?? []).joined() { key.capital?.layer.displayIfNeeded() }
-        case 3:
-            for key in (built[.numbers] ?? []).joined() { key.label.layer.displayIfNeeded() }
+        case 5..<8:
+            for key in row(of: .letters, step - 5) { key.capital?.layer.displayIfNeeded() }
+        case 8..<12:
+            for key in row(of: .numbers, step - 8) { key.label.layer.displayIfNeeded() }
         default:
             return
         }
+        let took = CACurrentMediaTime() - started
+        if took > 0.004 { TypingLog.add("⏱ chuẩn bị trang ẩn bước \(step) mất \(Int(took * 1000))ms") }
         DispatchQueue.main.async { [weak self] in self?.prepareHidden(step: step + 1) }
+    }
+
+    /// How long after a key the hidden pages may take a step: a typing gap, not a pause.
+    private static let prepareGap: CFTimeInterval = 0.15
+
+    private func row(of page: Page, _ r: Int) -> [Key] {
+        guard let rows = built[page], rows.indices.contains(r) else { return [] }
+        return rows[r]
     }
 
     private func makeKey(_ kind: Kind, on page: Page) -> Key {

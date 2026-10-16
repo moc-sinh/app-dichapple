@@ -275,7 +275,7 @@ struct DiagnosticsView: View {
                     .foregroundStyle(.secondary)
                 Button {
                     let info = Bundle.main.infoDictionary
-                    let header = "Nhật ký gõ MSTrans \(info?["CFBundleShortVersionString"] as? String ?? "?") · iOS \(UIDevice.current.systemVersion)"
+                    let header = "Nhật ký gõ MSTrans \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) · iOS \(UIDevice.current.systemVersion)"
                     Clipboard.copy(([header] + typingLog).joined(separator: "\n"))
                     typingLogCopied = true
                 } label: {
