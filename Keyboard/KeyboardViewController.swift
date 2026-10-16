@@ -56,6 +56,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private var composer = Composer()
     private var lastKeyAt: CFTimeInterval = 0
+    /// Until the first key: iOS sometimes hands the app's text settings over only after the
+    /// keyboard appeared, so Shift for the first letter is worked out again when the app reports.
+    private var typedSinceAppear = false
     /// A look at the field is due once typing pauses (`checkField`).
     private var checkPending = false
     /// The key typed last and the typing as it was before it, so holding that key can take it
@@ -91,6 +94,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidLoad() {
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
+        TypingLog.watchMainThread()
         // The first Telex key builds the engine's tables and the first language check loads a
         // model: both now, off the main thread, not on the first key press.
         DispatchQueue.global(qos: .userInitiated).async {
@@ -169,6 +173,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
+        typedSinceAppear = false
         TypingLog.add("▶ mở: \(TypingLog.tail(composer.before ?? ""))|\(TypingLog.head(textDocumentProxy.documentContextAfterInput ?? ""))")
         matchAppearance()
         configureReturn()
@@ -191,6 +196,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         while let current = ancestor {
             current.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
             ancestor = current.superview
+        }
+        if !typedSinceAppear {
+            updateAutoCapitalization()
+            configureReturn()
         }
         startBenchmarkIfAsked()
     }
@@ -217,7 +226,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         task?.cancel()
         incomingTask?.cancel()
         TypingLog.add("■ đóng")
-        TypingLog.save()
+        TypingLog.save(now: true)
     }
 
     override func viewWillLayoutSubviews() {
@@ -263,6 +272,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             reconcile(now: now)
         }
         lastKeyAt = now
+        typedSinceAppear = true
         let previous = composer
         var typed = false
         let edits: [Composer.Edit]
@@ -370,6 +380,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             return scheduleCheck()
         }
         reconcile(before: before, after: after, now: now)
+        if !typedSinceAppear { updateAutoCapitalization() }
     }
 
     private func reconcile(now: CFTimeInterval) {

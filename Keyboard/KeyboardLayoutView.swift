@@ -35,6 +35,8 @@ final class KeyboardLayoutView: UIView {
         let kind: Kind
         let cap = UIView()
         let label = UILabel()
+        /// Letters page: the capital, drawn once; Shift shows it instead of drawing the letter again.
+        var capital: UILabel?
         let icon = UIImageView()
         var hit = CGRect.zero
         var shadowSize = CGSize.zero
@@ -76,13 +78,19 @@ final class KeyboardLayoutView: UIView {
     /// taken back. Return still waits for the lift, so a message is never sent by a graze.
     var typesOnTouchDown = true
     var showsGlobe = false {
-        didSet { if showsGlobe != oldValue { rebuild() } }
+        didSet { if showsGlobe != oldValue { rebuildAll() } }
     }
     private(set) var shift: Shift = .off
 
     private var page: Page = .letters
     private var rows: [[Key]] = []
     private var keys: [Key] = []
+    /// Each page's keys, built once and kept: 123 and ABC only show another set of keys, they
+    /// never build 33 keys again (that held up the key after every switch, and punctuation is
+    /// on the 123 page, so it happened often).
+    private var built: [Page: [[Key]]] = [:]
+    /// The size each page was last laid out for.
+    private var laidOut: [Page: CGSize] = [:]
     private var tracks: [UITouch: Track] = [:]
     private var lastShiftTap: CFTimeInterval = 0
 
@@ -108,13 +116,16 @@ final class KeyboardLayoutView: UIView {
     private var sparePopups: [KeyPopup] = []
     /// Key frames are computed only when the size or the keys change, not on every pass.
     private var needsKeyFrames = true
-    private var laidOutSize = CGSize.zero
 
     static let cornerRadius: CGFloat = {
         if #available(iOS 26.0, *) { return 8.5 }
         return 5
     }()
     private static let iconConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+    /// Made once: Shift changes its icon at the start of every sentence.
+    private static let shiftOff = UIImage(systemName: "shift", withConfiguration: iconConfig)
+    private static let shiftOn = UIImage(systemName: "shift.fill", withConfiguration: iconConfig)
+    private static let capsLock = UIImage(systemName: "capslock.fill", withConfiguration: iconConfig)
 
     private static let accents: [String: [String]] = [
         "a": ["a", "á", "à", "ả", "ã", "ạ", "ă", "â"],
@@ -156,7 +167,7 @@ final class KeyboardLayoutView: UIView {
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         feedbackObserver = observer
-        rebuild()
+        showPage()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -189,12 +200,12 @@ final class KeyboardLayoutView: UIView {
     func showLetters() {
         guard page != .letters else { return }
         page = .letters
-        rebuild()
+        showPage()
     }
 
     // MARK: Building
 
-    private func rowKinds() -> [[Kind]] {
+    private func rowKinds(_ page: Page) -> [[Kind]] {
         func chars(_ s: String) -> [Kind] { s.map { .char(String($0)) } }
         let other: Page = page == .letters ? .numbers : .letters
         let bottom: [Kind] = showsGlobe ? [.page(other), .globe, .space, .ret] : [.page(other), .space, .ret]
@@ -208,18 +219,56 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func rebuild() {
-        keys.forEach { $0.cap.removeFromSuperview() }
-        rows = rowKinds().map { $0.map(makeKey) }
-        keys = rows.flatMap { $0 }
-        keys.forEach { insertSubview($0.cap, belowSubview: overlay) }
+    /// Shows the current page's keys, building them the first time.
+    private func showPage() {
+        for key in keys { key.cap.isHidden = true }
+        rows = built[page] ?? build(page)
+        keys = Array(rows.joined())
+        for key in keys { key.cap.isHidden = false }
         applyShift()
         applyReturn()
-        needsKeyFrames = true
-        setNeedsLayout()
+        if laidOut[page] != bounds.size {
+            needsKeyFrames = true
+            setNeedsLayout()
+        }
     }
 
-    private func makeKey(_ kind: Kind) -> Key {
+    private func build(_ page: Page) -> [[Key]] {
+        let rows = rowKinds(page).map { $0.map { makeKey($0, on: page) } }
+        for key in rows.joined() {
+            key.cap.isHidden = true
+            insertSubview(key.cap, belowSubview: overlay)
+        }
+        built[page] = rows
+        return rows
+    }
+
+    /// The bottom row changed (globe key): every page is built again.
+    private func rebuildAll() {
+        for key in built.values.joined().joined() { key.cap.removeFromSuperview() }
+        built.removeAll()
+        laidOut.removeAll()
+        keys = []
+        showPage()
+    }
+
+    /// Once the keyboard is up and no key is being pressed: builds and lays out the 123 page and
+    /// draws the capitals, so the first switch to 123 and the first capital cost nothing then.
+    private func prepareHidden() {
+        guard window != nil, bounds.width > 0 else { return }
+        guard CACurrentMediaTime() - lastTouchAt > 0.5, tracks.isEmpty else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.prepareHidden() }
+            return
+        }
+        if built[.numbers] == nil { _ = build(.numbers) }
+        for p in [Page.letters, .numbers] where laidOut[p] != bounds.size { layout(p) }
+        for key in built.values.joined().joined() {
+            key.label.layer.displayIfNeeded()
+            key.capital?.layer.displayIfNeeded()
+        }
+    }
+
+    private func makeKey(_ kind: Kind, on page: Page) -> Key {
         let key = Key(kind: kind)
         let cap = key.cap
         cap.isUserInteractionEnabled = false
@@ -247,6 +296,16 @@ final class KeyboardLayoutView: UIView {
             key.label.font = .systemFont(ofSize: page == .letters ? 23 : 22.5)
             key.label.adjustsFontSizeToFitWidth = false
             cap.accessibilityLabel = s
+            if page == .letters {
+                let capital = UILabel()
+                capital.text = s.uppercased()
+                capital.font = key.label.font
+                capital.textColor = .label
+                capital.textAlignment = .center
+                capital.isHidden = true
+                cap.addSubview(capital)
+                key.capital = capital
+            }
         case .shift:
             cap.accessibilityLabel = "Shift"
         case .delete:
@@ -274,15 +333,22 @@ final class KeyboardLayoutView: UIView {
 
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
+        laidOut.removeAll()
         needsKeyFrames = true
         setNeedsLayout()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width > 0, rows.count == 4, needsKeyFrames || bounds.size != laidOutSize else { return }
+        guard bounds.width > 0, needsKeyFrames || laidOut[page] != bounds.size else { return }
         needsKeyFrames = false
-        laidOutSize = bounds.size
+        layout(page)
+    }
+
+    /// Places one page's keys for the current size.
+    private func layout(_ page: Page) {
+        guard let rows = built[page], rows.count == 4 else { return }
+        laidOut[page] = bounds.size
         overlay.frame = bounds
         Self.layoutPasses += 1
         let width = bounds.width
@@ -297,7 +363,7 @@ final class KeyboardLayoutView: UIView {
 
         for (r, row) in rows.enumerated() {
             let y = top + CGFloat(r) * (keyHeight + rowGap)
-            let frames = rowFrames(r, row, y: y, height: keyHeight, unit: unit, gap: gap, side: side, width: width)
+            let frames = rowFrames(r, row, page: page, y: y, height: keyHeight, unit: unit, gap: gap, side: side, width: width)
             for (key, frame) in zip(row, frames) { key.cap.frame = frame }
         }
 
@@ -313,9 +379,10 @@ final class KeyboardLayoutView: UIView {
             }
         }
 
-        for key in keys {
+        for key in rows.joined() {
             let b = key.cap.bounds
             key.label.frame = key.character != nil && page == .letters ? b.offsetBy(dx: 0, dy: -1) : b.insetBy(dx: 2, dy: 0)
+            key.capital?.frame = key.label.frame
             key.icon.frame = b
             if key.shadowSize != b.size {
                 key.shadowSize = b.size
@@ -324,7 +391,7 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func rowFrames(_ r: Int, _ row: [Key], y: CGFloat, height: CGFloat, unit u: CGFloat,
+    private func rowFrames(_ r: Int, _ row: [Key], page: Page, y: CGFloat, height: CGFloat, unit u: CGFloat,
                            gap g: CGFloat, side: CGFloat, width w: CGFloat) -> [CGRect] {
         func rect(_ x: CGFloat, _ width: CGFloat) -> CGRect { CGRect(x: x, y: y, width: width, height: height) }
 
@@ -399,12 +466,15 @@ final class KeyboardLayoutView: UIView {
         UIView.performWithoutAnimation {
             for key in keys {
                 switch key.kind {
-                case .char(let s) where page == .letters:
-                    let text = upper ? s.uppercased() : s
-                    if key.label.text != text { key.label.text = text }
+                case .char:
+                    // Both cases are drawn once; Shift only swaps which one shows.
+                    if let capital = key.capital, capital.isHidden == upper {
+                        capital.isHidden = !upper
+                        key.label.isHidden = upper
+                    }
                 case .shift:
-                    let name = shift == .locked ? "capslock.fill" : (upper ? "shift.fill" : "shift")
-                    key.icon.image = UIImage(systemName: name, withConfiguration: Self.iconConfig)
+                    let image = shift == .locked ? Self.capsLock : (upper ? Self.shiftOn : Self.shiftOff)
+                    if key.icon.image !== image { key.icon.image = image }
                     key.cap.backgroundColor = color(for: key, pressed: false)
                     key.cap.accessibilityTraits = upper ? [.keyboardKey, .selected] : .keyboardKey
                     key.cap.accessibilityValue = shift == .locked ? "Khóa chữ hoa" : nil
@@ -417,7 +487,7 @@ final class KeyboardLayoutView: UIView {
 
     private func applyReturn() {
         for key in keys where key.kind == .ret {
-            key.label.text = returnTitle
+            if key.label.text != returnTitle { key.label.text = returnTitle }
             key.label.textColor = returnProminent && returnEnabled ? .white : (returnEnabled ? .label : .tertiaryLabel)
             key.cap.backgroundColor = color(for: key, pressed: false)
             key.cap.accessibilityLabel = returnTitle
@@ -428,6 +498,7 @@ final class KeyboardLayoutView: UIView {
         UIView.animate(withDuration: 0.15) {
             for key in self.keys {
                 key.label.alpha = on ? 0 : 1
+                key.capital?.alpha = on ? 0 : 1
                 key.icon.alpha = on ? 0 : 1
             }
         }
@@ -524,7 +595,7 @@ final class KeyboardLayoutView: UIView {
             feedback()
             page = p
             if p != .letters { shift = .off }
-            rebuild()
+            showPage()
             track.committed = true
         case .space:
             feedback()
@@ -792,6 +863,7 @@ final class KeyboardLayoutView: UIView {
         default: key = keys.first { $0.character?.lowercased() == wanted }
         }
         guard let key else { return nil }
+        lastTouchAt = CACurrentMediaTime()
         for (_, track) in tracks where !track.committed && track.key.character != nil { commit(track) }
         let track = Track(key: key)
         begin(track, touch: nil, event: nil)
@@ -817,6 +889,7 @@ final class KeyboardLayoutView: UIView {
             if trackpadTouch != nil { setTrackpad(false) }
         } else {
             haptics.prepare()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.prepareHidden() }
         }
     }
 }

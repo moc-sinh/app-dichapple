@@ -91,7 +91,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 
 Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
 
-Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím xử lý lâu (⏱), tiếng click và rung lâu, và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms), tiếng click và rung lâu, và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
 
 ## 6. Mỗi 7 ngày
 
@@ -118,8 +118,9 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
+- Trang chữ, trang 123 và trang ký hiệu được tạo một lần rồi giữ lại: bấm 123/ABC chỉ đổi trang đang hiện, không dựng lại 33 phím. Chữ hoa và chữ thường trên phím được vẽ sẵn, nên đầu câu không phải vẽ lại cả bàn phím.
+- Bộ gõ Telex xử lý mỗi phím trên chữ đang gõ, không chạy lại cả từ: khoảng 0,004 mili giây mỗi phím, và cho kết quả y hệt bản trước trên 2,7 triệu lần gõ thử.
 - Phím sát mép màn hình (q, a, z, p, l, xóa, phím cách) không bị iOS giữ lại để chờ thao tác vuốt hệ thống; tiếng click và rung chạy sau khi phím đã hiện.
-- Bộ gõ Telex xử lý mỗi phím trong khoảng 0,01 mili giây (đo trên máy chủ build), nhỏ hơn hàng trăm lần một khung hình của màn hình.
 - Bàn phím đọc bộ nhớ tạm ở luồng nền (khi bạn chạm để dịch, hoặc ngay lúc mở nếu bật Dịch ngay), nên dù iOS có hỏi quyền dán thì phím vẫn hiện và gõ được.
 - Mở bàn phím là kết nối tới OpenAI được mở sẵn, nên lần bấm Dịch đầu tiên không mất thêm thời gian bắt tay mạng. Mạng rớt hay máy chủ bận thì tự thử lại một lần.
 - Bấm Dịch là dịch cả tin, kể cả khi tin có nhiều dòng (iOS chỉ đưa cho bàn phím đoạn đang gõ, bàn phím tự đọc hết các đoạn còn lại).
