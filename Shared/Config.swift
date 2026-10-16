@@ -107,8 +107,10 @@ struct Language: Equatable {
     static func named(_ code: String) -> Language? { all.first { $0.code == code } }
 }
 
-/// How tall the keys are. "Vừa" is the Apple keyboard's height; "Lớn", the default, is a little
-/// taller, as most other keyboards are. Only the height changes: the keys stay as wide as the screen allows.
+/// How tall the keys are. "Vừa" is the Apple keyboard's height: 45 pt keys 11 pt apart on an
+/// iPhone Pro Max with iOS 26, measured on screenshots (the 216 pt used before gave 42.75 pt
+/// keys, a little short). "Lớn", the default, is a little taller, as most other keyboards are.
+/// Only the height changes: the keys stay as wide as the screen allows.
 enum KeyboardSize: Int, CaseIterable {
     case medium, large, extraLarge
 
@@ -123,7 +125,7 @@ enum KeyboardSize: Int, CaseIterable {
     /// The key area's height in points, with the iPhone upright and on its side.
     var keysHeight: (portrait: Double, landscape: Double) {
         switch self {
-        case .medium: return (216, 160)
+        case .medium: return (225, 160)
         case .large: return (236, 168)
         case .extraLarge: return (256, 176)
         }

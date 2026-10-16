@@ -60,6 +60,8 @@ final class KeyboardLayoutView: UIView {
         var popup: KeyPopup?
         /// The key lit instead of a pop-up (see `showsPopups`).
         var lit: Key?
+        /// The letter a typed key's finger last slid on to, for the typing log.
+        var slidTo: String?
         var anchorX: CGFloat = 0
         let start: CGPoint
         let beganAt = CACurrentMediaTime()
@@ -169,6 +171,7 @@ final class KeyboardLayoutView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        TypingLog.mark("tạo phím")
         isMultipleTouchEnabled = true
         clipsToBounds = false
         overlay.isUserInteractionEnabled = false
@@ -242,6 +245,7 @@ final class KeyboardLayoutView: UIView {
 
     /// Shows the current page's keys, building them the first time.
     private func showPage() {
+        TypingLog.mark("đổi trang")
         for key in keys { key.cap.isHidden = true }
         rows = built[page] ?? build(page)
         keys = Array(rows.joined())
@@ -300,6 +304,7 @@ final class KeyboardLayoutView: UIView {
             DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.prepareHidden(step: step) }
             return
         }
+        TypingLog.mark("chuẩn bị trang ẩn")
         let started = CACurrentMediaTime()
         switch step {
         case 0..<4:
@@ -405,6 +410,7 @@ final class KeyboardLayoutView: UIView {
 
     /// Places one page's keys for the current size.
     private func layout(_ page: Page) {
+        TypingLog.mark("xếp phím")
         guard let rows = built[page], rows.count == 4 else { return }
         laidOut[page] = bounds.size
         overlay.frame = bounds
@@ -611,6 +617,7 @@ final class KeyboardLayoutView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        TypingLog.mark("chạm")
         let now = CACurrentMediaTime()
         lastTouchAt = now
         // Two fingers landing in the same instant: the earlier one types first.
@@ -656,6 +663,8 @@ final class KeyboardLayoutView: UIView {
             lastShiftTap = now
             applyShift()
             track.committed = true
+            // Keys that type nothing are noted too: a tap that hit Shift is not read as a lost letter.
+            TypingLog.add(shift == .locked ? "⇪" : shift == .once ? "⇧" : "⇧ tắt")
         case .delete:
             feedback(.delete)
             setPressed(key, true)
@@ -667,6 +676,7 @@ final class KeyboardLayoutView: UIView {
             if p != .letters { shift = .off }
             showPage()
             track.committed = true
+            TypingLog.add(p == .letters ? "▦ ABC" : p == .numbers ? "▦ 123" : "▦ #+=")
         case .space:
             feedback()
             setPressed(key, true)
@@ -708,8 +718,18 @@ final class KeyboardLayoutView: UIView {
             }
             switch track.key.kind {
             case .char:
+                guard let key = hitKey(at: point), key !== track.key, let s = key.character else { continue }
+                guard !track.committed else {
+                    // Typed as the finger landed: the finger now on another letter types nothing
+                    // more. Noted, so a letter lost this way (a thumb that rolled on to the next
+                    // key without lifting) is told from one the screen never passed on.
+                    if track.slidTo != s {
+                        track.slidTo = s
+                        TypingLog.add("↝ \(track.key.character ?? "?") trượt sang \(s), không gõ \(s)")
+                    }
+                    continue
+                }
                 // Sliding to another letter before lifting types that letter instead.
-                guard !track.committed, let key = hitKey(at: point), key !== track.key, key.character != nil else { continue }
                 track.key = key
                 showPopup(track)
                 cancelLongPress(touch)
@@ -734,6 +754,11 @@ final class KeyboardLayoutView: UIView {
         cancelLongPress(touch)
         guard let track = tracks.removeValue(forKey: touch) else { return }
         removePopup(track)
+        // A real tap lasts 30 ms or more: one that began and ended together was held back by iOS
+        // until the finger lifted (the edge delay `KeyboardViewController.viewDidAppear` turns off).
+        if !cancelled, let s = track.key.character, CACurrentMediaTime() - track.beganAt < 0.012 {
+            TypingLog.add("⌛ \(s) iOS giữ lại tới lúc nhấc tay")
+        }
         var cancelled = cancelled
         if cancelled, track.key.character != nil, !track.committed {
             // iOS sometimes cancels a quick tap while it checks for a system swipe; a short tap
@@ -752,6 +777,7 @@ final class KeyboardLayoutView: UIView {
         }
         if touch === accentTouch {
             accentTouch = nil
+            TypingLog.add("… bảng dấu đóng: \(cancelled ? "bị hủy" : accentPicker?.selected == 0 ? "giữ nguyên" : accentPicker?.selectedText ?? "?")")
             if !cancelled, let picker = accentPicker, let text = picker.selectedText {
                 if !track.typedOnDown {
                     delegate?.keyboardLayoutView(self, perform: .text(text))
@@ -870,12 +896,15 @@ final class KeyboardLayoutView: UIView {
     }
 
     @objc private func longPressFired() {
+        TypingLog.mark("giữ phím")
         longPressTimer = nil
         guard let touch = longPressTouch, let track = tracks[touch], !track.committed || track.typedOnDown else { return }
         longPressTouch = nil
         switch track.key.kind {
         case .char(let s):
             guard let options = Self.accents[s.lowercased()] else { return }
+            // Lifting on the plain letter types nothing more: noted, so it is not read as a lost key.
+            TypingLog.add("… giữ \(s): bảng dấu")
             let upper = track.typedOnDown ? track.upper : shift != .off && page == .letters
             let shown = upper ? options.map { $0.uppercased() } : options
             removePopup(track)

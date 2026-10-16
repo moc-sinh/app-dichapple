@@ -34,20 +34,34 @@ enum TypingLog {
     }
 
     private static var watching = false
+    /// The keyboard's own work since the main thread last woke, named by `mark`.
+    private static var marks: [String] = []
+
+    /// Names work the keyboard is about to do on the main thread: a busy line lists what ran, so
+    /// a slow moment points at its cause. A 106 ms one in a log from an iPhone had no line before
+    /// it to tell what it was.
+    static func mark(_ what: String) {
+        if marks.count < 4, !marks.contains(what) { marks.append(what) }
+    }
 
     /// Notes each time the keyboard's main thread stays busy long enough to hold up a key (over
     /// 12 ms, more than a frame): with the app's own delay, it tells a slow keyboard from a slow app.
+    /// "không rõ": none of the marked work ran (iOS itself, or drawing).
     static func watchMainThread() {
         guard !watching else { return }
         watching = true
         var wokeAt = CACurrentMediaTime()
         let wake = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, -2_000_000) { _, _ in
             wokeAt = CACurrentMediaTime()
+            TypingLog.marks.removeAll(keepingCapacity: true)
         }
         // After Core Animation's commit and the key click: all the keyboard's work for the event.
         let sleep = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 3_000_000) { _, _ in
             let busy = CACurrentMediaTime() - wokeAt
-            if busy > 0.012 { TypingLog.add("⏱ bàn phím bận \(Int(busy * 1000))ms") }
+            if busy > 0.012 {
+                let what = TypingLog.marks.isEmpty ? "không rõ" : TypingLog.marks.joined(separator: ", ")
+                TypingLog.add("⏱ bàn phím bận \(Int(busy * 1000))ms · \(what)")
+            }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), wake, .commonModes)
         CFRunLoopAddObserver(CFRunLoopGetMain(), sleep, .commonModes)

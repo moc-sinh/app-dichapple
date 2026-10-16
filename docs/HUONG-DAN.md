@@ -93,7 +93,9 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 
 Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
 
-Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms; dòng ngay trước nó cho biết lúc đó bàn phím làm gì, ví dụ ⓘ ẩn dòng báo hay ▭ thanh dịch vẽ lại), rung lâu (⏱ rung mất … ms), và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), chạm bị iOS giữ lại tới lúc nhấc tay (⌛ … iOS giữ lại), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms · việc bàn phím đang làm lúc đó, ví dụ phím, kiểm tra ô, thanh dịch; “không rõ” là lúc đó không có việc nào của MSTrans được ghi tên: iOS tự làm, hoặc vẽ lại), rung lâu (⏱ rung mất … ms), và lúc app chat báo lại chữ (⌛ app báo lại chữ chậm nhất sau … ms; nhiều app chỉ thỉnh thoảng mới báo, nên đây không hẳn là lúc chữ hiện). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
+
+Chữ bị mất cũng có dấu vết: ngón tay trượt từ phím vừa gõ sang phím khác mà không nhấc lên (↝ d trượt sang a, không gõ a), hay giữ phím lâu nên hiện bảng dấu (… giữ d: bảng dấu, rồi … bảng dấu đóng). Không có dòng nào cho chữ bị mất thì iOS đã không chuyển cú chạm đó cho bàn phím.
 
 ## 6. Mỗi 7 ngày
 

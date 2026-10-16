@@ -110,6 +110,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        TypingLog.mark("tạo giao diện")
         SharedStore.noteKeyboard("2 tạo giao diện")
         TypingLog.watchMainThread()
         // The first Telex key builds the engine's tables: now, off the main thread, not on the
@@ -186,6 +187,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        TypingLog.mark("mở")
         fullAccess = hasFullAccess
         SharedStore.noteKeyboard(fullAccess ? "3 sắp hiện (có truy cập đầy đủ)" : "3 sắp hiện (chưa có truy cập đầy đủ)")
         if fullAccess { SharedStore.keyboardHasFullAccess = true }
@@ -225,12 +227,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         globeKnown = true
         // iOS holds back touches near the screen edges (q, a, z, p, l, delete, space) while it
         // checks for a system swipe, so those keys answered late when typing fast. The window and
-        // every view up to it can carry such a recognizer.
+        // every view up to it can carry such a recognizer. The log says how many were found: a
+        // tap held back anyway shows as "iOS giữ lại" (see `KeyboardLayoutView.finish`).
+        var released = 0
         var ancestor: UIView? = view
         while let current = ancestor {
-            current.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+            for recognizer in current.gestureRecognizers ?? [] where recognizer.delaysTouchesBegan {
+                recognizer.delaysTouchesBegan = false
+                released += 1
+            }
             ancestor = current.superview
         }
+        TypingLog.add("▶ đã hiện · cử chỉ iOS thôi giữ chạm: \(released)")
         if !typedSinceAppear {
             updateAutoCapitalization()
             configureReturn()
@@ -265,6 +273,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
+        TypingLog.mark("bố cục")
         let compact = traitCollection.verticalSizeClass == .compact
         // Only real changes: a constraint set again asks for another layout of the keyboard.
         let keys = keySize.keysHeight
@@ -299,6 +308,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     // MARK: Keys
 
     func keyboardLayoutView(_ view: KeyboardLayoutView, perform action: KeyAction) {
+        TypingLog.mark("phím")
         let now = CACurrentMediaTime()
         if composer.before == nil {
             readField()
@@ -403,6 +413,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// pauses. Only an emptied field is taken at once: the message was sent, the next one starts
     /// afresh (with a capital).
     private func fieldReported() {
+        TypingLog.mark("ô báo")
         let proxy = textDocumentProxy
         let before = proxy.documentContextBeforeInput ?? "", after = proxy.documentContextAfterInput ?? ""
         let now = CACurrentMediaTime()
@@ -446,6 +457,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func checkField() {
+        TypingLog.mark("kiểm tra ô")
         checkPending = false
         let now = CACurrentMediaTime()
         let idle = now - lastKeyAt
@@ -457,7 +469,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             DispatchQueue.main.asyncAfter(deadline: .now() + (caughtUp - idle)) { [weak self] in self?.checkField() }
         } else {
             if slowestApp > 0 {
-                TypingLog.add("⌛ app hiện chữ chậm nhất sau \(Int(slowestApp * 1000))ms")
+                // When the app reported the text back, not when it showed it: many apps report only
+                // now and then (one did 1.6 s after the last key, once the user stopped).
+                TypingLog.add("⌛ app báo lại chữ chậm nhất sau \(Int(slowestApp * 1000))ms")
                 slowestApp = 0
             }
             TypingLog.save()
@@ -529,6 +543,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     // MARK: Translate bar
 
     private func renderBar() {
+        TypingLog.mark("thanh dịch")
         bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         switch mode {
         case .normal:
@@ -601,6 +616,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     /// Only the pill's title: the bar is not built again.
     private func updateLanguagePill() {
+        TypingLog.mark("tên ngôn ngữ")
         guard let button = languageButton, button.superview != nil else { return }
         let target = shownTarget
         let title = pillTitle(target)
@@ -620,6 +636,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// The icon carries the colour (orange: partner, green: you, gold: check this, red: problem);
     /// the text stays in label colours so it reads on the keyboard background.
     private func renderInfo() {
+        TypingLog.mark("dòng báo")
         let height = infoLineHeight
         infoButton.isHidden = height == 0
         if infoHeight?.constant != height { infoHeight?.constant = height }
@@ -1028,6 +1045,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     guard let self, !Task.isCancelled else { return }
                     self.original = text
                     self.replaceDocument(with: result.text) { [weak self] in
+                        TypingLog.mark("kết quả dịch")
                         let line = ChatLine(side: .me, text: result.text, date: Date())
                         let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
                                                meaning: result.meaning, note: result.note)
@@ -1142,7 +1160,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func tick(_ work: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
+            TypingLog.mark("đọc/thay ô")
+            work()
+        }
     }
 
     // MARK: Translating the partner's messages
@@ -1171,6 +1192,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// makes iOS ask for paste permission and blocks until it is answered, so that waits for a
     /// tap unless the user chose instant mode.
     private func pasteboardChecked(changeCount: Int, fresh: Bool) {
+        TypingLog.mark("clipboard")
         // The user started typing while the clipboard was asked: the info line would appear or go
         // and change the keyboard's height under their thumbs. The next check (a second on) offers it.
         if CACurrentMediaTime() - lastKeyAt < 1.5 { return }
@@ -1248,6 +1270,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func show(incoming source: String, translation: Translation) {
+        TypingLog.mark("tin đối tác")
         lastIncoming = (source, translation)
         info = .incoming(source: source, translation: translation)
         expandIfLong(source: source, translation: translation)
