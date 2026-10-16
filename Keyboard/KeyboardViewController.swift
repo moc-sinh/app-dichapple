@@ -385,9 +385,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         var text = UIColor.label
         switch info {
         case .idle:
-            let count = SharedStore.context().count
-            title = count > 0 ? "Ngữ cảnh: \(count) tin gần đây" : "Chưa có ngữ cảnh"
-            symbol = "eye"
+            // Nothing to say: the line stays empty (its height stays, so the chat doesn't jump).
+            // The context still goes with every translation; the logo shows it.
+            title = ""
+            symbol = ""
             tint = .secondaryLabel
             text = .secondaryLabel
         case .copied:
@@ -423,7 +424,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             tint = .systemRed
         }
         c.title = title
-        c.image = UIImage(systemName: symbol)
+        c.image = symbol.isEmpty ? nil : UIImage(systemName: symbol)
         c.baseForegroundColor = text
         c.imageColorTransformer = UIConfigurationColorTransformer { _ in tint }
         // VoiceOver hears whose message it is; sighted users get it from the icon and its colour.
@@ -438,6 +439,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             return a
         }
         infoButton.configuration = c
+        let idle: Bool
+        if case .idle = info { idle = true } else { idle = false }
+        infoButton.isUserInteractionEnabled = !idle
+        infoButton.isAccessibilityElement = !idle
         infoButton.accessibilityHint = "Chạm để xem chi tiết"
     }
 

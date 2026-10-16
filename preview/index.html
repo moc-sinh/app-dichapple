@@ -471,8 +471,7 @@ button:focus-visible, .field:focus-visible { outline: 3px solid var(--brand); ou
   function renderInfo() {
     var i = S.info, cls = '', icon = ICON.eye, text = '';
     if (i.kind === 'idle') {
-      var n = ctxLines().length;
-      text = n ? 'Ngữ cảnh: ' + n + ' tin gần đây' : 'Chưa có ngữ cảnh';
+      icon = '';
     } else if (i.kind === 'copied') { cls = 'incoming'; icon = ICON.clip; text = 'Có tin vừa sao chép · chạm để dịch'; }
     else if (i.kind === 'incomingBusy') { text = 'Đang dịch tin mới của đối tác…'; }
     else if (i.kind === 'incoming') { cls = 'incoming'; icon = i.note ? ICON.warn : ICON.bubble; text = i.vi; }
