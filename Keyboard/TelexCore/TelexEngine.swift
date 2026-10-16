@@ -1831,6 +1831,16 @@ public struct TelexEngine {
                !(tIdx >= 2 && letters[tIdx - 2].base == UInt8(ascii: "q")) {
                 tIdx -= 1
             }
+            // "uou" nucleus (rượu, hươu, bướu): a w typed after the whole nucleus horns the uo, as
+            // "nguoiw" does for người: the o takes it and render mirrors it onto the u ("ruouwj" →
+            // rượu). Its last u is never the target: "uoư" is no rime.
+            if tIdx >= 2,
+               letters[tIdx].base == UInt8(ascii: "u"), letters[tIdx].mark == .none,
+               letters[tIdx - 1].base == UInt8(ascii: "o"),
+               letters[tIdx - 1].mark == .none || letters[tIdx - 1].mark == .horn,
+               letters[tIdx - 2].base == UInt8(ascii: "u") {
+                tIdx -= 1
+            }
             if tIdx >= 0 {
                 let p = letters[tIdx]
                 if p.mark == .none && p.base == UInt8(ascii: "a") {

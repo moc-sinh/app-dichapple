@@ -20,10 +20,17 @@ struct Composer {
     /// The word before the cursor as the engine last left it. When the text there ends
     /// otherwise, the word was changed elsewhere (the cursor moved, an accent was picked) and
     /// the engine takes it up again before the next key.
-    private var shown = ""
+    private var shown = "" { didSet { vietnameseShown = false } }
+    /// `shown` is the engine's word and could still be Vietnamese, not the keys as typed.
+    private var vietnameseShown = false
+    /// The letter typed last turned a Vietnamese word into the keys typed ("không" + k shows
+    /// "khoongk"): a ⌫ right after it takes that letter back.
+    private var turnedAsTyped = false
     /// The word at the cursor is one the engine cannot take up ("google", "iPhone"): letters
     /// go on it as typed until the word ends.
     private var literal = false
+    /// The word `take` handed the engine, as it was in the field, and the keys `seed` typed for it.
+    private var seeded: (word: String, keys: String)?
     private var text = TypedText()
     private var lastSpaceAt = -10.0
     private var spaceAfterWord = false
@@ -106,15 +113,21 @@ struct Composer {
 
     mutating func letter(_ c: Character, now: Double) -> [Edit] {
         lastSpaceAt = -10
+        turnedAsTyped = false
         follow()
+        // A new word: nothing the engine holds was taken from the field.
+        if engine.isEmpty { seeded = nil }
         if literal { return typeAsIs(c, now: now) }
+        let wasVietnamese = vietnameseShown
         _ = engine.feed(c)
         // Longer than any word the engine holds (32 keys): the rest goes on as typed.
         if engine.isOverflowed {
             literal = true
             return typeAsIs(c, now: now)
         }
-        return show(liveWord(), now: now)
+        let edits = show(liveWord(), now: now)
+        turnedAsTyped = wasVietnamese && !vietnameseShown && shown == engine.rawKeystrokes
+        return edits
     }
 
     /// Digits, punctuation, or a letter from the accent picker, typed as is. Anything but a letter
@@ -155,16 +168,28 @@ struct Composer {
     /// again: ⌫ over the space after a word re-opens it ("tháy ⌫ a" → "thấy").
     mutating func deleteBackward(now: Double) -> [Edit] {
         lastSpaceAt = -10
+        let turned = turnedAsTyped
+        turnedAsTyped = false
         if !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown {
-            if shown == engine.composed {
-                _ = engine.backspace()
+            if turned, case let keys = engine.rawKeystrokes, !Self.isKnownEnglish(keys) {
+                // The letter just typed turned the word into its keys ("không" + k showed
+                // "khoongk"): it is taken back, and the word shows as it did before it.
+                engine.reset()
+                for key in keys.dropLast() { _ = engine.feed(key) }
                 return show(liveWord(), now: now)
             }
-            // The word shows as typed ("good", not the engine's "gôd"): its last letter goes, and the
-            // rest stays as typed.
-            literal = true
+            if shown == engine.composed, seeded == nil {
+                let rest = String(shown.dropLast())
+                _ = engine.backspace()
+                // Only the last letter goes: re-reading the shorter word, the engine may compose it
+                // otherwise ("are" ⌫ showed "ả", "after" ⌫⌫ "at").
+                let live = liveWord()
+                if live.word == rest { return show(live, now: now) }
+            }
+            // The word shows as typed ("good", not the engine's "gôd"), or the engine would change
+            // more than its last letter: that letter goes, and the rest stays as it is.
             let edits = record([.delete(1)], now: now)
-            shown = Self.trailingWord(text.before ?? "")
+            take(Self.trailingWord(text.before ?? ""))
             return edits
         }
         let canReopen = engine.canReopenLastCommit && !(text.before?.last?.isLetter ?? true)
@@ -173,6 +198,8 @@ struct Composer {
         literal = false
         if canReopen, let reopened = engine.reopenLastCommit(), reopened == word {
             shown = word
+            seeded = nil
+            vietnameseShown = Self.couldBeVietnamese(word)
         } else {
             take(word)
         }
@@ -207,6 +234,16 @@ struct Composer {
         engine.reset()
         shown = word
         literal = !word.isEmpty && !engine.seed(word)
+        seeded = literal || word.isEmpty ? nil : (word, engine.rawKeystrokes)
+        vietnameseShown = !literal && !word.isEmpty && Self.couldBeVietnamese(word)
+    }
+
+    /// An English word the engine knows ("good", "are", "wifi"): ⌫ right after its last letter
+    /// takes that letter as typed.
+    private static func isKnownEnglish(_ keys: String) -> Bool {
+        let word = keys.lowercased()
+        return EnglishContextWords.words.contains(word) || EnglishCollisions.words.contains(word)
+            || EnglishContextWords.neutralLoanwords.contains(word) || EnglishContextWords.restoreOnly.contains(word)
     }
 
     /// The word is done: an English word the engine had changed goes back to the keys typed.
@@ -221,19 +258,27 @@ struct Composer {
         }
         // What the engine commits, from what is on screen (the engine's own edit assumes its
         // composed word is there, and it may show as typed already: `liveWord`).
-        let final = engine.peekCommitText(autoRestore: true)
+        let final = ending()
         _ = engine.commitBoundary(autoRestore: true)
         return show(final, now: now)
+    }
+
+    /// What the word would be if it ended now. Put back as typed, a word taken up from the field
+    /// keeps the letters it had there: "việt" + k is "việtk", not the keys `seed` typed ("vieetjk").
+    private func ending() -> String {
+        let final = engine.peekCommitText(autoRestore: true)
+        guard let seeded, final == engine.rawKeystrokes, final.hasPrefix(seeded.keys) else { return final }
+        return seeded.word + final.dropFirst(seeded.keys.count)
     }
 
     /// The word as it shows while typed: what the engine composed, unless that can no longer be
     /// Vietnamese ("gôd", "ưe"); then what the word would be if it ended now ("good", "we"). The
     /// engine alone keeps such marks until the word ends, and a message sent right after it went
     /// out with them.
-    private func liveWord() -> String {
+    private func liveWord() -> (word: String, vietnamese: Bool) {
         let composed = engine.composed
-        if Self.couldBeVietnamese(composed) { return composed }
-        return engine.peekCommitText(autoRestore: true)
+        if Self.couldBeVietnamese(composed) { return (composed, true) }
+        return (ending(), false)
     }
 
     /// Whether more keys could still make `word` a Vietnamese syllable: a known onset, then the
@@ -242,6 +287,35 @@ struct Composer {
     /// engine's own check is looser (it reads every marked letter as any of its marks) and let
     /// "we" show as "ưe".
     static func couldBeVietnamese(_ word: String) -> Bool {
+        // The engine's words (a–z and the Vietnamese letters, at most 32) go through the same
+        // tables compiled to tries, without building strings; anything else the long way.
+        let scalars = word.unicodeScalars
+        if scalars.count <= 32, let fast = withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 32, { buffer -> Bool? in
+            var n = 0
+            for scalar in scalars {
+                guard let letter = letterClasses[scalar.value] else { return nil }
+                buffer[n] = letter
+                n += 1
+            }
+            var node: Int32 = 0
+            for k in 0...min(n, longestOnset) {
+                if k > 0 {
+                    node = onsetTrie.step(node, buffer[k - 1])
+                    if node < 0 { return false }
+                }
+                let mask = onsetTrie.mask(node)
+                if mask == 0 { continue }
+                if k == n { return true }
+                guard mask == 2 else { continue }
+                var rime: Int32 = 0
+                for i in k..<n {
+                    rime = rimeTrie.step(rime, buffer[i])
+                    if rime < 0 { break }
+                }
+                if rime >= 0 { return true }
+            }
+            return false
+        }) { return fast }
         var letters = ""
         for c in word.lowercased() {
             if let scalar = c.unicodeScalars.first, c.unicodeScalars.count == 1,
@@ -251,13 +325,44 @@ struct Composer {
                 letters.append(c)
             }
         }
-        for onset in onsetStarts.keys where letters.hasPrefix(onset) {
-            let rest = String(letters.dropFirst(onset.count))
-            // Still typing the onset ("q" of "qu", "ng" of "ngh"), or a rime begun after a whole one.
-            if rest.isEmpty || (onsetStarts[onset] == true && rimeStarts.contains(rest)) { return true }
+        // Each beginning of the word that is an onset (or the start of one): a few lookups, not a
+        // walk over every onset.
+        var end = letters.startIndex
+        var taken = 0
+        while true {
+            if let whole = onsetStarts[String(letters[..<end])] {
+                let rest = letters[end...]
+                // Still typing the onset ("q" of "qu", "ng" of "ngh"), or a rime begun after a whole one.
+                if rest.isEmpty || (whole && rimeStarts.contains(String(rest))) { return true }
+            }
+            guard taken < longestOnset, end < letters.endIndex else { return false }
+            letters.formIndex(after: &end)
+            taken += 1
         }
-        return false
     }
+
+    private static let longestOnset = onsetStarts.keys.map(\.count).max() ?? 0
+
+    /// `onsetStarts` and `rimeStarts` as tries over the engine's letter classes: an onset start
+    /// has mask 1, a whole onset 2.
+    private static let onsetTrie = ClassTrie(onsetStarts.map { ($0.key, $0.value ? 2 : 1) })
+    private static let rimeTrie = ClassTrie(rimeStarts.map { ($0, 1) })
+
+    /// Letter class of each letter the engine writes, lowercased and without its tone: "Ấ" is â.
+    private static let letterClasses: [UInt32: UInt8] = {
+        var classes: [UInt32: UInt8] = [:]
+        for letter in "abcdefghijklmnopqrstuvwxyzđ" {
+            for form in [letter, Character(letter.uppercased())] {
+                classes[form.unicodeScalars.first!.value] = Tables.charClass[letter]
+            }
+        }
+        for (toned, (base, _)) in Tables.detoneTable {
+            guard let plain = Unicode.Scalar(base), let lower = String(plain).lowercased().first,
+                  let letter = Tables.charClass[lower] else { continue }
+            classes[toned] = letter
+        }
+        return classes
+    }()
 
     /// Every beginning of a standard onset; true when it is a whole onset.
     private static let onsetStarts: [String: Bool] = {
@@ -299,6 +404,12 @@ struct Composer {
         return edits
     }
 
+    private mutating func show(_ live: (word: String, vietnamese: Bool), now: Double) -> [Edit] {
+        let edits = show(live.word, now: now)
+        vietnameseShown = live.vietnamese
+        return edits
+    }
+
     private mutating func typeAsIs(_ c: Character, now: Double) -> [Edit] {
         let edits = record([.insert(String(c))], now: now)
         shown = Self.trailingWord(text.before ?? "")
@@ -307,12 +418,14 @@ struct Composer {
 
     /// Only the part of the word that changed, so the field never flickers.
     static func diff(_ old: String, _ new: String) -> [Edit] {
-        let a = Array(old), b = Array(new)
-        var same = 0
-        while same < a.count, same < b.count, a[same] == b[same] { same += 1 }
+        var i = old.startIndex, j = new.startIndex
+        while i < old.endIndex, j < new.endIndex, old[i] == new[j] {
+            old.formIndex(after: &i)
+            new.formIndex(after: &j)
+        }
         var edits: [Edit] = []
-        if same < a.count { edits.append(.delete(a.count - same)) }
-        if same < b.count { edits.append(.insert(String(b[same...]))) }
+        if i < old.endIndex { edits.append(.delete(old.distance(from: i, to: old.endIndex))) }
+        if j < new.endIndex { edits.append(.insert(String(new[j...]))) }
         return edits
     }
 
@@ -348,7 +461,15 @@ struct Composer {
     }
 
     static func trailingWord(_ text: String) -> String {
-        String(text.reversed().prefix { $0.isLetter }.reversed())
+        // Walked back by index: `reversed().prefix().reversed()` went through generic code that
+        // took most of the time of a key.
+        var start = text.endIndex
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            guard text[previous].isLetter else { break }
+            start = previous
+        }
+        return String(text[start...])
     }
 }
 

@@ -85,6 +85,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Bỏ dấu ở đâu trong từ cũng được: `hofang` → hoàng, `tosan` → toán, `dduocwj` → được.
 - Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên; từ lỡ bị thêm dấu lúc gõ (gôgle) tự trở lại như đã gõ khi bạn gõ dấu cách hay dấu câu (google). Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`; ba chữ w liền nhau giữ nguyên (`www`).
 - Xóa dấu cách ngay sau một từ là sửa tiếp được từ đó: `thays` cách ⌫ `a` → thấy.
+- Lỡ gõ thừa một chữ làm từ tiếng Việt hiện thành phím gõ (`khoongk`): bấm ⌫ là từ trở lại `không`. Trong từ tiếng Anh, ⌫ chỉ xóa đúng chữ cuối (`are` ⌫ → `ar`).
 - Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.
 - Gửi tin rồi gõ tin mới ngay (bằng nút Gửi của app hay phím Gửi): tin mới bắt đầu sạch, không dính chữ của tin vừa gửi, kể cả khi vừa bấm ⌫ trên ô trống.
 - Gõ lấn hai ngón (ngón này chưa nhấc, ngón kia đã chạm): phím chạm trước luôn vào trước, kể cả phím Gửi và phím cách.
@@ -129,7 +130,7 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu tốc độ; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím. Nền bàn phím không hoàn toàn trong suốt (mắt không thấy): iOS chuyển cú chạm vào chỗ trong suốt cho app phía sau, nên trước đây chạm vào khe giữa phím hay dải trống cạnh chữ a có lúc mất chữ.
 - Trang chữ, trang 123 và trang ký hiệu được tạo một lần rồi giữ lại: bấm 123/ABC chỉ đổi trang đang hiện, không dựng lại 33 phím. Chữ hoa và chữ thường trên phím được vẽ sẵn, nên đầu câu không phải vẽ lại cả bàn phím.
-- Bộ gõ Telex là TelexCore của VietTelex (mã nguồn mở, giấy phép MIT): gõ đúng cả 400 từ tiếng Việt và giữ đúng gần như mọi từ tiếng Anh trong bộ 9.091 trường hợp thử của VietTelex, bộ thử này chạy lại mỗi lần build. Mỗi phím mất khoảng 0,01 mili giây.
+- Bộ gõ Telex là TelexCore của VietTelex (mã nguồn mở, giấy phép MIT): gõ đúng cả 400 từ tiếng Việt và giữ đúng gần như mọi từ tiếng Anh trong bộ 9.091 trường hợp thử của VietTelex, bộ thử này chạy lại mỗi lần build. Mỗi phím mất khoảng 0,004 mili giây.
 - Phím sát mép màn hình (q, a, z, p, l, xóa, phím cách) không bị iOS giữ lại để chờ thao tác vuốt hệ thống; tiếng click và rung chạy sau khi phím đã hiện.
 - Tiếng click do bàn phím tự phát ở một luồng riêng (có Truy cập đầy đủ): cách phát cũ của iOS bắt phím phải chờ dịch vụ âm thanh, có lúc tới gần 0,1 giây, và đó là cảm giác khựng khi gõ nhanh. Phím chữ, phím xóa và các phím khác có tiếng riêng như bàn phím iPhone. Tắt trong Cài đặt › Bàn phím › **Âm thanh khi gõ**; gạt nút im lặng của iPhone cũng tắt tiếng.
 - Bàn phím đọc bộ nhớ tạm ở luồng nền (khi bạn chạm để dịch, hoặc ngay lúc mở nếu bật Dịch ngay), nên dù iOS có hỏi quyền dán thì phím vẫn hiện và gõ được.

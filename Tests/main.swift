@@ -54,6 +54,8 @@ let cases: [(String, String)] = [
     ("hofang", "hoàng"), ("tosan", "toán"), ("lojai", "loại"), ("gisa", "giá"), ("qusy", "quý"),
     // English that took a mark while typed is back as typed once the word ends.
     ("google", "google"), ("github", "github"), ("enterprise", "enterprise"),
+    // The horn typed after the whole "uou" (it gave the keys back).
+    ("ruouwj", "rượu"), ("huouw", "hươu"), ("buouws", "bướu"), ("khuouws", "khướu"),
 ]
 
 var failed = 0
@@ -138,6 +140,19 @@ let sequences: [(before: String, steps: [String], want: String)] = [
     ("", ["g", "o", "o", "d", "⌫", "s"], "goos"),
     // Inside a word ⌫ takes the last letter shown and the word keeps composing.
     ("", ["k", "h", "o", "o", "⌫", "o", "o", "n", "g"], "không"),
+    // A stray letter turned the Vietnamese word into its keys: ⌫ right after it brings the word back
+    // (it stayed "khoong", and the whole word had to be typed again).
+    ("", ["k", "h", "o", "o", "n", "g", "k", "⌫", " "], "không "),
+    ("", ["t", "i", "e", "e", "n", "g", "s", "p", "⌫", " "], "tiếng "),
+    ("", ["n", "g", "u", "w", "o", "w", "i", "f", "k", "⌫", " "], "người "),
+    // ⌫ in an English word takes only its last letter ("are" ⌫ gave "ả", "after" ⌫⌫ "at").
+    ("", ["a", "r", "e", "⌫"], "ar"),
+    ("", ["a", "f", "t", "e", "r", "⌫", "⌫"], "aft"),
+    ("", ["o", "r", "d", "e", "r", "⌫", "⌫", "⌫"], "or"),
+    // A word taken up from the field keeps its letters when it ends as typed ("vieetjk", "DDaayl").
+    ("việt", ["k", " "], "việtk "),
+    ("Đây", ["l"], "Đâyl"),
+    ("", ["b", "+ê", "t", " "], "bêt "),
 ]
 for c in sequences {
     let got = sequence(c.before, c.steps)
