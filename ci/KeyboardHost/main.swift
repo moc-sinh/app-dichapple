@@ -27,6 +27,11 @@ final class ViewController: UIViewController {
         center.addObserver(forName: UITextInputMode.currentInputModeDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.report("inputModeDidChange")
         }
+        // Every change, so CI can check what the typing benchmark typed.
+        center.addObserver(forName: UITextField.textDidChangeNotification, object: field, queue: .main) { [weak self] _ in
+            print("FIELD_TEXT=\(self?.field.text ?? "")")
+            fflush(stdout)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {

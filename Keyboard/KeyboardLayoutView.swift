@@ -623,6 +623,7 @@ final class KeyboardLayoutView: UIView {
     }
 
     @objc private func deleteTick() {
+        onRepeat?()
         deleteCount += 1
         let words = deleteCount > 16
         if words && deleteCount % 2 == 1 { return }
@@ -639,12 +640,19 @@ final class KeyboardLayoutView: UIView {
 
     /// Layout passes that placed the keys; the typing benchmark reports them per key.
     static var layoutPasses = 0
+    /// Called as each delete repeat starts, so the benchmark can time it.
+    var onRepeat: (() -> Void)?
 
     /// Presses the key for `character` as a finger would, through the same handling, minus
     /// UIKit's touch delivery. Returns what `benchmarkRelease` needs.
     func benchmarkPress(_ character: Character) -> AnyObject? {
         let wanted = String(character).lowercased()
-        let key = character == " " ? keys.first { $0.kind == .space } : keys.first { $0.character?.lowercased() == wanted }
+        let key: Key?
+        switch character {
+        case " ": key = keys.first { $0.kind == .space }
+        case "\u{8}": key = keys.first { $0.kind == .delete }
+        default: key = keys.first { $0.character?.lowercased() == wanted }
+        }
         guard let key else { return nil }
         for (_, track) in tracks where !track.committed && track.key.character != nil { commit(track) }
         let track = Track(key: key)

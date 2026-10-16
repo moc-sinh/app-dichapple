@@ -8,7 +8,9 @@ import plistlib
 import sys
 import unicodedata
 
-EXPECTED = "Chào anh bên em đã gửi báo giá rồi nhé. Anh xem giúp em với ạ"
+# Keyboard/TypingBenchmark.swift types this before it holds delete.
+EXPECTED = ("Chào anh bên em đã gửi báo giá rồi nhé. Anh xem giúp em với ạ aaaaaaaaaaaaaaaaaaaa "
+            "người người người người người người hahahahahahahahahahahahahahahahahahahaha")
 
 
 def prefs_path(group_dir):
@@ -32,16 +34,19 @@ def setup(group_dir):
 
 
 def report(group_dir, host_log):
-    print("Result:", load(group_dir).get("typingBenchmarkResult", "none"))
-    typed = ""
+    print(load(group_dir).get("typingBenchmarkResult", "no result"))
+    want = unicodedata.normalize("NFC", EXPECTED)
+    seen = []
     with open(host_log, encoding="utf-8", errors="replace") as f:
         for line in f:
             if line.startswith("FIELD_TEXT="):
-                typed = line[len("FIELD_TEXT="):].rstrip("\n")
+                seen.append(unicodedata.normalize("NFC", line[len("FIELD_TEXT="):].rstrip("\n")))
+    # The longest text the field held is the one right before delete was held.
+    typed = max(seen, key=len, default="")
     print("Typed:   ", typed)
     print("Expected:", EXPECTED)
-    same = unicodedata.normalize("NFC", typed) == unicodedata.normalize("NFC", EXPECTED)
-    print("Text:", "match" if same else "MISMATCH")
+    print("After holding delete:", seen[-1] if seen else "")
+    print("Text:", "match" if want in seen else "MISMATCH")
 
 
 if __name__ == "__main__":
