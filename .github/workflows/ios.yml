@@ -91,8 +91,10 @@ jobs:
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim \
             ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= build | tail -20
 
+      # The runners' simulators are sometimes slow to boot and launch apps (4-5 minutes for a
+      # phase that usually takes 30 s): every check passed and the step still ran out of time.
       - name: Open the keyboard in the simulator
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: bash ci/keyboard-smoke.sh
 
       - uses: actions/upload-artifact@v4

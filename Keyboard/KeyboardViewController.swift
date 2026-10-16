@@ -104,6 +104,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             _ = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48)).image { _ in
                 ("aĂ" as NSString).draw(at: .zero, withAttributes: [.font: UIFont.systemFont(ofSize: 34)])
             }
+            // The key letters, both cases: the first key of a sentence turns the capitals back to
+            // small letters, and drawing them for the first time made that key 27 ms slow.
+            let letters = "qwertyuiopasdfghjklzxcvbnm"
+            _ = UIGraphicsImageRenderer(size: CGSize(width: 700, height: 120)).image { _ in
+                for (text, size, y) in [(letters, 23.0, 0.0), (letters.uppercased(), 23, 30),
+                                        ("1234567890-/:;()₫&@\".,?!'", 22.5, 60), ("ABC123#+=dấu cách", 16, 90)] as [(String, CGFloat, CGFloat)] {
+                    (text as NSString).draw(at: CGPoint(x: 0, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: size)])
+                }
+            }
         }
 
         infoButton.contentHorizontalAlignment = .leading
