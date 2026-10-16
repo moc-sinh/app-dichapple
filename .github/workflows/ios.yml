@@ -31,6 +31,12 @@ jobs:
           swiftc -O Keyboard/Telex.swift Tests/main.swift -o telex-tests
           ./telex-tests
 
+      - name: Language detection tests
+        run: |
+          swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
+            Tests/Language/main.swift -o language-tests
+          ./language-tests
+
       - name: Generate project
         run: |
           brew install xcodegen
