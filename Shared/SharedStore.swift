@@ -23,7 +23,6 @@ enum SharedStore {
         static let gender = "gender"
         static let glossary = "glossary"
         static let checkMeaning = "checkMeaning"
-        static let autoIncoming = "autoIncoming"
         static let instantIncoming = "instantIncoming"
         static let haptics = "haptics"
         static let memory = "memory"
@@ -32,6 +31,7 @@ enum SharedStore {
         static let handledPasteboard = "handledPasteboard"
         static let keyboardStage = "keyboardStage"
         static let keyboardStageAt = "keyboardStageAt"
+        static let contextClearedAt = "contextClearedAt"
     }
 
     // MARK: Settings
@@ -68,7 +68,6 @@ enum SharedStore {
     static var gender: Int { defaults.integer(forKey: Key.gender) }
     static var glossary: String { defaults.string(forKey: Key.glossary) ?? "" }
     static var checkMeaning: Bool { defaults.object(forKey: Key.checkMeaning) as? Bool ?? true }
-    static var autoIncoming: Bool { defaults.object(forKey: Key.autoIncoming) as? Bool ?? true }
     /// Read the copied message as the keyboard opens, no tap. Needs paste permission set to
     /// "Allow" for MSTrans, or iOS asks every time.
     static var instantIncoming: Bool { defaults.bool(forKey: Key.instantIncoming) }
@@ -122,7 +121,11 @@ enum SharedStore {
 
     static func clearContext() {
         defaults.removeObject(forKey: Key.memory)
+        defaults.set(Date(), forKey: Key.contextClearedAt)
     }
+
+    /// When "Cuộc mới" last started a new conversation.
+    static var contextClearedAt: Date? { defaults.object(forKey: Key.contextClearedAt) as? Date }
 
     // MARK: Incoming translations (never pay twice for the same message)
 

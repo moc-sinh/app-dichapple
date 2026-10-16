@@ -3,20 +3,20 @@ import UIKit
 /// CI only (ci/keyboard-smoke.sh switches it on through the App Group): types through the real
 /// key handling at a quick typist's pace, then holds delete, and records for each part how long
 /// the main thread stays busy after every press, release and delete repeat (the handler, then
-/// the layout and the Core Animation commit it causes). Also counts key layouts, late frames
-/// and clipboard checks made on the main thread.
+/// the layout and the Core Animation commit it causes). Also counts key layouts and late frames.
 @MainActor
 final class TypingBenchmark: NSObject {
     static let flagKey = "typingBenchmark"
     static let resultKey = "typingBenchmarkResult"
 
     /// Telex keys, part by part: a sentence, one key pressed again and again, one Vietnamese
-    /// word typed again and again, and a long chat laugh.
+    /// word typed again and again, a long chat laugh, and the horn rules (chuaw, ngwoif, ww).
     static let parts: [(name: String, keys: String)] = [
         ("câu", "chaof anh been em ddax guwir baos gias roofi nhes  anh xem giusp em vowis aj"),
         ("aaaa", " aaaaaaaaaaaaaaaaaaaa"),
         ("người×6", " nguwowif nguwowif nguwowif nguwowif nguwowif nguwowif"),
         ("hahaha", " hahahahahahahahahahahahahahahahahahahaha"),
+        ("chưa người", " chuaw ngwoif muaw ww"),
     ]
     // ci/typing-benchmark.py checks the field held the expected text before delete was held.
     private static let deleteKey: Character = "\u{8}"
@@ -31,8 +31,6 @@ final class TypingBenchmark: NSObject {
     private var frames: [CFTimeInterval] = []
     private var link: CADisplayLink?
     private var layoutsAtStart = 0
-    private var checksAtStart = 0
-    private var checkTimeAtStart: CFTimeInterval = 0
 
     init(keyboard: KeyboardLayoutView, finished: @escaping (String) -> Void) {
         self.keyboard = keyboard
@@ -46,8 +44,6 @@ final class TypingBenchmark: NSObject {
 
     func start() {
         layoutsAtStart = KeyboardLayoutView.layoutPasses
-        checksAtStart = KeyboardViewController.mainThreadPasteboardChecks
-        checkTimeAtStart = KeyboardViewController.mainThreadPasteboardTime
         link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         link?.add(to: .main, forMode: .common)
         step()
@@ -120,10 +116,8 @@ final class TypingBenchmark: NSObject {
         let late = intervals.filter { $0 > typical * 1.5 }.count
         let keys = Self.parts.reduce(0) { $0 + $1.keys.count }
         let layouts = KeyboardLayoutView.layoutPasses - layoutsAtStart
-        let checks = KeyboardViewController.mainThreadPasteboardChecks - checksAtStart
-        let checkTime = (KeyboardViewController.mainThreadPasteboardTime - checkTimeAtStart) * 1000
-        let totals = String(format: "keys=%d layouts=%d (%.2f/key) late_frames=%d/%d frame=%.1fms clipboard_checks_on_main=%d (%.1fms)",
-                            keys, layouts, Double(layouts) / Double(keys), late, intervals.count, typical, checks, checkTime)
+        let totals = String(format: "keys=%d layouts=%d (%.2f/key) late_frames=%d/%d frame=%.1fms",
+                            keys, layouts, Double(layouts) / Double(keys), late, intervals.count, typical)
         finished((parts + [totals]).joined(separator: "\n"))
     }
 }

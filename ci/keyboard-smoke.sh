@@ -205,8 +205,7 @@ run_phase dark
 limit 30 xcrun simctl ui "$UDID" appearance light
 
 # The keyboard types a sentence through its own key handling as fast as a quick typist and
-# records main-thread time per key, key layouts, late frames and clipboard checks on the
-# main thread (Keyboard/TypingBenchmark.swift).
+# records main-thread time per key, key layouts and late frames (Keyboard/TypingBenchmark.swift).
 group "Typing benchmark setup"
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
 limit 120 xcrun simctl shutdown "$UDID"
@@ -218,8 +217,8 @@ endgroup
 run_phase typing
 
 group "Typing benchmark"
-# The benchmark types about 190 keys and then holds delete: give it time to finish.
-sleep 14
+# The benchmark types about 210 keys and then holds delete: give it time to finish.
+sleep 16
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
 limit 120 xcrun simctl shutdown "$UDID"
 python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt" || FAILED=1

@@ -9,10 +9,19 @@ enum LanguageDetector {
         return language(of: text)
     }
 
-    /// The language of `text`, unless it is Vietnamese or too short to tell.
+    /// The language of `text`, unless it is Vietnamese or too short to tell. A foreign message that
+    /// names a Vietnamese person or place ("@Đào Ngọc Minh we cannot use this address…") is still foreign.
     static func language(of text: String) -> Language? {
-        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2,
-              let detected = dominant(text), detected != .vietnamese, detected != .undetermined else { return nil }
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        var detected = recognizer.dominantLanguage
+        if detected == .vietnamese, !hasVietnameseMarks(text) {
+            detected = recognizer.languageHypotheses(withMaximum: 3)
+                .filter { $0.key != .vietnamese }
+                .max { $0.value < $1.value }?.key
+        }
+        guard let detected, detected != .vietnamese, detected != .undetermined else { return nil }
         let code: String
         switch detected {
         case .simplifiedChinese: code = "zh"
@@ -25,40 +34,40 @@ enum LanguageDetector {
         return Language(code: code, label: name.capitalized, name: name, englishName: englishName)
     }
 
-    /// Vietnamese for sure: it has letters only Vietnamese writes and the recognizer is confident.
-    /// A wrong "yes" refuses to translate the partner's message; a wrong "no" only costs one
-    /// request that comes back unchanged, so doubt counts as "no".
+    /// Vietnamese as people write it: recognised as Vietnamese and with marks on many letters.
     static func isVietnamese(_ text: String) -> Bool {
-        guard hasVietnameseLetters(text) else { return false }
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
-        return (recognizer.languageHypotheses(withMaximum: 2)[.vietnamese] ?? 0) >= 0.8
+        return recognizer.dominantLanguage == .vietnamese && hasVietnameseMarks(text)
     }
 
-    /// The recognizer's best guess, except that text without a single Vietnamese letter is not
-    /// Vietnamese (short English or Malay often gets that guess): then the next best.
-    private static func dominant(_ text: String) -> NLLanguage? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(text)
-        guard let best = recognizer.dominantLanguage else { return nil }
-        guard best == .vietnamese, !hasVietnameseLetters(text) else { return best }
-        return recognizer.languageHypotheses(withMaximum: 3)
-            .filter { $0.key != .vietnamese }
-            .max { $0.value < $1.value }?.key
-    }
-
-    /// At least one letter in twenty is one only Vietnamese uses: ă đ ơ ư and the vowels with a
-    /// hook, a dot below or two marks (ả ạ ấ ồ ữ…). á, à, â, é, ê, ô… are French or Spanish too.
-    private static func hasVietnameseLetters(_ text: String) -> Bool {
+    /// About a quarter of the letters in Vietnamese carry a mark (ă â đ ê ô ơ ư or a tone); an
+    /// English message with a Vietnamese name in it has only a few.
+    static func hasVietnameseMarks(_ text: String) -> Bool {
         var letters = 0
-        var vietnamese = 0
-        for scalar in text.precomposedStringWithCanonicalMapping.unicodeScalars where CharacterSet.letters.contains(scalar) {
-            letters += 1
-            switch scalar.value {
-            case 0x0102, 0x0103, 0x0110, 0x0111, 0x01A0, 0x01A1, 0x01AF, 0x01B0, 0x1EA0...0x1EF9: vietnamese += 1
-            default: break
+        var marked = 0
+        for scalar in text.unicodeScalars where scalar.properties.isAlphabetic {
+            let value = scalar.value
+            if value < 0x80 {
+                letters += 1
+            } else if (0xC0...0x1EFF).contains(value) {
+                letters += 1
+                marked += 1
             }
         }
-        return vietnamese > 0 && vietnamese * 20 >= letters
+        return letters > 0 && Double(marked) / Double(letters) >= 0.1
+    }
+}
+
+extension Language {
+    /// The language to write to the partner in: the one chosen, or with "Tự động" the partner's
+    /// own (from the conversation, else the one seen last).
+    static func target(code: String, context: [ChatLine]) -> Language {
+        guard code == autoCode else { return named(code) ?? all[0] }
+        if let detected = LanguageDetector.partnerLanguage(in: context) {
+            if named(detected.code) != nil { SharedStore.lastPartnerCode = detected.code }
+            return detected
+        }
+        return named(SharedStore.lastPartnerCode) ?? all[0]
     }
 }

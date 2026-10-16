@@ -12,18 +12,21 @@ func check(_ ok: Bool, _ what: String) {
     }
 }
 
-// Copied partner messages must never be taken for Vietnamese (the keyboard would refuse them).
+// The partner's messages must not be taken for Vietnamese: Back Tap would translate them out
+// again instead of into Vietnamese.
 let foreign = [
     "Can you send me the price list?", "OK, 300 pcs", "Thanks!", "ok", "Hi", "No problem",
     "你好，请问这个型号的价格是多少？", "好的", "Terima kasih banyak", "À bientôt, ça va?",
     "¿Cuánto cuesta?", "감사합니다", "ありがとうございます", "1200 USD", "OK 👍",
+    "@Đào Ngọc Minh we cannot use this address, please send us another one",
 ]
 for text in foreign {
     check(!LanguageDetector.isVietnamese(text), "\"\(text)\" taken for Vietnamese")
 }
 
 // Vietnamese with its letters is still recognised.
-for text in ["Bên em đã gửi báo giá rồi nhé", "Mẫu này giá bao nhiêu vậy anh?", "Dạ vâng, em cảm ơn anh ạ"] {
+for text in ["Bên em đã gửi báo giá rồi nhé", "Mẫu này giá bao nhiêu vậy anh?", "Dạ vâng, em cảm ơn anh ạ",
+             "Anh gửi giúp em hóa đơn nhé"] {
     check(LanguageDetector.isVietnamese(text), "\"\(text)\" not recognised as Vietnamese")
 }
 

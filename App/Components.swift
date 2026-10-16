@@ -136,3 +136,7 @@ enum Clipboard {
 func openSystemSettings() {
     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
 }
+
+func openShortcutsApp() {
+    if let url = URL(string: "shortcuts://") { UIApplication.shared.open(url) }
+}
