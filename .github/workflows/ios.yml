@@ -28,8 +28,11 @@ jobs:
 
       - name: Typing tests
         run: |
-          swiftc -O Keyboard/Telex.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests
+          swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests
           ./telex-tests
+          # VietTelex's 9,091 typing cases through the same composer.
+          swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/Suite/main.swift -o telex-suite
+          ./telex-suite Tests/Suite/telex_suite.tsv
 
       - name: Language detection tests
         run: |

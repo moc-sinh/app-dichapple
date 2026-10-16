@@ -1,6 +1,25 @@
 // Typing checks, run in CI with:
-// swiftc Keyboard/Telex.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests && ./telex-tests
+// swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests && ./telex-tests
 import Foundation
+
+/// What typing `keys` and then a space leaves in an empty field, without that space: the word as
+/// it stays once it is done (an English word the engine had changed is back as typed).
+func typed(_ keys: String) -> String {
+    var composer = Composer()
+    composer.start(before: "", after: "", now: 0)
+    var text: [Character] = []
+    func apply(_ edits: [Composer.Edit]) {
+        for edit in edits {
+            switch edit {
+            case .delete(let count): text.removeLast(count)
+            case .insert(let s): text.append(contentsOf: s)
+            }
+        }
+    }
+    for key in keys { apply(composer.letter(key, now: 0)) }
+    apply(composer.space(now: 0))
+    return String(text.dropLast())
+}
 
 let cases: [(String, String)] = [
     // Vietnamese
@@ -12,8 +31,9 @@ let cases: [(String, String)] = [
     ("baos", "báo"), ("nhw", "như"), ("w", "ư"), ("tw", "tư"), ("gif", "gì"),
     ("quoocs", "quốc"), ("dduocwj", "được"), ("nguoiwf", "người"), ("khuyeen", "khuyên"),
     ("giuwax", "giữa"), ("Vieejt", "Việt"), ("NAM", "NAM"), ("DDAAY", "ĐÂY"), ("xooong", "xoong"),
-    // w: on its own it is ư, twice it is w (as UniKey); the horn goes where it makes a syllable
-    ("ww", "w"), ("Ww", "W"), ("WW", "W"), ("tww", "tw"), ("www", "ww"), ("chuaw", "chưa"), ("muaw", "mưa"),
+    // w: on its own it is ư, twice it is w (as UniKey); the horn goes where it makes a syllable.
+    // Three or more stay as typed: "www" for web addresses.
+    ("ww", "w"), ("Ww", "W"), ("WW", "W"), ("tww", "tw"), ("www", "www"), ("chuaw", "chưa"), ("muaw", "mưa"),
     ("ngwoif", "người"), ("nguwoif", "người"), ("twowng", "tương"), ("hoaw", "hoă"), ("quaw", "quă"),
     ("tuw", "tư"), ("uwow", "ươ"), ("Uw", "Ư"),
     // Undo by repeating a modifier
@@ -25,29 +45,78 @@ let cases: [(String, String)] = [
     ("WeChat", "WeChat"), ("class", "class"), ("access", "access"), ("process", "process"),
     ("staff", "staff"), ("check", "check"), ("file", "file"),
     // One key again and again, long words: still exactly as typed
-    // Twenty a's give nineteen: the third takes the hat off "â" (aa -> â, aaa -> aa), as in Unikey.
+    // Twenty a's give nineteen: the third takes the hat off "â" (aa -> â, aaa -> aa), as in Unikey;
+    // seven d's give six the same way (dd -> đ, ddd -> dd).
     ("aaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaa"), ("hahahahahahahahahahahahahahahahahahahaha", "hahahahahahahahahahahahahahahahahahahaha"),
-    ("kkkkkkkkkkkkkkkk", "kkkkkkkkkkkkkkkk"), ("ddddddd", "ddddddd"), ("facebookfacebookfacebook", "facebookfacebookfacebook"),
+    ("kkkkkkkkkkkkkkkk", "kkkkkkkkkkkkkkkk"), ("ddddddd", "dddddd"), ("facebookfacebookfacebook", "facebookfacebookfacebook"),
     ("nghieengs", "nghiếng"), ("khuyeenr", "khuyển"),
+    // A tone typed before the end of the word moves to its vowel (the old Telex left "hòang").
+    ("hofang", "hoàng"), ("tosan", "toán"), ("lojai", "loại"), ("gisa", "giá"), ("qusy", "quý"),
+    // English that took a mark while typed is back as typed once the word ends.
+    ("google", "google"), ("github", "github"), ("enterprise", "enterprise"),
 ]
 
 var failed = 0
 for (keys, want) in cases {
-    let got = Telex.output(for: keys)
+    let got = typed(keys)
     if got != want {
         failed += 1
         print("FAIL \(keys) -> \(got), want \(want)")
     }
 }
 
-// Words picked up from the text field must keep editing correctly.
+// Words picked up from the text field must keep editing correctly: the engine takes each up as is.
 let words = ["người", "được", "tiếng", "Việt", "khuyên", "giữa", "quốc", "Đây", "tuần", "hoà", "gửi",
              "trước", "nhé", "không", "chào", "thứ", "cảm", "ơn", "hàng", "báo", "phương", "nghiêng", "ngoài"]
 for w in words {
-    let again = Telex.output(for: Telex.rawKeys(for: w))
-    if again != w {
+    var engine = Composer.makeEngine()
+    if !engine.seed(w) || engine.composed != w {
         failed += 1
-        print("FAIL round trip \(w) -> \(Telex.rawKeys(for: w)) -> \(again)")
+        print("FAIL taking up \(w) -> \(engine.composed)")
+    }
+}
+
+// Keys, accents picked from the row and ⌫ in a row, into a field that starts with `before`.
+func sequence(_ before: String, _ steps: [String]) -> String {
+    var composer = Composer()
+    composer.start(before: before, after: "", now: 0)
+    var text = Array(before)
+    var now = 0.0
+    for step in steps {
+        now += 0.2
+        let edits: [Composer.Edit]
+        switch step {
+        case "⌫": edits = composer.deleteBackward(now: now)
+        case " ": edits = composer.space(now: now)
+        case let s where s.count > 1 || !(s.first?.isASCII ?? true): edits = composer.insert(String(s.dropFirst(s.hasPrefix("+") ? 1 : 0)), now: now)
+        default: edits = composer.letter(step.first!, now: now)
+        }
+        for edit in edits {
+            switch edit {
+            case .delete(let count): text.removeLast(count)
+            case .insert(let s): text.append(contentsOf: s)
+            }
+        }
+    }
+    return String(text)
+}
+let sequences: [(before: String, steps: [String], want: String)] = [
+    // ⌫ over the space after a word opens it again: the next mark still lands on it.
+    ("", ["t", "h", "a", "y", "s", " ", "⌫", "a"], "thấy"),
+    // A word already in the field takes the next tone.
+    ("Chào toan", ["s"], "Chào toán"),
+    // An accent picked from the row, then the word goes on.
+    ("", ["c", "+á", "n"], "cán"),
+    // A word the engine cannot take up goes on as typed.
+    ("google", ["s"], "googles"),
+    // Inside a word ⌫ takes the last letter shown and the word keeps composing.
+    ("", ["k", "h", "o", "o", "⌫", "o", "o", "n", "g"], "không"),
+]
+for c in sequences {
+    let got = sequence(c.before, c.steps)
+    if got != c.want {
+        failed += 1
+        print("FAIL \(c.before)|\(c.steps.joined()) -> \(got), want \(c.want)")
     }
 }
 
@@ -211,7 +280,7 @@ do {
     for round in 0..<200 {
         fastChecks += 1
         let keys = messages[round % messages.count]
-        let want = keys.split(separator: " ").map { Telex.output(for: String($0)) }.joined(separator: " ")
+        let want = keys.split(separator: " ").map { typed(String($0)) }.joined(separator: " ")
         var field = LaggingField()
         var composer = Composer()
         var now = Double(random(10))
@@ -301,7 +370,7 @@ if perKey > 100 {
     print("FAIL typing is too slow: \(perKey) µs per key")
 }
 
-let total = cases.count + words.count + fastChecks
+let total = cases.count + words.count + sequences.count + fastChecks
 print(failed == 0 ? "Telex: \(total) checks passed" : "Telex: \(failed) of \(total) failed")
 fflush(stdout)
 if failed > 0 { exit(1) }

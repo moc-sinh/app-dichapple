@@ -1,6 +1,10 @@
 /// The keyboard's typing, without UIKit: Telex for the word at the cursor, kept in step with the
 /// text before the cursor. Each call returns the edits to make in the text field.
 ///
+/// Telex itself is VietTelex's `TelexEngine` (TelexCore/, MIT): 9,091 checked cases, tones typed
+/// anywhere in the word find their vowel ("hofang" → hoàng), and a word that cannot be Vietnamese
+/// is put back as typed when it ends ("gôgle " → "google ").
+///
 /// iOS updates `documentContextBeforeInput` only after the app has applied an edit, so while
 /// someone types fast it lags a few keys behind. Reading it before every key turned "là" into
 /// "lf" and "w" into "ưw". The keyboard keeps its own copy instead (`TypedText`) and takes the
@@ -12,17 +16,44 @@ struct Composer {
         case insert(String)
     }
 
-    private(set) var word = TelexWord()
+    private var engine = Composer.makeEngine()
+    /// The word before the cursor as the engine last left it. When the text there ends
+    /// otherwise, the word was changed elsewhere (the cursor moved, an accent was picked) and
+    /// the engine takes it up again before the next key.
+    private var shown = ""
+    /// The word at the cursor is one the engine cannot take up ("google", "iPhone"): letters
+    /// go on it as typed until the word ends.
+    private var literal = false
     private var text = TypedText()
     private var lastSpaceAt = -10.0
     private var spaceAfterWord = false
+
+    /// Telex as MSTrans types it.
+    static func makeEngine() -> TelexEngine {
+        var engine = TelexEngine()
+        // Marks and tones typed late still find their vowel: "hofang" → hoàng, "dduocwj" → được.
+        engine.freeMarking = true
+        // hoà, khoẻ, thuỷ, as MSTrans has always written them.
+        engine.modernTone = true
+        // A word that can no longer be Vietnamese stops changing as it is typed.
+        engine.liveSpellCheck = true
+        // Standard spelling only: chat spellings (w for qu, z for d) would turn English words
+        // ("was", "war") into Vietnamese ones. VietTelex's app has it off too.
+        engine.teencode = false
+        // A word both English and Vietnamese ("last"/lát, "list"/lít) stays Vietnamese.
+        engine.collisionPrefersVietnamese = true
+        return engine
+    }
 
     /// The text before the cursor as this keyboard knows it; nil when it does not.
     var before: String? { text.before }
 
     mutating func start(before: String, after: String, now: Double) {
         text.reset(before: before, after: after, now: now)
-        word = TelexWord()
+        engine.reset()
+        engine.resetContext()
+        shown = ""
+        literal = false
         lastSpaceAt = -10
     }
 
@@ -36,50 +67,76 @@ struct Composer {
     /// The cursor moved or the whole field was replaced: read the field again before the next key.
     mutating func forget() {
         text.forget()
-        word = TelexWord()
+        engine.reset()
+        shown = ""
+        literal = false
     }
 
     mutating func letter(_ c: Character, now: Double) -> [Edit] {
-        let current = Self.trailingWord(text.before ?? "")
-        if current != word.shown { word = TelexWord(resuming: current) }
-        let old = word.shown
-        word.type(c)
         lastSpaceAt = -10
-        return apply(Self.diff(old, word.shown), now: now)
+        follow()
+        if literal { return record([.insert(String(c))], now: now) }
+        return apply(engine.feed(c), typed: String(c), now: now)
     }
 
-    /// Digits, punctuation, or a letter from the accent picker, typed as is.
+    /// Digits, punctuation, or a letter from the accent picker, typed as is. Anything but a letter
+    /// ends the word first.
     mutating func insert(_ s: String, now: Double) -> [Edit] {
-        let edits = apply([.insert(s)], now: now)
-        word = !s.isEmpty && s.allSatisfy(\.isLetter) ? TelexWord(resuming: Self.trailingWord(text.before ?? "")) : TelexWord()
         lastSpaceAt = -10
+        guard s.first?.isLetter ?? false else { return endWord(now: now) + record([.insert(s)], now: now) }
+        // An accented letter joins the word: the engine takes the word up again at the next key.
+        let edits = record([.insert(s)], now: now)
+        engine.reset()
+        literal = false
+        shown = ""
         return edits
     }
 
     /// Two spaces after a word make ". ", as on the system keyboard.
     mutating func space(now: Double) -> [Edit] {
+        let ended = endWord(now: now)
         let before = text.before ?? ""
-        word = TelexWord()
         if now - lastSpaceAt < 1.2, spaceAfterWord, before.hasSuffix(" ") {
             lastSpaceAt = -10
-            return apply([.delete(1), .insert(". ")], now: now)
+            // The space a ⌫ would have taken back to re-open the word is gone.
+            engine.forgetLastCommit()
+            return ended + record([.delete(1), .insert(". ")], now: now)
         }
         spaceAfterWord = before.last.map { $0.isLetter || $0.isNumber } ?? false
         lastSpaceAt = now
-        return apply([.insert(" ")], now: now)
+        return ended + record([.insert(" ")], now: now)
     }
 
     mutating func newline(now: Double) -> [Edit] {
-        word = TelexWord()
         lastSpaceAt = -10
-        return apply([.insert("\n")], now: now)
+        return endWord(now: now) + record([.insert("\n")], now: now)
     }
 
-    /// Deleting a letter keeps composing the rest of the word, so its marks can still change.
+    /// Inside the word being composed, the last letter shown goes ("khô" → "kh") and the rest keeps
+    /// composing. Elsewhere one character goes, and the word now before the cursor is taken up
+    /// again: ⌫ over the space after a word re-opens it ("tháy ⌫ a" → "thấy").
     mutating func deleteBackward(now: Double) -> [Edit] {
         lastSpaceAt = -10
-        let edits = apply([.delete(1)], now: now)
-        word = TelexWord(resuming: Self.trailingWord(text.before ?? ""))
+        if !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown {
+            switch engine.backspace() {
+            case .passthrough:
+                // A word too long for the engine: the letter simply goes.
+                let edits = record([.delete(1)], now: now)
+                shown = Self.trailingWord(text.before ?? "")
+                return edits
+            case let action:
+                return apply(action, typed: "", now: now)
+            }
+        }
+        let canReopen = engine.canReopenLastCommit && !(text.before?.last?.isLetter ?? true)
+        let edits = record([.delete(1)], now: now)
+        let word = Self.trailingWord(text.before ?? "")
+        literal = false
+        if canReopen, let reopened = engine.reopenLastCommit(), reopened == word {
+            shown = word
+        } else {
+            take(word)
+        }
         return edits
     }
 
@@ -90,12 +147,60 @@ struct Composer {
         while i > 0, before[i - 1].isWhitespace { i -= 1 }
         while i > 0, !before[i - 1].isWhitespace { i -= 1 }
         lastSpaceAt = -10
-        let edits = apply([.delete(max(1, before.count - i))], now: now)
-        word = TelexWord()
+        engine.reset()
+        literal = false
+        let edits = record([.delete(max(1, before.count - i))], now: now)
+        shown = ""
         return edits
     }
 
-    private mutating func apply(_ edits: [Edit], now: Double) -> [Edit] {
+    /// The word at the cursor, when it is not the one the engine left there.
+    private mutating func follow() {
+        let current = Self.trailingWord(text.before ?? "")
+        guard current != shown else { return }
+        take(current)
+    }
+
+    /// Makes `word`, already in the field, the one being composed: the engine takes it up when it
+    /// would type it exactly the same way (`seed`), so "toan" + s gives "toán"; otherwise letters
+    /// go on as typed.
+    private mutating func take(_ word: String) {
+        engine.reset()
+        shown = word
+        literal = !word.isEmpty && !engine.seed(word)
+    }
+
+    /// The word is done: an English word the engine had changed goes back to the keys typed.
+    private mutating func endWord(now: Double) -> [Edit] {
+        defer {
+            shown = ""
+            literal = false
+        }
+        guard !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown else {
+            engine.reset()
+            return []
+        }
+        return apply(engine.commitBoundary(autoRestore: true), typed: "", now: now)
+    }
+
+    /// The engine's answer as edits; a letter it lets through is typed as is.
+    private mutating func apply(_ action: TelexAction, typed: String, now: Double) -> [Edit] {
+        var edits: [Edit] = []
+        switch action {
+        case .replace(let backspaces, let insert):
+            if backspaces > 0 { edits.append(.delete(backspaces)) }
+            if !insert.isEmpty { edits.append(.insert(insert)) }
+        case .passthrough:
+            if !typed.isEmpty { edits.append(.insert(typed)) }
+        case .none:
+            break
+        }
+        let recorded = record(edits, now: now)
+        shown = Self.trailingWord(text.before ?? "")
+        return recorded
+    }
+
+    private mutating func record(_ edits: [Edit], now: Double) -> [Edit] {
         for edit in edits {
             switch edit {
             case .delete(let count):
@@ -124,17 +229,6 @@ struct Composer {
             undo.append(.insert(String(gone)))
         }
         return undo
-    }
-
-    /// Only the part of the word that changed, so the field never flickers.
-    static func diff(_ old: String, _ new: String) -> [Edit] {
-        let a = Array(old), b = Array(new)
-        var same = 0
-        while same < a.count, same < b.count, a[same] == b[same] { same += 1 }
-        var edits: [Edit] = []
-        if same < a.count { edits.append(.delete(a.count - same)) }
-        if same < b.count { edits.append(.insert(String(b[same...]))) }
-        return edits
     }
 
     static func trailingWord(_ text: String) -> String {

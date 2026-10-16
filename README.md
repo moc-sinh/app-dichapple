@@ -14,10 +14,10 @@ Màu lấy từ logo Mộc Sinh: xanh là bạn và mọi nút bấm, cam là đ
 | Thư mục | Nội dung |
 |---|---|
 | `App/` | App chính (SwiftUI): 4 tab, thao tác Phím tắt “Dịch tin đã sao chép” |
-| `Keyboard/` | Bàn phím (UIKit): phím chuẩn iPhone, bộ gõ Telex, thanh Dịch, dòng thông tin |
+| `Keyboard/` | Bàn phím (UIKit): phím chuẩn iPhone, thanh Dịch, dòng thông tin; `Keyboard/TelexCore/` là bộ gõ Telex của [VietTelex](https://github.com/ptrinh/viettelex) (MIT) |
 | `Shared/` | Màu và logo, cấu hình, dữ liệu chung (App Group), lịch sử, nhận diện ngôn ngữ, gọi OpenAI |
 | `preview/` | Trang xem trước giao diện trên web |
-| `Tests/` | Kiểm thử bộ gõ Telex |
+| `Tests/` | Kiểm thử bộ gõ Telex: các ca của MSTrans và 9.091 ca của VietTelex (`Tests/Suite`) |
 | `ci/` | Chạy thử bàn phím và chụp màn hình app trên trình giả lập iOS |
 
 Project Xcode được sinh từ `project.yml` bằng XcodeGen. Mỗi lần push, GitHub Actions chạy kiểm thử, build file cài `MSTrans.ipa`, rồi mở bàn phím trong trình giả lập iOS để chắc chắn nó hiện lên (kể cả khi đã bật truy cập đầy đủ và có chữ trong bộ nhớ tạm) và chụp màn hình từng tab. Dùng cá nhân thì cài bằng AltStore với Apple ID miễn phí (Sideloadly ký sai bàn phím trên iOS 26, bàn phím không mở được). Cài đặt và cách dùng, không cần Mac: [docs/HUONG-DAN.md](docs/HUONG-DAN.md).
