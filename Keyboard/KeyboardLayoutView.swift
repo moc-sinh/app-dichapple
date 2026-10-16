@@ -787,6 +787,8 @@ final class KeyboardLayoutView: UIView {
         switch character {
         case " ": key = keys.first { $0.kind == .space }
         case "\u{8}": key = keys.first { $0.kind == .delete }
+        // 123 / ABC, at the left of the bottom row.
+        case "\u{2}": key = keys.last { if case .page = $0.kind { return true } else { return false } }
         default: key = keys.first { $0.character?.lowercased() == wanted }
         }
         guard let key else { return nil }

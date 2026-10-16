@@ -18,7 +18,7 @@ MAX_LAYOUTS_PER_KEY = 0.2
 # in Telex the third one takes the hat off "â" (aa -> â, aaa -> aa), as in Unikey and EVKey.
 EXPECTED = ("Chào anh bên em đã gửi báo giá rồi nhé. Anh xem giúp em với ạ " + "a" * 19 + " "
             "người người người người người người hahahahahahahahahahahahahahahahahahahaha "
-            "chưa người mưa w")
+            "chưa người mưa w giá 500k, ok?")
 
 
 def prefs_path(group_dir):

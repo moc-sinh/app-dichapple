@@ -17,6 +17,8 @@ final class TypingBenchmark: NSObject {
         ("người×6", " nguwowif nguwowif nguwowif nguwowif nguwowif nguwowif"),
         ("hahaha", " hahahahahahahahahahahahahahahahahahahaha"),
         ("chưa người", " chuaw ngwoif muaw ww"),
+        // \u{2} is 123 / ABC: digits and punctuation live on the 123 page, so chat switches pages often.
+        ("123 ABC", " gias \u{2}500\u{2}k\u{2}, ok\u{2}?"),
     ]
     // ci/typing-benchmark.py checks the field held the expected text before delete was held.
     private static let deleteKey: Character = "\u{8}"
@@ -54,7 +56,7 @@ final class TypingBenchmark: NSObject {
         guard !queue.isEmpty else { return holdDelete() }
         let (part, character) = queue.removeFirst()
         pressed += 1
-        let name = "#\(pressed) '\(character == " " ? "␣" : String(character))'"
+        let name = "#\(pressed) '\(character == " " ? "␣" : character == "\u{2}" ? "123" : String(character))'"
         mark(part, "\(name) down")
         let token = keyboard.benchmarkPress(character)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [self] in
