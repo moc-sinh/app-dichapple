@@ -267,18 +267,26 @@ final class KeyboardLayoutView: UIView {
 
     /// Once the keyboard is up and no key is being pressed: builds and lays out the 123 page and
     /// draws the capitals, so the first switch to 123 and the first capital cost nothing then.
-    private func prepareHidden() {
+    /// A step at a time (about 20 ms in all in CI), so a key pressed meanwhile never waits for all.
+    private func prepareHidden(step: Int = 0) {
         guard window != nil, bounds.width > 0 else { return }
         guard CACurrentMediaTime() - lastTouchAt > 0.5, tracks.isEmpty else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.prepareHidden() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.prepareHidden(step: step) }
             return
         }
-        if built[.numbers] == nil { _ = build(.numbers) }
-        for p in [Page.letters, .numbers] where laidOut[p] != bounds.size { layout(p) }
-        for key in built.values.joined().joined() {
-            key.label.layer.displayIfNeeded()
-            key.capital?.layer.displayIfNeeded()
+        switch step {
+        case 0:
+            if built[.numbers] == nil { _ = build(.numbers) }
+        case 1:
+            for p in [Page.letters, .numbers] where laidOut[p] != bounds.size { layout(p) }
+        case 2:
+            for key in (built[.letters] ?? []).joined() { key.capital?.layer.displayIfNeeded() }
+        case 3:
+            for key in (built[.numbers] ?? []).joined() { key.label.layer.displayIfNeeded() }
+        default:
+            return
         }
+        DispatchQueue.main.async { [weak self] in self?.prepareHidden(step: step + 1) }
     }
 
     private func makeKey(_ kind: Kind, on page: Page) -> Key {
