@@ -45,6 +45,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var pollTimer: Timer?
     /// The clipboard already read (or asked about) in instant mode, so iOS isn't asked twice.
     private var attemptedPasteboard: Int?
+    private var benchmark: TypingBenchmark?
+    /// Clipboard checks made on the main thread, and the time they took (typing benchmark).
+    static var mainThreadPasteboardChecks = 0
+    static var mainThreadPasteboardTime: CFTimeInterval = 0
 
     // Telex: the word at the cursor while it is being typed.
     private var word = TelexWord()
@@ -140,6 +144,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        if SharedStore.defaults.bool(forKey: TypingBenchmark.flagKey) {
+            SharedStore.defaults.removeObject(forKey: TypingBenchmark.flagKey)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self else { return }
+                self.benchmark = TypingBenchmark(keyboard: self.keyboard) { [weak self] result in
+                    SharedStore.defaults.set(result, forKey: TypingBenchmark.resultKey)
+                    self?.benchmark = nil
+                }
+                self.benchmark?.start()
+            }
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -853,7 +868,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// Text was copied and not translated yet. The change count and `hasStrings` never ask for
     /// paste permission; only reading the text does.
     private var hasNewCopy: Bool {
-        hasFullAccess && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
+        let start = CACurrentMediaTime()
+        defer {
+            Self.mainThreadPasteboardChecks += 1
+            Self.mainThreadPasteboardTime += CACurrentMediaTime() - start
+        }
+        return hasFullAccess && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
             && UIPasteboard.general.hasStrings
     }
 

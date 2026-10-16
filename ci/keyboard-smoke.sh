@@ -204,6 +204,25 @@ limit 30 xcrun simctl ui "$UDID" appearance dark
 run_phase dark
 limit 30 xcrun simctl ui "$UDID" appearance light
 
+# The keyboard types a sentence through its own key handling as fast as a quick typist and
+# records main-thread time per key, key layouts, late frames and clipboard checks on the
+# main thread (Keyboard/TypingBenchmark.swift).
+group "Typing benchmark setup"
+xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+limit 120 xcrun simctl shutdown "$UDID"
+python3 ci/typing-benchmark.py setup "$GROUP_DIR"
+limit 180 xcrun simctl boot "$UDID"
+limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
+endgroup
+
+run_phase typing
+
+group "Typing benchmark"
+xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+limit 120 xcrun simctl shutdown "$UDID"
+python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt"
+endgroup
+
 # Screenshots of each tab of the app, light and dark, with a few sample translations.
 group "App screens"
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1

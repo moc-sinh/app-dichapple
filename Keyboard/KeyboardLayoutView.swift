@@ -222,6 +222,7 @@ final class KeyboardLayoutView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0, rows.count == 4 else { return }
+        Self.layoutPasses += 1
         let width = bounds.width
         let landscape = width > 500
         let side: CGFloat = (landscape ? 4 : 3) + max(safeAreaInsets.left, safeAreaInsets.right)
@@ -398,13 +399,13 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func begin(_ track: Track, touch: UITouch, event: UIEvent?) {
+    private func begin(_ track: Track, touch: UITouch?, event: UIEvent?) {
         let key = track.key
         switch key.kind {
         case .char(let s):
             feedback()
             showPopup(track)
-            if Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
+            if let touch, Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
         case .shift:
             feedback()
             let now = CACurrentMediaTime()
@@ -430,8 +431,10 @@ final class KeyboardLayoutView: UIView {
         case .space:
             feedback()
             setPressed(key, true)
-            track.anchorX = touch.location(in: self).x
-            scheduleLongPress(touch, after: 0.35)
+            if let touch {
+                track.anchorX = touch.location(in: self).x
+                scheduleLongPress(touch, after: 0.35)
+            }
         case .ret:
             feedback()
             setPressed(key, true)
@@ -505,6 +508,10 @@ final class KeyboardLayoutView: UIView {
             return
         }
 
+        end(track, event: event, cancelled: cancelled)
+    }
+
+    private func end(_ track: Track, event: UIEvent?, cancelled: Bool) {
         switch track.key.kind {
         case .char:
             if !track.committed && !cancelled { commit(track) }
@@ -626,6 +633,29 @@ final class KeyboardLayoutView: UIView {
     private func stopDeleteRepeat() {
         deleteTimer?.invalidate()
         deleteTimer = nil
+    }
+
+    // MARK: Typing benchmark (CI)
+
+    /// Layout passes that placed the keys; the typing benchmark reports them per key.
+    static var layoutPasses = 0
+
+    /// Presses the key for `character` as a finger would, through the same handling, minus
+    /// UIKit's touch delivery. Returns what `benchmarkRelease` needs.
+    func benchmarkPress(_ character: Character) -> AnyObject? {
+        let wanted = String(character).lowercased()
+        let key = character == " " ? keys.first { $0.kind == .space } : keys.first { $0.character?.lowercased() == wanted }
+        guard let key else { return nil }
+        for (_, track) in tracks where !track.committed && track.key.character != nil { commit(track) }
+        let track = Track(key: key)
+        begin(track, touch: nil, event: nil)
+        return track
+    }
+
+    func benchmarkRelease(_ token: AnyObject) {
+        guard let track = token as? Track else { return }
+        removePopup(track)
+        end(track, event: nil, cancelled: false)
     }
 
     override func didMoveToWindow() {

@@ -39,6 +39,12 @@ final class ViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
             guard let self else { return }
             print("KEYBOARD_HEIGHT=\(Int(keyboardHeight))")
+            print("FIELD_TEXT=\(field.text ?? "")")
+            fflush(stdout)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self else { return }
+            print("FIELD_TEXT=\(field.text ?? "")")
             fflush(stdout)
         }
     }
