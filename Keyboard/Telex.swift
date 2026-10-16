@@ -246,7 +246,23 @@ enum Telex {
     // MARK: Characters
 
     private static func vowel(_ c: Character) -> Vowel? { vowels[lower(c)] }
-    private static func lower(_ c: Character) -> Character { Character(c.lowercased()) }
+
+    /// Upper-case Vietnamese letters to lower case, built once.
+    private static let lowercase: [Character: Character] = {
+        var map: [Character: Character] = ["Đ": "đ"]
+        for chars in forms.values {
+            for c in chars { map[Character(c.uppercased())] = c }
+        }
+        return map
+    }()
+
+    /// Lower-cases a letter without building a string: runs several times per key press.
+    private static func lower(_ c: Character) -> Character {
+        if let ascii = c.asciiValue {
+            return (65...90).contains(ascii) ? Character(Unicode.Scalar(ascii + 32)) : c
+        }
+        return lowercase[c] ?? c
+    }
 
     private static func make(_ source: Character, _ base: Character, _ tone: Int) -> Character {
         let c = forms[base]![tone]
@@ -273,6 +289,13 @@ struct TelexWord {
         let shownBefore = shown
         raw.append(key)
         if literal {
+            shown.append(key)
+            return
+        }
+        // No Vietnamese syllable takes this many keys. A word still shown as typed stays so,
+        // and from here each key costs nothing however long it gets (hahahaha…).
+        if raw.count > 12, shownBefore == rawBefore {
+            literal = true
             shown.append(key)
             return
         }

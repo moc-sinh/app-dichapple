@@ -222,7 +222,7 @@ group "Typing benchmark"
 sleep 14
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
 limit 120 xcrun simctl shutdown "$UDID"
-python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt"
+python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt" || FAILED=1
 endgroup
 
 # Screenshots of each tab of the app, light and dark, with a few sample translations.

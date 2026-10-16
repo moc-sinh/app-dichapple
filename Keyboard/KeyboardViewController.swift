@@ -47,8 +47,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var attemptedPasteboard: Int?
     private var benchmark: TypingBenchmark?
     /// Clipboard checks made on the main thread, and the time they took (typing benchmark).
+    /// Checks now run on `clipboardQueue`, so these stay at zero.
     static var mainThreadPasteboardChecks = 0
     static var mainThreadPasteboardTime: CFTimeInterval = 0
+
+    // The clipboard, asked off the main thread: every question is a round trip to another
+    // process, long enough to drop frames, so it never runs while keys are being pressed.
+    private let clipboardQueue = DispatchQueue(label: "com.mocsinh.mstrans.clipboard", qos: .utility)
+    private var clipboardCheckRunning = false
+    /// From the last check: the clipboard holds text that was not translated yet.
+    private var copyPending = false
+    private var copyChangeCount = 0
+    private var copyButtonShown = false
+    private var lastKeyAt: CFTimeInterval = 0
 
     // Telex: the word at the cursor while it is being typed.
     private var word = TelexWord()
@@ -76,6 +87,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidLoad() {
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
+        // The first language check loads a model; do it now, off the main thread, not on a key press.
+        DispatchQueue.global(qos: .utility).async { _ = LanguageDetector.isVietnamese("Xin chào") }
 
         infoButton.contentHorizontalAlignment = .leading
         infoButton.addAction(UIAction { [weak self] _ in self?.openInfo() }, for: .touchUpInside)
@@ -135,7 +148,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         updateAutoCapitalization()
         mode = .normal
         info = .idle
-        refreshIncoming()
+        checkClipboard()
         if hasFullAccess, SharedStore.apiKey != nil { Translator.warmUp() }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
@@ -144,6 +157,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        // iOS holds back touches near the screen edges in case they start a system swipe, so
+        // q, a, p, l, Shift and delete answered later than the middle keys. A keyboard has no
+        // edge swipes to wait for.
+        var ancestor: UIView? = view
+        while let current = ancestor {
+            current.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+            ancestor = current.superview
+        }
         if SharedStore.defaults.bool(forKey: TypingBenchmark.flagKey) {
             SharedStore.defaults.removeObject(forKey: TypingBenchmark.flagKey)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
@@ -168,9 +189,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
-        infoHeight?.constant = compact ? 26 : 30
-        barHeight?.constant = compact ? 36 : 42
-        keysHeight?.constant = compact ? 160 : 216
+        // Only real changes: setting a constraint, even to its value, asks for another layout.
+        for (constraint, value) in [(infoHeight, compact ? 26 : 30), (barHeight, compact ? 36 : 42), (keysHeight, compact ? 160 : 216)] {
+            if let constraint, constraint.constant != CGFloat(value) { constraint.constant = CGFloat(value) }
+        }
         keyboard.showsGlobe = needsInputModeSwitchKey
     }
 
@@ -182,16 +204,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func matchAppearance() {
-        view.overrideUserInterfaceStyle = textDocumentProxy.keyboardAppearance == .dark ? .dark : .unspecified
+        let style: UIUserInterfaceStyle = textDocumentProxy.keyboardAppearance == .dark ? .dark : .unspecified
+        // Setting it re-resolves every colour on the keyboard; only when it really changes.
+        if view.overrideUserInterfaceStyle != style { view.overrideUserInterfaceStyle = style }
     }
 
     @objc private func poll() {
-        refreshIncoming()
+        // Typing comes first: the clipboard waits until the keys have been quiet for a moment.
+        guard CACurrentMediaTime() - lastKeyAt > 1.5 else { return }
+        checkClipboard()
     }
 
     // MARK: Keys
 
     func keyboardLayoutView(_ view: KeyboardLayoutView, perform action: KeyAction) {
+        lastKeyAt = CACurrentMediaTime()
         let proxy = textDocumentProxy
         switch action {
         case .letter(let c):
@@ -305,9 +332,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .words:
             on = before.isEmpty || before.last?.isWhitespace == true
         case .sentences:
-            if before.isEmpty || before.hasSuffix("\n") {
+            if before.isEmpty || before.last == "\n" {
                 on = true
-            } else if before.hasSuffix(" "), let last = before.trimmingCharacters(in: .whitespaces).last {
+            } else if before.last == " ", let last = before.last(where: { !$0.isWhitespace }) {
                 on = ".!?".contains(last)
             } else {
                 on = false
@@ -484,7 +511,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             language.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             bar.addArrangedSubview(language)
             bar.addArrangedSubview(spacer())
-            if !SharedStore.autoIncoming && hasNewCopy {
+            copyButtonShown = !SharedStore.autoIncoming && copyPending
+            if copyButtonShown {
                 bar.addArrangedSubview(pill("Tin copy", style: .incoming) { [weak self] in self?.translateCopied() })
             }
             bar.addArrangedSubview(pill("Dịch", image: "translate", style: .primary) { [weak self] in self?.translateDraft() })
@@ -865,47 +893,61 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     // MARK: Translating the partner's messages
 
-    /// Text was copied and not translated yet. The change count and `hasStrings` never ask for
-    /// paste permission; only reading the text does.
-    private var hasNewCopy: Bool {
-        let start = CACurrentMediaTime()
-        defer {
-            Self.mainThreadPasteboardChecks += 1
-            Self.mainThreadPasteboardTime += CACurrentMediaTime() - start
+    /// Whether the clipboard holds text not translated yet. The change count and `hasStrings`
+    /// never ask for paste permission (only reading the text does), but each is a round trip to
+    /// the clipboard's process, so they run on `clipboardQueue` and the answer comes back here.
+    private func checkClipboard() {
+        guard hasFullAccess, SharedStore.apiKey != nil, !clipboardCheckRunning else { return }
+        clipboardCheckRunning = true
+        let handled = SharedStore.handledPasteboard
+        clipboardQueue.async { [weak self] in
+            let board = UIPasteboard.general
+            let changeCount = board.changeCount
+            let pending = changeCount != handled && board.hasStrings
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.clipboardCheckRunning = false
+                self.copyPending = pending
+                self.copyChangeCount = changeCount
+                self.refreshIncoming()
+            }
         }
-        return hasFullAccess && UIPasteboard.general.changeCount != SharedStore.handledPasteboard
-            && UIPasteboard.general.hasStrings
     }
 
-    /// Offers to translate a fresh copy. Only offered: reading the clipboard makes iOS ask for
-    /// paste permission and blocks the caller until it is answered, so reading it while the
-    /// keyboard opens stopped the keyboard from ever drawing.
+    /// Offers to translate a fresh copy, or in instant mode translates it. Reading the clipboard
+    /// makes iOS ask for paste permission and blocks the reader until it is answered, so the
+    /// text is only ever read off the main thread.
     private func refreshIncoming() {
-        guard SharedStore.autoIncoming, hasFullAccess, SharedStore.apiKey != nil else { return }
+        guard hasFullAccess, SharedStore.apiKey != nil else { return }
+        guard SharedStore.autoIncoming else {
+            // The "Tin copy" button on the bar follows the clipboard.
+            if mode == .normal, copyPending != copyButtonShown { renderBar() }
+            return
+        }
         // Offered whenever the line is free, so pressing Dịch first or a denied paste doesn't lose it.
         switch info {
-        case .idle where hasNewCopy:
+        case .idle where copyPending:
             // Instant mode reads each copy once by itself; after that the offer stays for a tap.
-            let changeCount = UIPasteboard.general.changeCount
-            if SharedStore.instantIncoming, attemptedPasteboard != changeCount {
-                attemptedPasteboard = changeCount
+            if SharedStore.instantIncoming, attemptedPasteboard != copyChangeCount {
+                attemptedPasteboard = copyChangeCount
                 translateCopied()
             } else {
                 info = .copied
             }
-        case .copied where !hasNewCopy: info = .idle
+        case .copied where !copyPending: info = .idle
         default: break
         }
     }
 
-    /// Translates the copied message. Only after a tap, and off the main thread, so the keys stay
+    /// Translates the copied message, reading it off the main thread so the keys stay
     /// responsive while iOS asks for paste permission.
     private func translateCopied() {
         guard readyKey() != nil else { return }
-        let changeCount = UIPasteboard.general.changeCount
         mode = .normal
         info = .incomingBusy
+        // Its own queue: the read can wait for the paste prompt, and clipboard checks must not.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let changeCount = UIPasteboard.general.changeCount
             let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             DispatchQueue.main.async { self?.received(copied: copied, changeCount: changeCount) }
         }
@@ -918,6 +960,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             return
         }
         SharedStore.handledPasteboard = changeCount
+        copyPending = false
         guard !LanguageDetector.isVietnamese(copied) else {
             info = .message("Tin vừa sao chép đã là tiếng Việt.")
             return

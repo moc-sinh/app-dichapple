@@ -34,6 +34,7 @@ final class KeyboardLayoutView: UIView {
         let label = UILabel()
         let icon = UIImageView()
         var hit = CGRect.zero
+        var shadowSize = CGSize.zero
 
         init(kind: Kind) { self.kind = kind }
 
@@ -78,6 +79,14 @@ final class KeyboardLayoutView: UIView {
     private var accentPicker: AccentPicker?
     private let haptics = UIImpactFeedbackGenerator(style: .light)
 
+    /// Pop-ups and the accent picker sit in their own layer above the keys: showing one never
+    /// makes the keys lay out again, and the pop-ups are reused instead of built per press.
+    private let overlay = UIView()
+    private var sparePopups: [KeyPopup] = []
+    /// Key frames are computed only when the size or the keys change, not on every pass.
+    private var needsKeyFrames = true
+    private var laidOutSize = CGSize.zero
+
     static let cornerRadius: CGFloat = {
         if #available(iOS 26.0, *) { return 8.5 }
         return 5
@@ -107,6 +116,9 @@ final class KeyboardLayoutView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         clipsToBounds = false
+        overlay.isUserInteractionEnabled = false
+        overlay.clipsToBounds = false
+        addSubview(overlay)
         rebuild()
     }
 
@@ -159,11 +171,10 @@ final class KeyboardLayoutView: UIView {
         keys.forEach { $0.cap.removeFromSuperview() }
         rows = rowKinds().map { $0.map(makeKey) }
         keys = rows.flatMap { $0 }
-        keys.forEach { addSubview($0.cap) }
-        // Pop-ups stay above the keys.
-        for track in tracks.values { if let popup = track.popup { bringSubviewToFront(popup) } }
+        keys.forEach { insertSubview($0.cap, belowSubview: overlay) }
         applyShift()
         applyReturn()
+        needsKeyFrames = true
         setNeedsLayout()
     }
 
@@ -193,6 +204,7 @@ final class KeyboardLayoutView: UIView {
         case .char(let s):
             key.label.text = s
             key.label.font = .systemFont(ofSize: page == .letters ? 23 : 22.5)
+            key.label.adjustsFontSizeToFitWidth = false
             cap.accessibilityLabel = s
         case .shift:
             cap.accessibilityLabel = "Shift"
@@ -219,9 +231,18 @@ final class KeyboardLayoutView: UIView {
 
     // MARK: Layout (iPhone system keyboard metrics)
 
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        needsKeyFrames = true
+        setNeedsLayout()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width > 0, rows.count == 4 else { return }
+        guard bounds.width > 0, rows.count == 4, needsKeyFrames || bounds.size != laidOutSize else { return }
+        needsKeyFrames = false
+        laidOutSize = bounds.size
+        overlay.frame = bounds
         Self.layoutPasses += 1
         let width = bounds.width
         let landscape = width > 500
@@ -255,7 +276,10 @@ final class KeyboardLayoutView: UIView {
             let b = key.cap.bounds
             key.label.frame = key.character != nil && page == .letters ? b.offsetBy(dx: 0, dy: -1) : b.insetBy(dx: 2, dy: 0)
             key.icon.frame = b
-            key.cap.layer.shadowPath = UIBezierPath(roundedRect: b, cornerRadius: Self.cornerRadius).cgPath
+            if key.shadowSize != b.size {
+                key.shadowSize = b.size
+                key.cap.layer.shadowPath = UIBezierPath(roundedRect: b, cornerRadius: Self.cornerRadius).cgPath
+            }
         }
     }
 
@@ -335,7 +359,8 @@ final class KeyboardLayoutView: UIView {
             for key in keys {
                 switch key.kind {
                 case .char(let s) where page == .letters:
-                    key.label.text = upper ? s.uppercased() : s
+                    let text = upper ? s.uppercased() : s
+                    if key.label.text != text { key.label.text = text }
                 case .shift:
                     let name = shift == .locked ? "capslock.fill" : (upper ? "shift.fill" : "shift")
                     key.icon.image = UIImage(systemName: name, withConfiguration: Self.iconConfig)
@@ -403,8 +428,8 @@ final class KeyboardLayoutView: UIView {
         let key = track.key
         switch key.kind {
         case .char(let s):
-            feedback()
             showPopup(track)
+            feedback()
             if let touch, Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
         case .shift:
             feedback()
@@ -555,16 +580,25 @@ final class KeyboardLayoutView: UIView {
     // MARK: Pop-ups and accents
 
     private func showPopup(_ track: Track) {
-        removePopup(track)
-        guard let s = track.key.character else { return }
+        guard let s = track.key.character else { return removePopup(track) }
         let text = shift != .off && page == .letters ? s.uppercased() : s
-        let popup = KeyPopup(keyFrame: track.key.cap.frame, width: bounds.width, text: text, traits: traitCollection)
-        addSubview(popup)
+        let popup: KeyPopup
+        if let current = track.popup {
+            popup = current
+        } else if let spare = sparePopups.popLast() {
+            popup = spare
+        } else {
+            popup = KeyPopup()
+            overlay.addSubview(popup)
+        }
+        popup.show(keyFrame: track.key.cap.frame, width: bounds.width, text: text, traits: traitCollection)
         track.popup = popup
     }
 
     private func removePopup(_ track: Track) {
-        track.popup?.removeFromSuperview()
+        guard let popup = track.popup else { return }
+        popup.isHidden = true
+        sparePopups.append(popup)
         track.popup = nil
     }
 
@@ -592,7 +626,7 @@ final class KeyboardLayoutView: UIView {
             let shown = shift != .off && page == .letters ? options.map { $0.uppercased() } : options
             removePopup(track)
             let picker = AccentPicker(options: shown, keyFrame: track.key.cap.frame, width: bounds.width)
-            addSubview(picker)
+            overlay.addSubview(picker)
             picker.select(atX: touch.location(in: self).x)
             accentPicker = picker
             accentTouch = touch
@@ -699,19 +733,51 @@ enum KeyColor {
 // MARK: - Key pop-up
 
 /// The enlarged letter shown above a key while it is held, shaped like the system one.
+/// Built once and reshaped for each press.
 private final class KeyPopup: UIView {
-    init(keyFrame k: CGRect, width: CGFloat, text: String, traits: UITraitCollection) {
+    private let shape = CAShapeLayer()
+    private let label = UILabel()
+    private var shapedFor: (key: CGRect, width: CGFloat)?
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        shape.shadowColor = UIColor.black.cgColor
+        shape.shadowOpacity = 0.25
+        shape.shadowRadius = 2
+        shape.shadowOffset = CGSize(width: 0, height: 1)
+        layer.addSublayer(shape)
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 34)
+        label.textColor = .label
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func show(keyFrame k: CGRect, width: CGFloat, text: String, traits: UITraitCollection) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if shapedFor?.key != k || shapedFor?.width != width {
+            shapedFor = (k, width)
+            reshape(keyFrame: k, width: width)
+        }
+        shape.fillColor = KeyColor.popup.resolvedColor(with: traits).cgColor
+        CATransaction.commit()
+        if label.text != text { label.text = text }
+        isHidden = false
+    }
+
+    private func reshape(keyFrame k: CGRect, width: CGFloat) {
         let balloonWidth = max(k.width + 22, 48)
         let balloonHeight = k.height + 14
         let balloonX = min(max(k.midX - balloonWidth / 2, 0), width - balloonWidth)
         let balloonY = k.minY - balloonHeight - 6
         let minX = min(balloonX, k.minX)
-        let box = CGRect(x: minX, y: balloonY, width: max(balloonX + balloonWidth, k.maxX) - minX, height: k.maxY - balloonY)
-        super.init(frame: box)
-        isUserInteractionEnabled = false
+        frame = CGRect(x: minX, y: balloonY, width: max(balloonX + balloonWidth, k.maxX) - minX, height: k.maxY - balloonY)
 
-        let balloon = CGRect(x: balloonX - box.minX, y: 0, width: balloonWidth, height: balloonHeight)
-        let keyRect = k.offsetBy(dx: -box.minX, dy: -box.minY)
+        let balloon = CGRect(x: balloonX - frame.minX, y: 0, width: balloonWidth, height: balloonHeight)
+        let keyRect = k.offsetBy(dx: -frame.minX, dy: -frame.minY)
         let path = UIBezierPath(roundedRect: balloon, cornerRadius: 10)
         let neck = UIBezierPath()
         neck.move(to: CGPoint(x: balloon.minX + 3, y: balloon.maxY - 8))
@@ -721,28 +787,10 @@ private final class KeyPopup: UIView {
         neck.close()
         path.append(neck)
         path.append(UIBezierPath(roundedRect: keyRect, cornerRadius: KeyboardLayoutView.cornerRadius))
-
-        let shape = CAShapeLayer()
         shape.path = path.cgPath
-        shape.fillColor = KeyColor.popup.resolvedColor(with: traits).cgColor
-        shape.shadowColor = UIColor.black.cgColor
-        shape.shadowOpacity = 0.25
-        shape.shadowRadius = 2
-        shape.shadowOffset = CGSize(width: 0, height: 1)
         shape.shadowPath = path.cgPath
-        layer.addSublayer(shape)
-
-        let label = UILabel(frame: balloon.insetBy(dx: 2, dy: 2))
-        label.text = text
-        label.textAlignment = .center
-        label.font = .systemFont(ofSize: 34)
-        label.adjustsFontSizeToFitWidth = true
-        label.minimumScaleFactor = 0.5
-        label.textColor = .label
-        addSubview(label)
+        label.frame = balloon.insetBy(dx: 2, dy: 2)
     }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
 
 // MARK: - Accent picker

@@ -1,5 +1,7 @@
 // Telex checks, run in CI with: swiftc Keyboard/Telex.swift Tests/main.swift -o telex-tests && ./telex-tests
 
+import Foundation
+
 let cases: [(String, String)] = [
     // Vietnamese
     ("guwir", "gửi"), ("giups", "giúp"), ("Saus", "Sáu"), ("nhes", "nhé"),
@@ -18,6 +20,10 @@ let cases: [(String, String)] = [
     ("price", "price"), ("order", "order"), ("email", "email"), ("iPhone", "iPhone"),
     ("WeChat", "WeChat"), ("class", "class"), ("access", "access"), ("process", "process"),
     ("staff", "staff"), ("check", "check"), ("file", "file"),
+    // One key again and again, long words: still exactly as typed
+    ("aaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaa"), ("hahahahahahahahahahahahahahahahahahahaha", "hahahahahahahahahahahahahahahahahahahaha"),
+    ("kkkkkkkkkkkkkkkk", "kkkkkkkkkkkkkkkk"), ("ddddddd", "ddddddd"), ("facebookfacebookfacebook", "facebookfacebookfacebook"),
+    ("nghieengs", "nghiếng"), ("khuyeenr", "khuyển"),
 ]
 
 var failed = 0
@@ -38,6 +44,25 @@ for w in words {
         failed += 1
         print("FAIL round trip \(w) -> \(Telex.rawKeys(for: w)) -> \(again)")
     }
+}
+
+// Speed: keys through the engine as the keyboard sends them, one at a time.
+let sample = ["nguwowif", "dduwowcj", "tieesng", "vieetj", "khoong", "aaaaaaaaaaaaaaaaaaaa",
+              "hahahahahahahahahahahahahahahahahahahaha", "facebook", "guwir", "baos", "gias"]
+var keyCount = 0
+let started = Date()
+for _ in 0..<500 {
+    for w in sample {
+        var word = TelexWord()
+        for key in w { word.type(key); keyCount += 1 }
+    }
+}
+let perKey = Date().timeIntervalSince(started) / Double(keyCount) * 1_000_000
+print(String(format: "Telex: %.2f µs per key over %d keys", perKey, keyCount))
+// A frame on a 120 Hz iPhone is 8,300 µs; the engine must be a rounding error of that.
+if perKey > 100 {
+    failed += 1
+    print("FAIL Telex is too slow: \(perKey) µs per key")
 }
 
 let total = cases.count + words.count
