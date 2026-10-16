@@ -510,8 +510,10 @@ struct TypedText {
     private static func matches(_ mine: String, _ field: String) -> Bool {
         if field.isEmpty { return mine.isEmpty || mine.last == "\n" }
         // Byte for byte first (the usual case, and fast); then as characters, for an app that
-        // hands back the same text composed differently.
+        // hands back the same text composed differently. Never when the last letters already differ,
+        // as they do for most of the texts compared: those cost next to nothing.
         if endsWith(mine.utf8, field.utf8) || (mine.utf8.count >= 48 && endsWith(field.utf8, mine.utf8)) { return true }
+        guard mine.last == field.last else { return false }
         return mine.hasSuffix(field) || (mine.count >= 16 && field.hasSuffix(mine))
     }
 
