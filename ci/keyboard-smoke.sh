@@ -93,7 +93,10 @@ run_phase() {
     sleep 1
     limit 60 xcrun simctl launch --terminate-running-process \
         --stdout="$PWD/$OUT/$name-host.log" --stderr="$PWD/$OUT/$name-host.err" "$UDID" "$HOST_ID"
-    sleep 8
+    # The typing benchmark runs for about 22 s once the keyboard is up. footprint pauses the
+    # keyboard to read its memory, and screenshots and the log load the machine: run them after,
+    # or they show up as slow keys.
+    if [ "$name" = typing ]; then sleep 30; else sleep 8; fi
     pid=$(keyboard_pid)
     if [ -n "$pid" ]; then
         echo "Keyboard process: running (pid $pid)"
@@ -217,8 +220,8 @@ endgroup
 run_phase typing
 
 group "Typing benchmark"
-# The benchmark types about 210 keys and then holds delete: give it time to finish.
-sleep 16
+# Done during the phase (it waited for the benchmark); the keyboard saves its log 1.6 s after.
+sleep 2
 xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
 limit 120 xcrun simctl shutdown "$UDID"
 python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt" || FAILED=1

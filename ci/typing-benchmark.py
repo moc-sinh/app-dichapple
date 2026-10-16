@@ -42,8 +42,18 @@ def setup(group_dir):
 
 
 def report(group_dir, host_log):
-    result = load(group_dir).get("typingBenchmarkResult", "")
+    values = load(group_dir)
+    result = values.get("typingBenchmarkResult", "")
     print(result or "no result")
+    # What the keyboard's typing log noted as slow (Keyboard/TypingLog.swift), with the line before.
+    log = values.get("typingLog", [])
+    slow = [i for i, line in enumerate(log) if "\u23f1" in line or "\u231b" in line]
+    if slow:
+        print("Slow moments in the keyboard's typing log:")
+        for i in slow[:30]:
+            if i > 0:
+                print("   ", log[i - 1])
+            print("   ", log[i])
     failures = [] if result else ["the keyboard wrote no benchmark result"]
     for m in re.finditer(r"^(.+?): \d+ events avg=[\d.]+ms p95=([\d.]+)ms", result, re.M):
         if float(m.group(2)) > FRAME_MS:

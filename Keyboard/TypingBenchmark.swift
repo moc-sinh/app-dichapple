@@ -27,7 +27,7 @@ final class TypingBenchmark: NSObject {
     private let keyboard: KeyboardLayoutView
     private let finished: (String) -> Void
     private var queue: [(part: String, key: Character)] = []
-    private var busy: [String: [(ms: Double, what: String)]] = [:]
+    private var busy: [String: [(ms: Double, cpu: Double, what: String)]] = [:]
     private var pressed = 0
     private var order: [String] = []
     private var frames: [CFTimeInterval] = []
@@ -87,14 +87,23 @@ final class TypingBenchmark: NSObject {
     }
 
     /// Starts timing an event: main-thread time from now until the run loop is about to sleep,
-    /// which is after Core Animation has laid out and committed whatever the event changed.
+    /// which is after Core Animation has laid out and committed whatever the event changed. Also
+    /// the CPU time the main thread used meanwhile: a slow event with little CPU time waited (on
+    /// another process, or a busy machine), one with a lot was the keyboard's own work.
     private func mark(_ part: String, _ what: String) {
         let start = CACurrentMediaTime()
+        let cpuStart = Self.threadCPU()
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, 3_000_000) { [weak self] observer, _ in
-            self?.busy[part, default: []].append(((CACurrentMediaTime() - start) * 1000, what))
+            self?.busy[part, default: []].append(((CACurrentMediaTime() - start) * 1000, (Self.threadCPU() - cpuStart) * 1000, what))
             CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    private static func threadCPU() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -110,8 +119,10 @@ final class TypingBenchmark: NSObject {
             guard let slowest = events.max(by: { $0.ms < $1.ms }) else { return "\(name): none" }
             let average = sorted.reduce(0, +) / Double(sorted.count)
             let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
-            return String(format: "%@: %d events avg=%.2fms p95=%.2fms max=%.2fms (%@)",
-                          name, sorted.count, average, p95, slowest.ms, slowest.what)
+            let cpu = events.map(\.cpu).sorted()
+            let cpuP95 = cpu[min(cpu.count - 1, Int(Double(cpu.count) * 0.95))]
+            return String(format: "%@: %d events avg=%.2fms p95=%.2fms max=%.2fms (%@, cpu %.2fms) cpu_p95=%.2fms cpu_max=%.2fms",
+                          name, sorted.count, average, p95, slowest.ms, slowest.what, slowest.cpu, cpuP95, cpu.last ?? 0)
         }
         let intervals = zip(frames.dropFirst(), frames).map { ($0 - $1) * 1000 }
         let typical = intervals.isEmpty ? 0 : intervals.sorted()[intervals.count / 2]
