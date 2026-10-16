@@ -24,6 +24,11 @@ let cases: [(String, String)] = [
     ("price", "price"), ("order", "order"), ("email", "email"), ("iPhone", "iPhone"),
     ("WeChat", "WeChat"), ("class", "class"), ("access", "access"), ("process", "process"),
     ("staff", "staff"), ("check", "check"), ("file", "file"),
+    // One key again and again, long words: still exactly as typed
+    // Twenty a's give nineteen: the third takes the hat off "â" (aa -> â, aaa -> aa), as in Unikey.
+    ("aaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaa"), ("hahahahahahahahahahahahahahahahahahahaha", "hahahahahahahahahahahahahahahahahahahaha"),
+    ("kkkkkkkkkkkkkkkk", "kkkkkkkkkkkkkkkk"), ("ddddddd", "ddddddd"), ("facebookfacebookfacebook", "facebookfacebookfacebook"),
+    ("nghieengs", "nghiếng"), ("khuyeenr", "khuyển"),
 ]
 
 var failed = 0
@@ -137,6 +142,28 @@ do {
         failed += 1
         print("FAIL double space: \(field.text), want ok. vâng")
     }
+}
+
+// Speed: keys through the engine and the composer as the keyboard sends them, one at a time.
+let sample = ["nguwowif", "dduwowcj", "tieesng", "vieetj", "khoong", "aaaaaaaaaaaaaaaaaaaa",
+              "hahahahahahahahahahahahahahahahahahahaha", "facebook", "guwir", "baos", "gias", "chuaw", "ngwoif"]
+var keyCount = 0
+let started = Date()
+for _ in 0..<500 {
+    var composer = Composer()
+    composer.start(before: "", after: "", now: 0)
+    var now = 0.0
+    for w in sample {
+        for key in w { _ = composer.letter(key, now: now); now += 0.06; keyCount += 1 }
+        _ = composer.space(now: now)
+    }
+}
+let perKey = Date().timeIntervalSince(started) / Double(keyCount) * 1_000_000
+print(String(format: "Typing: %.2f µs per key over %d keys", perKey, keyCount))
+// A frame on a 120 Hz iPhone is 8,300 µs; typing must be a rounding error of that.
+if perKey > 100 {
+    failed += 1
+    print("FAIL typing is too slow: \(perKey) µs per key")
 }
 
 let total = cases.count + words.count + fastChecks

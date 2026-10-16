@@ -80,6 +80,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidLoad() {
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
+        // The first Telex key builds the engine's tables and the first language check loads a
+        // model: both now, off the main thread, not on the first key press.
+        DispatchQueue.global(qos: .userInitiated).async {
+            var warm = Composer()
+            warm.start(before: "", after: "", now: 0)
+            for key in "nguwowif chuaw" {
+                if key == " " { _ = warm.space(now: 0) } else { _ = warm.letter(key, now: 0) }
+            }
+            _ = LanguageDetector.language(of: "Can you send me the price list?")
+            // The key pop-up's big letter: the first one drawn sets up the font at that size.
+            _ = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48)).image { _ in
+                ("aĂ" as NSString).draw(at: .zero, withAttributes: [.font: UIFont.systemFont(ofSize: 34)])
+            }
+        }
 
         infoButton.contentHorizontalAlignment = .leading
         infoButton.addAction(UIAction { [weak self] _ in self?.openInfo() }, for: .touchUpInside)
@@ -149,8 +163,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         super.viewDidAppear(animated)
         SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
         // iOS holds back touches near the screen edges (q, a, z, p, l, delete, space) while it
-        // checks for a system swipe, so those keys answered late when typing fast.
-        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        // checks for a system swipe, so those keys answered late when typing fast. The window and
+        // every view up to it can carry such a recognizer.
+        var ancestor: UIView? = view
+        while let current = ancestor {
+            current.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+            ancestor = current.superview
+        }
         startBenchmarkIfAsked()
     }
 
@@ -180,9 +199,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
-        infoHeight?.constant = infoLineHeight
-        barHeight?.constant = compact ? 36 : 42
-        keysHeight?.constant = compact ? 160 : 216
+        // Only real changes: a constraint set again asks for another layout of the keyboard.
+        let heights: [(NSLayoutConstraint?, CGFloat)] = [(infoHeight, infoLineHeight), (barHeight, compact ? 36 : 42),
+                                                          (keysHeight, compact ? 160 : 216)]
+        for (constraint, value) in heights where constraint?.constant != value { constraint?.constant = value }
         keyboard.showsGlobe = needsInputModeSwitchKey
     }
 
