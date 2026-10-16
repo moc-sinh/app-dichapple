@@ -673,14 +673,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             text = .secondaryLabel
         case .incoming(_, let translation):
             title = translation.text
-            symbol = translation.note == nil ? "bubble.left.fill" : "exclamationmark.bubble.fill"
+            symbol = "bubble.left.fill"
             tint = Brand.orange
         case .outgoing(let translation, _):
-            if let note = translation.note {
-                title = "Lưu ý: \(note)"
-                symbol = "exclamationmark.triangle.fill"
-                tint = Brand.gold
-            } else if let meaning = translation.meaning {
+            if let meaning = translation.meaning {
                 title = "Nghĩa: \(meaning)"
                 symbol = "checkmark.circle.fill"
                 tint = Brand.green
@@ -912,17 +908,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let recent = lastIncoming == nil || lastOutgoing == nil ? SharedStore.recentHistory() : []
 
         if let incoming = lastIncoming {
-            parts += incomingParts(source: incoming.source, translation: incoming.translation.text, note: incoming.translation.note)
+            parts += incomingParts(translation: incoming.translation.text)
         } else if let item = recent.first(where: { $0.side == .partner }) {
-            parts += incomingParts(source: item.source, translation: item.translation, note: item.note)
+            parts += incomingParts(translation: item.translation)
         }
         if let outgoing = lastOutgoing {
             let t = outgoing.translation
             parts += outgoingParts(original: outgoing.original, translation: t.text, language: t.language.name,
-                                   meaning: t.meaning, note: t.note)
+                                   meaning: t.meaning)
         } else if let item = recent.first(where: { $0.side == .me }) {
             parts += outgoingParts(original: item.source, translation: item.translation, language: item.languageName.lowercased(),
-                                   meaning: item.meaning, note: item.note)
+                                   meaning: item.meaning)
         }
 
         let lines = SharedStore.context()
@@ -937,17 +933,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         }
     }
 
-    private func incomingParts(source: String, translation: String, note: String?) -> [(String, Bool)] {
-        var parts = [("Tin đối tác", true), (source, true), ("→ " + translation, false)]
-        if let note { parts.append(("Lưu ý: " + note, true)) }
-        return parts
+    /// Only the translation: the partner's message itself is in the chat.
+    private func incomingParts(translation: String) -> [(String, Bool)] {
+        [("Tin đối tác (đã dịch)", true), (translation, false)]
     }
 
     private func outgoingParts(original: String, translation: String, language: String,
-                               meaning: String?, note: String?) -> [(String, Bool)] {
+                               meaning: String?) -> [(String, Bool)] {
         var parts = [(language.isEmpty ? "Bạn gửi" : "Bạn gửi (\(language))", true), (original, true), ("→ " + translation, false)]
         if let meaning { parts.append(("Nghĩa: " + meaning, true)) }
-        if let note { parts.append(("Lưu ý: " + note, true)) }
         return parts
     }
 
@@ -956,13 +950,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let t = outgoing.translation
         var parts = [("Bạn viết", true), (outgoing.original, false), ("Đã đổi sang \(t.language.name)", true), (t.text, false)]
         if let meaning = t.meaning { parts += [("Nghĩa khi dịch ngược", true), (meaning, false)] }
-        if let note = t.note { parts += [("Lưu ý", true), (note, false)] }
         showPanel("Kiểm tra bản dịch", parts, button: "Hoàn tác, lấy lại câu gốc") { [weak self] in self?.undo() }
     }
 
+    /// Only the translation: the partner's message is right above in the chat.
     private func presentIncoming(source: String, translation: Translation) {
-        var parts = [(source, true), ("→ " + translation.text, false)]
-        if let note = translation.note { parts.append(("Lưu ý: " + note, true)) }
+        let parts = [(translation.text, false)]
         showPanel("Tin đối tác → Tiếng Việt", parts, button: "Sao chép bản dịch") { [weak self] in
             UIPasteboard.general.string = translation.text
             SharedStore.handledPasteboard = UIPasteboard.general.changeCount
@@ -1096,21 +1089,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         func back() {
             steps += 1
             let before = proxy.documentContextBeforeInput ?? ""
+            let after = proxy.documentContextAfterInput ?? ""
             if !before.isEmpty, steps < 80 {
                 collected = before + collected
                 proxy.adjustTextPosition(byCharacterOffset: -before.utf16.count)
-                return tick(back)
+                return afterMove(from: before, after, waitingUpTo: 12) { _ in back() }
             }
             // Nothing before the cursor means the start of the field, or of a paragraph: step
             // over one character and see whether the field moved.
-            let after = proxy.documentContextAfterInput ?? ""
             proxy.adjustTextPosition(byCharacterOffset: -1)
-            tick {
-                let moved = !(proxy.documentContextBeforeInput ?? "").isEmpty || (proxy.documentContextAfterInput ?? "") != after
+            afterMove(from: before, after, waitingUpTo: 4) { moved in
                 if moved, steps < 80 {
                     collected = "\n" + collected
                     return back()
                 }
+                TypingLog.add("▤ đọc ô: \(collected.count) ký tự, \(steps) bước")
                 proxy.adjustTextPosition(byCharacterOffset: collected.utf16.count)
                 self.tick { completion(collected) }
             }
@@ -1127,15 +1120,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         var steps = 0
         func forward() {
             steps += 1
+            let before = proxy.documentContextBeforeInput ?? ""
             let after = proxy.documentContextAfterInput ?? ""
             if !after.isEmpty, steps < 80 {
                 proxy.adjustTextPosition(byCharacterOffset: after.utf16.count)
-                return tick(forward)
+                return afterMove(from: before, after, waitingUpTo: 12) { _ in forward() }
             }
-            let before = proxy.documentContextBeforeInput ?? ""
             proxy.adjustTextPosition(byCharacterOffset: 1)
-            tick {
-                let moved = (proxy.documentContextBeforeInput ?? "") != before || (proxy.documentContextAfterInput ?? "") != after
+            afterMove(from: before, after, waitingUpTo: 4) { moved in
                 if moved, steps < 80 { return forward() }
                 completion()
             }
@@ -1165,6 +1157,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             tick(clear)
         }
         moveToEnd(clear)
+    }
+
+    /// After moving the cursor: runs `work` once the field reports other text around the cursor (the
+    /// move has reached the app), or after `ticks` × 25 ms without (it did not move: an end of the
+    /// field). Apps report the new place a moment later. Read at once, Zalo now and then still gave
+    /// the old text, which was read twice: the message went to translation as "X X" and came back
+    /// translated twice.
+    private func afterMove(from before: String, _ after: String, waitingUpTo ticks: Int, _ work: @escaping (Bool) -> Void) {
+        tick {
+            let proxy = self.textDocumentProxy
+            let moved = (proxy.documentContextBeforeInput ?? "") != before || (proxy.documentContextAfterInput ?? "") != after
+            if moved || ticks <= 1 { return work(moved) }
+            self.afterMove(from: before, after, waitingUpTo: ticks - 1, work)
+        }
     }
 
     private func tick(_ work: @escaping () -> Void) {
