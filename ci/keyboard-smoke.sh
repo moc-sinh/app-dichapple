@@ -209,23 +209,36 @@ limit 30 xcrun simctl ui "$UDID" appearance light
 
 # The keyboard types a sentence through its own key handling as fast as a quick typist and
 # records main-thread time per key, key layouts and late frames (Keyboard/TypingBenchmark.swift).
-group "Typing benchmark setup"
-xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
-limit 120 xcrun simctl shutdown "$UDID"
-python3 ci/typing-benchmark.py setup "$GROUP_DIR"
-limit 180 xcrun simctl boot "$UDID"
-limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
-endgroup
+# Key events slow while the keyboard's own CPU time stayed small mean the machine stalled (it
+# does, now and then, for a few hundred milliseconds): that is measured once more, and only the
+# second run counts. A slow keyboard is slow both times.
+for attempt in 1 2; do
+    group "Typing benchmark setup"
+    xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+    limit 120 xcrun simctl shutdown "$UDID"
+    python3 ci/typing-benchmark.py setup "$GROUP_DIR"
+    limit 180 xcrun simctl boot "$UDID"
+    limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
+    endgroup
 
-run_phase typing
+    run_phase typing
 
-group "Typing benchmark"
-# Done during the phase (it waited for the benchmark); the keyboard saves its log 1.6 s after.
-sleep 2
-xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
-limit 120 xcrun simctl shutdown "$UDID"
-python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" | tee "$OUT/typing-benchmark.txt" || FAILED=1
-endgroup
+    group "Typing benchmark"
+    # Done during the phase (it waited for the benchmark); the keyboard saves its log 1.6 s after.
+    sleep 2
+    xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+    limit 120 xcrun simctl shutdown "$UDID"
+    python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" $([ "$attempt" = 2 ] && echo last) \
+        | tee "$OUT/typing-benchmark-$attempt.txt"
+    status=${PIPESTATUS[0]}
+    endgroup
+    if [ "$status" = 2 ]; then
+        echo "Key events were slow while the keyboard's own work stayed small: measuring once more"
+        continue
+    fi
+    [ "$status" = 0 ] || FAILED=1
+    break
+done
 
 # Screenshots of each tab of the app, light and dark, with a few sample translations.
 group "App screens"

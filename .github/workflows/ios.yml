@@ -78,7 +78,7 @@ jobs:
   # Opens the keyboard in the iOS Simulator; fails if it crashes or never starts.
   keyboard-smoke:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 34
     steps:
       - uses: actions/checkout@v4
 
@@ -100,7 +100,8 @@ jobs:
       # The runners' simulators are sometimes slow to boot and launch apps (4-5 minutes for a
       # phase that usually takes 30 s): every check passed and the step still ran out of time.
       - name: Open the keyboard in the simulator
-        timeout-minutes: 25
+        # About 20 minutes, a few more when the typing benchmark is measured twice.
+        timeout-minutes: 28
         run: bash ci/keyboard-smoke.sh
 
       - uses: actions/upload-artifact@v4

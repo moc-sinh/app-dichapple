@@ -1,7 +1,11 @@
 """Typing benchmark helper for ci/keyboard-smoke.sh.
 
-setup  GROUP_DIR           turns the benchmark on for the next keyboard launch
-report GROUP_DIR HOST_LOG  prints the keyboard's measurements and checks the typed text
+setup  GROUP_DIR                turns the benchmark on for the next keyboard launch
+report GROUP_DIR HOST_LOG [last]  prints the keyboard's measurements and checks the typed text
+
+report exits 1 on a failure, 2 when key events were slow while the keyboard's own work (its CPU
+time) stayed small: the CI machine stalled, and ci/keyboard-smoke.sh measures once more. With
+`last`, slow key events are a failure too. A slow keyboard is slow both times.
 """
 import os
 import plistlib
@@ -41,7 +45,7 @@ def setup(group_dir):
     print("benchmark on")
 
 
-def report(group_dir, host_log):
+def report(group_dir, host_log, last):
     values = load(group_dir)
     result = values.get("typingBenchmarkResult", "")
     print(result or "no result")
@@ -55,9 +59,14 @@ def report(group_dir, host_log):
                 print("   ", log[i - 1])
             print("   ", log[i])
     failures = [] if result else ["the keyboard wrote no benchmark result"]
-    for m in re.finditer(r"^(.+?): \d+ events avg=[\d.]+ms p95=([\d.]+)ms", result, re.M):
-        if float(m.group(2)) > FRAME_MS:
-            failures.append(f"{m.group(1)}: 95% of key events took up to {m.group(2)} ms, over a 120 Hz frame")
+    slow_keys = []
+    for m in re.finditer(r"^(.+?): \d+ events avg=[\d.]+ms p95=([\d.]+)ms.*?cpu_p95=([\d.]+)ms", result, re.M):
+        name, p95, cpu_p95 = m.group(1), float(m.group(2)), float(m.group(3))
+        if cpu_p95 > FRAME_MS:
+            failures.append(f"{name}: the keyboard's own work took up to {cpu_p95} ms for 95% of key events, over a 120 Hz frame")
+        elif p95 > FRAME_MS:
+            slow_keys.append(f"{name}: 95% of key events took up to {p95} ms, over a 120 Hz frame"
+                             f" (the keyboard's own work: up to {cpu_p95} ms)")
     m = re.search(r"layouts=\d+ \(([\d.]+)/key\)", result)
     if m and float(m.group(1)) > MAX_LAYOUTS_PER_KEY:
         failures.append(f"each key press laid out the keys {m.group(1)} times")
@@ -77,11 +86,17 @@ def report(group_dir, host_log):
         failures.append("the field never held the expected text")
     for failure in failures:
         print(f"::error::Typing benchmark: {failure}")
-    return 1 if failures else 0
+    if failures:
+        return 1
+    for slow_key in slow_keys:
+        print(f"::{'error' if last else 'warning'}::Typing benchmark: {slow_key}")
+    if slow_keys:
+        return 1 if last else 2
+    return 0
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "setup":
         setup(sys.argv[2])
     else:
-        sys.exit(report(sys.argv[2], sys.argv[3]))
+        sys.exit(report(sys.argv[2], sys.argv[3], len(sys.argv) > 4 and sys.argv[4] == "last"))
