@@ -1319,10 +1319,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// asks for paste permission.
     private func translateCopied() {
         guard readyKey() != nil else { return }
-        let changeCount = UIPasteboard.general.changeCount
         if case .panel = mode { mode = .normal }
         info = .incomingBusy
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Both ask the clipboard's process: not on the main thread.
+            let changeCount = UIPasteboard.general.changeCount
             let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             DispatchQueue.main.async { self?.received(copied: copied, changeCount: changeCount) }
         }
