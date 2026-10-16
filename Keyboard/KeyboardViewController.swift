@@ -56,6 +56,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private var composer = Composer()
     private var lastKeyAt: CFTimeInterval = 0
+    /// Read once as the keyboard appears: `hasFullAccess` asks iOS's privacy service every time
+    /// (the clipboard check asked it every second), and it cannot change while the keyboard is up.
+    private var fullAccess = false
+    /// Whether the globe key is needed is only known for sure once the keyboard is connected to
+    /// the app (`viewDidAppear`); until then it is asked again at each layout, after that never.
+    private var globeKnown = false
     /// Until the first key: iOS sometimes hands the app's text settings over only after the
     /// keyboard appeared, so Shift for the first letter is worked out again when the app reports.
     private var typedSinceAppear = false
@@ -166,11 +172,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        SharedStore.noteKeyboard(hasFullAccess ? "3 sắp hiện (có truy cập đầy đủ)" : "3 sắp hiện (chưa có truy cập đầy đủ)")
-        if hasFullAccess { SharedStore.keyboardHasFullAccess = true }
+        fullAccess = hasFullAccess
+        SharedStore.noteKeyboard(fullAccess ? "3 sắp hiện (có truy cập đầy đủ)" : "3 sắp hiện (chưa có truy cập đầy đủ)")
+        if fullAccess { SharedStore.keyboardHasFullAccess = true }
         targetCode = SharedStore.targetCode
-        keyboard.hapticsEnabled = hasFullAccess && SharedStore.haptics
+        keyboard.hapticsEnabled = fullAccess && SharedStore.haptics
         keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
+        globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
         typedSinceAppear = false
@@ -181,14 +189,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         mode = .normal
         info = .idle
         checkPasteboard(waitForTyping: false)
-        if hasFullAccess, SharedStore.apiKey != nil { Translator.warmUp() }
+        if fullAccess, SharedStore.apiKey != nil { Translator.warmUp() }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        SharedStore.noteKeyboard(hasFullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        fullAccess = hasFullAccess
+        SharedStore.noteKeyboard(fullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        keyboard.showsGlobe = needsInputModeSwitchKey
+        globeKnown = true
         // iOS holds back touches near the screen edges (q, a, z, p, l, delete, space) while it
         // checks for a system swipe, so those keys answered late when typing fast. The window and
         // every view up to it can carry such a recognizer.
@@ -236,7 +247,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let heights: [(NSLayoutConstraint?, CGFloat)] = [(infoHeight, infoLineHeight), (barHeight, compact ? 36 : 42),
                                                           (keysHeight, compact ? 160 : 216)]
         for (constraint, value) in heights where constraint?.constant != value { constraint?.constant = value }
-        keyboard.showsGlobe = needsInputModeSwitchKey
+        if !globeKnown { keyboard.showsGlobe = needsInputModeSwitchKey }
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -882,7 +893,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     // MARK: Translating the user's message
 
     private func readyKey() -> String? {
-        guard hasFullAccess else {
+        guard fullAccess else {
             mode = .failed(TranslateError.noFullAccess.errorDescription ?? "")
             return nil
         }
@@ -1068,7 +1079,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private func checkPasteboard(waitForTyping: Bool) {
         // Typing comes first: nothing is asked while keys are being pressed.
         if waitForTyping && CACurrentMediaTime() - lastKeyAt < 1.5 { return }
-        guard hasFullAccess, !checkingPasteboard, SharedStore.apiKey != nil else { return }
+        guard fullAccess, !checkingPasteboard, SharedStore.apiKey != nil else { return }
         checkingPasteboard = true
         let handled = SharedStore.handledPasteboard
         DispatchQueue.global(qos: .utility).async { [weak self] in
