@@ -183,6 +183,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.clicksEnabled = SharedStore.keySounds
         keyboard.playsOwnClicks = fullAccess
         keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
+        keyboard.showsPopups = SharedStore.keyPopups
         globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()

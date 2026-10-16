@@ -58,6 +58,8 @@ final class KeyboardLayoutView: UIView {
         /// Typed as a capital: its accents are offered as capitals too.
         var upper = false
         var popup: KeyPopup?
+        /// The key lit instead of a pop-up (see `showsPopups`).
+        var lit: Key?
         var anchorX: CGFloat = 0
         let start: CGPoint
         let beganAt = CACurrentMediaTime()
@@ -84,6 +86,10 @@ final class KeyboardLayoutView: UIView {
     /// offers its accents, and holding the space bar still moves the cursor: the key typed is
     /// taken back. Return still waits for the lift, so a message is never sent by a graze.
     var typesOnTouchDown = true
+    /// The enlarged letter above a pressed key. Off (the default), the key lights up instead, as
+    /// the Apple keyboard does with Character Preview off: the balloon covered the keys above and
+    /// beside the one pressed, so the next key was hidden while typing fast.
+    var showsPopups = false
     var showsGlobe = false {
         didSet { if showsGlobe != oldValue { rebuildAll() } }
     }
@@ -174,7 +180,7 @@ final class KeyboardLayoutView: UIView {
             sparePopups.append(popup)
         }
         // Each pass, after Core Animation's commit (order 2,000,000) has handed the pressed key's
-        // pop-up to the screen: the key never waits for the click or the haptic engine.
+        // pop-up or lit cap to the screen: the key never waits for the click or the haptic engine.
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_100_000) { [weak self] _, _ in
             self?.playFeedback()
         }
@@ -467,7 +473,7 @@ final class KeyboardLayoutView: UIView {
     private func color(for key: Key, pressed: Bool) -> UIColor {
         switch key.kind {
         case .char, .space:
-            return pressed ? KeyColor.special : KeyColor.key
+            return pressed ? KeyColor.pressed : KeyColor.key
         case .ret:
             if returnProminent { return returnEnabled ? (pressed ? KeyColor.prominentPressed : KeyColor.prominent) : KeyColor.special }
             return pressed ? KeyColor.key : KeyColor.special
@@ -782,8 +788,16 @@ final class KeyboardLayoutView: UIView {
 
     // MARK: Pop-ups and accents
 
+    /// Marks the key under the finger: its pop-up, or the key lit when pop-ups are off.
     private func showPopup(_ track: Track) {
         guard let s = track.key.character else { return removePopup(track) }
+        if !showsPopups {
+            guard track.lit !== track.key else { return }
+            if let lit = track.lit { setPressed(lit, false) }
+            setPressed(track.key, true)
+            track.lit = track.key
+            return
+        }
         let text = shift != .off && page == .letters ? s.uppercased() : s
         let popup: KeyPopup
         if let current = track.popup {
@@ -799,6 +813,11 @@ final class KeyboardLayoutView: UIView {
     }
 
     private func removePopup(_ track: Track) {
+        if let lit = track.lit {
+            track.lit = nil
+            // Two fingers on one key (dd, oo): it stays lit while the other holds it.
+            if !tracks.values.contains(where: { $0.lit === lit }) { setPressed(lit, false) }
+        }
         guard let popup = track.popup else { return }
         popup.isHidden = true
         sparePopups.append(popup)
@@ -935,6 +954,11 @@ enum KeyColor {
         $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.15) : UIColor(red: 0.671, green: 0.698, blue: 0.737, alpha: 1)
     }
     static let popup = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.42, alpha: 1) : .white }
+    /// A letter or the space bar while pressed: grey in light mode, lighter than the key in dark,
+    /// as the system keyboard lights its keys.
+    static let pressed = UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.55) : UIColor(red: 0.671, green: 0.698, blue: 0.737, alpha: 1)
+    }
     /// Send, Go, Search… in the Mộc Sinh green, like the Dịch button.
     static let prominent = Brand.greenFill
     static let prominentPressed = UIColor(light: 0x084D32, dark: 0x146140)

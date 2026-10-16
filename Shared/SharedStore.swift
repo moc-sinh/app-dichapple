@@ -35,6 +35,7 @@ enum SharedStore {
         static let typingLog = "typingLog"
         static let typesOnTouchDown = "typesOnTouchDown"
         static let keySounds = "keySounds"
+        static let keyPopups = "keyPopups"
     }
 
     // MARK: Settings
@@ -81,6 +82,9 @@ enum SharedStore {
     /// Key sounds. With Full Access the keyboard plays them itself, so iOS's keyboard sound
     /// setting does not reach it; this one does (and the silent switch mutes them).
     static var keySounds: Bool { defaults.object(forKey: Key.keySounds) as? Bool ?? true }
+    /// The enlarged letter above a pressed key (see `KeyboardLayoutView.showsPopups`); off by
+    /// default, the key lights up instead, like the Apple keyboard with Character Preview off.
+    static var keyPopups: Bool { defaults.bool(forKey: Key.keyPopups) }
 
     // MARK: State
 
