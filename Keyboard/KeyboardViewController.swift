@@ -101,21 +101,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
         TypingLog.watchMainThread()
-        // The first Telex key builds the engine's tables and the first language check loads a
-        // model: both now, off the main thread, not on the first key press.
+        // The first Telex key builds the engine's tables: now, off the main thread, not on the
+        // first key press.
         DispatchQueue.global(qos: .userInitiated).async {
             var warm = Composer()
             warm.start(before: "", after: "", now: 0)
             for key in "nguwowif chuaw" {
                 if key == " " { _ = warm.space(now: 0) } else { _ = warm.letter(key, now: 0) }
             }
-            _ = LanguageDetector.language(of: "Can you send me the price list?")
             // The key pop-up's big letter: the first one drawn sets up the font at that size.
             _ = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48)).image { _ in
                 ("aĂ" as NSString).draw(at: .zero, withAttributes: [.font: UIFont.systemFont(ofSize: 34)])
             }
-            // The key letters, both cases: the first key of a sentence turns the capitals back to
-            // small letters, and drawing them for the first time made that key 27 ms slow.
+            // The key letters at their sizes, both cases, the same way.
             let letters = "qwertyuiopasdfghjklzxcvbnm"
             _ = UIGraphicsImageRenderer(size: CGSize(width: 700, height: 120)).image { _ in
                 for (text, size, y) in [(letters, 23.0, 0.0), (letters.uppercased(), 23, 30),
@@ -123,6 +121,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     (text as NSString).draw(at: CGPoint(x: 0, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: size)])
                 }
             }
+        }
+        // The language model is only needed to translate, and loading it is heavy: at a lower
+        // priority, so it never takes a fast core from the keys while the keyboard opens.
+        DispatchQueue.global(qos: .utility).async {
+            _ = LanguageDetector.language(of: "Can you send me the price list?")
         }
 
         infoButton.contentHorizontalAlignment = .leading
@@ -177,6 +180,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         if fullAccess { SharedStore.keyboardHasFullAccess = true }
         targetCode = SharedStore.targetCode
         keyboard.hapticsEnabled = fullAccess && SharedStore.haptics
+        keyboard.clicksEnabled = SharedStore.keySounds
+        keyboard.playsOwnClicks = fullAccess
         keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
         globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey

@@ -1,3 +1,4 @@
+import AudioToolbox
 import UIKit
 
 /// What a key press asks the text field to do.
@@ -72,6 +73,12 @@ final class KeyboardLayoutView: UIView {
 
     weak var delegate: KeyboardLayoutViewDelegate?
     var hapticsEnabled = true
+    /// Key sounds, as the user set them in MSTrans.
+    var clicksEnabled = true
+    /// With Full Access the keyboard plays the key sounds itself, off the main thread:
+    /// `UIDevice.playInputClick` waited on iOS's sound service on the main thread (up to 89 ms in
+    /// CI) and every key behind it waited too. Without Full Access it is the only way.
+    var playsOwnClicks = false
     /// Letters, digits, symbols and the space bar type as the finger lands, not as it lifts: the
     /// text is in the app a whole press sooner (60–100 ms when typing fast). Holding a vowel still
     /// offers its accents, and holding the space bar still moves the cursor: the key typed is
@@ -106,9 +113,15 @@ final class KeyboardLayoutView: UIView {
     private weak var accentTouch: UITouch?
     private var accentPicker: AccentPicker?
     private let haptics = UIImpactFeedbackGenerator(style: .light)
-    /// A key went down: its click and haptic play once the pop-up has gone to the screen.
-    private var feedbackPending = false
+    /// A key went down: its sound and haptic play once the pop-up has gone to the screen.
+    private var pendingSound: Sound?
     private var feedbackObserver: CFRunLoopObserver?
+
+    /// The system keyboard's own sounds: letters, delete, and the other keys.
+    private enum Sound: SystemSoundID {
+        case key = 1104, delete = 1155, modifier = 1156
+    }
+    private static let sounds = DispatchQueue(label: "MSTrans.key-sounds", qos: .userInteractive)
 
     /// Pop-ups and the accent picker sit in their own layer above the keys: showing one never
     /// makes the keys lay out again, and the pop-ups are reused instead of built per press.
@@ -504,21 +517,33 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func feedback() {
-        feedbackPending = true
+    private func feedback(_ sound: Sound = .modifier) {
+        pendingSound = sound
     }
 
     private func playFeedback() {
-        guard feedbackPending else { return }
-        feedbackPending = false
-        let started = CACurrentMediaTime()
-        UIDevice.current.playInputClick()
+        guard let sound = pendingSound else { return }
+        pendingSound = nil
+        play(sound)
         if hapticsEnabled {
+            let started = CACurrentMediaTime()
             haptics.impactOccurred(intensity: 0.5)
             haptics.prepare()
+            let took = CACurrentMediaTime() - started
+            if took > 0.004 { TypingLog.add("⏱ rung mất \(Int(took * 1000))ms") }
         }
-        let took = CACurrentMediaTime() - started
-        if took > 0.004 { TypingLog.add("⏱ tiếng click và rung mất \(Int(took * 1000))ms") }
+    }
+
+    private func play(_ sound: Sound) {
+        guard clicksEnabled else { return }
+        if playsOwnClicks {
+            Self.sounds.async { AudioServicesPlaySystemSound(sound.rawValue) }
+        } else {
+            let started = CACurrentMediaTime()
+            UIDevice.current.playInputClick()
+            let took = CACurrentMediaTime() - started
+            if took > 0.004 { TypingLog.add("⏱ tiếng click mất \(Int(took * 1000))ms") }
+        }
     }
 
     // MARK: Touches
@@ -573,7 +598,7 @@ final class KeyboardLayoutView: UIView {
                 track.typedOnDown = true
                 type(track)
             }
-            feedback()
+            feedback(.key)
             if let touch, Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
         case .shift:
             feedback()
@@ -587,7 +612,7 @@ final class KeyboardLayoutView: UIView {
             applyShift()
             track.committed = true
         case .delete:
-            feedback()
+            feedback(.delete)
             setPressed(key, true)
             delegate?.keyboardLayoutView(self, perform: .delete(word: false))
             startDeleteRepeat()
@@ -834,7 +859,7 @@ final class KeyboardLayoutView: UIView {
         deleteCount += 1
         let words = deleteCount > 16
         if words && deleteCount % 2 == 1 { return }
-        UIDevice.current.playInputClick()
+        play(.delete)
         delegate?.keyboardLayoutView(self, perform: .delete(word: words))
     }
 

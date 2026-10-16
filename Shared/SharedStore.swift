@@ -34,6 +34,7 @@ enum SharedStore {
         static let contextClearedAt = "contextClearedAt"
         static let typingLog = "typingLog"
         static let typesOnTouchDown = "typesOnTouchDown"
+        static let keySounds = "keySounds"
     }
 
     // MARK: Settings
@@ -77,6 +78,9 @@ enum SharedStore {
     /// Keys type as the finger lands (see `KeyboardLayoutView.typesOnTouchDown`); off, as the
     /// finger lifts, like the Apple keyboard.
     static var typesOnTouchDown: Bool { defaults.object(forKey: Key.typesOnTouchDown) as? Bool ?? true }
+    /// Key sounds. With Full Access the keyboard plays them itself, so iOS's keyboard sound
+    /// setting does not reach it; this one does (and the silent switch mutes them).
+    static var keySounds: Bool { defaults.object(forKey: Key.keySounds) as? Bool ?? true }
 
     // MARK: State
 
