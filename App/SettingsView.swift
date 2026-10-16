@@ -14,7 +14,7 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.typesOnTouchDown, store: SharedStore.defaults) private var typesOnTouchDown = true
     @AppStorage(SharedStore.Key.keySounds, store: SharedStore.defaults) private var keySounds = true
     @AppStorage(SharedStore.Key.keyPopups, store: SharedStore.defaults) private var keyPopups = false
-    @AppStorage(SharedStore.Key.keyboardSize, store: SharedStore.defaults) private var keyboardSize = KeyboardSize.large.rawValue
+    @AppStorage(SharedStore.Key.keyboardSize, store: SharedStore.defaults) private var keyboardSize = KeyboardSize.medium.rawValue
     @AppStorage(SharedStore.keepHistoryKey, store: SharedStore.defaults) private var keepHistory = true
     @Environment(\.scenePhase) private var scenePhase
     @State private var setup = SetupStatus.current
@@ -186,7 +186,7 @@ struct SettingsView: View {
         } header: {
             Text("Bàn phím")
         } footer: {
-            Text("Âm thanh khi gõ: tiếng click của MSTrans, tắt được ở đây (gạt nút im lặng của iPhone cũng tắt). Ra chữ ngay khi chạm: chữ vào ô nhập lúc ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Tắt để giống bàn phím Apple (chữ vào khi nhấc tay, trượt sang phím khác trước khi nhấc để đổi chữ). Chữ nổi khi bấm phím: chữ to hiện phía trên phím đang bấm, như bàn phím Apple khi bật Xem trước ký tự; tắt thì phím chỉ sáng lên, không che các phím bên cạnh. Cỡ bàn phím: Lớn (mặc định) và Rất lớn cho phím cao hơn bàn phím Apple, dễ bấm trúng hơn; đổi xong, mở lại bàn phím là thấy. Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
+            Text("Âm thanh khi gõ: tiếng click của MSTrans, tắt được ở đây (gạt nút im lặng của iPhone cũng tắt). Ra chữ ngay khi chạm: chữ vào ô nhập lúc ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Tắt để giống bàn phím Apple (chữ vào khi nhấc tay, trượt sang phím khác trước khi nhấc để đổi chữ). Chữ nổi khi bấm phím: chữ to hiện phía trên phím đang bấm, như bàn phím Apple khi bật Xem trước ký tự; tắt thì phím chỉ sáng lên, không che các phím bên cạnh. Cỡ bàn phím: mặc định mỗi phím nằm đúng chỗ như bàn phím iPhone, nên ngón tay quen tay bấm trúng; hai cỡ còn lại cho phím cao hơn. Đổi xong, mở lại bàn phím là thấy. Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
         }
     }
 
@@ -219,6 +219,8 @@ struct SettingsView: View {
                 }
             }
             .accessibilityElement(children: .combine)
+        } footer: {
+            Text("Bộ gõ Telex: TelexCore của VietTelex, © 2026 Phil Trinh, dùng theo giấy phép MIT (github.com/ptrinh/viettelex). Vị trí phím theo số đo bàn phím iPhone của VietTelex.")
         }
     }
 

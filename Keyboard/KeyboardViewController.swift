@@ -78,7 +78,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private static let settle: CFTimeInterval = 0.5
     private var benchmark: TypingBenchmark?
     /// How tall the keys are (Cài đặt › Bàn phím › Cỡ bàn phím), read as the keyboard appears.
-    private var keySize = KeyboardSize.large
+    private var keySize = KeyboardSize.medium
     /// The language "Tự động" stands for on the pill. Working it out runs language detection over
     /// the partner's messages, so it is done off the main thread and kept: the bar is drawn again
     /// on the first key after a translation, and that key no longer waits for it.
@@ -105,6 +105,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func loadView() {
         let input = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
         input.allowsSelfSizing = true
+        // Not clear: a touch on a clear spot (around the bar's buttons, between keys) goes to the app
+        // behind the keyboard (see `KeyboardLayoutView.touchable`).
+        input.backgroundColor = KeyboardLayoutView.touchable
         view = input
     }
 
@@ -158,7 +161,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         }
         let infoHeight = infoButton.heightAnchor.constraint(equalToConstant: 0)
         let barHeight = bar.heightAnchor.constraint(equalToConstant: 42)
-        let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: CGFloat(keySize.keysHeight.portrait))
+        let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: keyArea())
         let bottom = keyboard.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         bottom.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
@@ -202,6 +205,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             keySize = size
             view.setNeedsLayout()
         }
+        keyboard.extraKeyHeight = CGFloat(keySize.extraKeyHeight)
         globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
@@ -276,11 +280,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         TypingLog.mark("bố cục")
         let compact = traitCollection.verticalSizeClass == .compact
         // Only real changes: a constraint set again asks for another layout of the keyboard.
-        let keys = keySize.keysHeight
         let heights: [(NSLayoutConstraint?, CGFloat)] = [(infoHeight, infoLineHeight), (barHeight, compact ? 36 : 42),
-                                                          (keysHeight, CGFloat(compact ? keys.landscape : keys.portrait))]
+                                                          (keysHeight, keyArea())]
         for (constraint, value) in heights where constraint?.constant != value { constraint?.constant = value }
         if !globeKnown { keyboard.showsGlobe = needsInputModeSwitchKey }
+    }
+
+    /// The keys' height for the view's width: Apple's keyboard's, plus the size setting (`KeyMetrics`).
+    private func keyArea() -> CGFloat {
+        KeyMetrics.phone(width: view.bounds.width, homeButton: keyboard.showsGlobe, extra: CGFloat(keySize.extraKeyHeight)).area
     }
 
     override func textDidChange(_ textInput: UITextInput?) {

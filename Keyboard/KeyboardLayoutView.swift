@@ -41,6 +41,9 @@ final class KeyboardLayoutView: UIView {
         let icon = UIImageView()
         var hit = CGRect.zero
         var shadowSize = CGSize.zero
+        /// Fingers on the key while it is lit, and when it lit up (see `unlight`).
+        var litBy = 0
+        var litAt: CFTimeInterval = 0
 
         init(kind: Kind) { self.kind = kind }
 
@@ -64,11 +67,14 @@ final class KeyboardLayoutView: UIView {
         var slidTo: String?
         var anchorX: CGFloat = 0
         let start: CGPoint
+        /// Where the finger was when its key's long press was set: moving off it is not holding.
+        var holdFrom: CGPoint
         let beganAt = CACurrentMediaTime()
 
         init(key: Key, start: CGPoint = .zero) {
             self.key = key
             self.start = start
+            holdFrom = start
         }
     }
 
@@ -94,6 +100,15 @@ final class KeyboardLayoutView: UIView {
     var showsPopups = false
     var showsGlobe = false {
         didSet { if showsGlobe != oldValue { rebuildAll() } }
+    }
+    /// Extra height of every key over Apple's (Cài đặt › Bàn phím › Cỡ bàn phím).
+    var extraKeyHeight: CGFloat = 0 {
+        didSet {
+            guard extraKeyHeight != oldValue else { return }
+            laidOut.removeAll()
+            needsKeyFrames = true
+            setNeedsLayout()
+        }
     }
     private(set) var shift: Shift = .off
 
@@ -140,6 +155,9 @@ final class KeyboardLayoutView: UIView {
     /// Key frames are computed only when the size or the keys change, not on every pass.
     private var needsKeyFrames = true
 
+    /// Clear to the eye but not to iOS (see `init`).
+    static let touchable = UIColor(white: 0, alpha: 0.01)
+
     static let cornerRadius: CGFloat = {
         if #available(iOS 26.0, *) { return 8.5 }
         return 5
@@ -172,6 +190,11 @@ final class KeyboardLayoutView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         TypingLog.mark("tạo phím")
+        // Not clear: iOS decides which process gets a touch by what is drawn under the finger,
+        // and a touch on a clear spot (the gaps between keys, the strip left of "a") went to the
+        // app behind the keyboard. Typing logs showed an "a" lost that way three times, with no
+        // touch reaching the keyboard (VietTelex found the same on its keyboard).
+        backgroundColor = Self.touchable
         isMultipleTouchEnabled = true
         clipsToBounds = false
         overlay.isUserInteractionEnabled = false
@@ -416,29 +439,27 @@ final class KeyboardLayoutView: UIView {
         overlay.frame = bounds
         Self.layoutPasses += 1
         let width = bounds.width
-        let landscape = width > 500
-        let side: CGFloat = (landscape ? 4 : 3) + max(safeAreaInsets.left, safeAreaInsets.right)
-        let gap: CGFloat = 6
-        let rowGap: CGFloat = landscape ? 6 : 11
-        let top: CGFloat = landscape ? 4 : 8
-        let bottom: CGFloat = landscape ? 2 : 4
-        let keyHeight = max(28, (bounds.height - top - bottom - 3 * rowGap) / 4)
+        // Where Apple's keyboard puts its keys (`KeyMetrics`), rows placed from the bottom up.
+        let m = KeyMetrics.phone(width: width, homeButton: showsGlobe, extra: extraKeyHeight)
+        let side = m.sideMargin + max(safeAreaInsets.left, safeAreaInsets.right)
+        let gap = m.keyGap
         let unit = (width - 2 * side - 9 * gap) / 10
+        let spans = m.rows(in: bounds.height)
 
         for (r, row) in rows.enumerated() {
-            let y = top + CGFloat(r) * (keyHeight + rowGap)
-            let frames = rowFrames(r, row, page: page, y: y, height: keyHeight, unit: unit, gap: gap, side: side, width: width)
+            let frames = rowFrames(r, row, page: page, y: spans[r].top, height: spans[r].height, unit: unit, gap: gap, side: side, width: width)
             for (key, frame) in zip(row, frames) { key.cap.frame = frame }
         }
 
-        // Hit areas meet halfway between keys and reach the edges: no touch is ever lost.
+        // Hit areas meet halfway between keys and between rows, and reach the edges: no touch is
+        // ever lost.
         for (r, row) in rows.enumerated() {
+            let minY = r == 0 ? 0 : (spans[r - 1].top + spans[r - 1].height + spans[r].top) / 2
+            let maxY = r == rows.count - 1 ? bounds.height : (spans[r].top + spans[r].height + spans[r + 1].top) / 2
             for (i, key) in row.enumerated() {
                 let f = key.cap.frame
                 let left = i == 0 ? 0 : (row[i - 1].cap.frame.maxX + f.minX) / 2
                 let right = i == row.count - 1 ? width : (f.maxX + row[i + 1].cap.frame.minX) / 2
-                let minY = r == 0 ? 0 : f.minY - rowGap / 2
-                let maxY = r == rows.count - 1 ? bounds.height : f.maxY + rowGap / 2
                 key.hit = CGRect(x: left, y: minY, width: right - left, height: maxY - minY)
             }
         }
@@ -718,6 +739,9 @@ final class KeyboardLayoutView: UIView {
             }
             switch track.key.kind {
             case .char:
+                // A finger that moves off where it held is not holding the key: no accent row. A
+                // slow roll from "d" to the next letter could open the "đ" row.
+                if hypot(point.x - track.holdFrom.x, point.y - track.holdFrom.y) > 10 { cancelLongPress(touch) }
                 guard let key = hitKey(at: point), key !== track.key, let s = key.character else { continue }
                 guard !track.committed else {
                     // Typed as the finger landed: the finger now on another letter types nothing
@@ -731,6 +755,7 @@ final class KeyboardLayoutView: UIView {
                 }
                 // Sliding to another letter before lifting types that letter instead.
                 track.key = key
+                track.holdFrom = point
                 showPopup(track)
                 cancelLongPress(touch)
                 if let s = key.character, Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
@@ -850,8 +875,8 @@ final class KeyboardLayoutView: UIView {
         guard let s = track.key.character else { return removePopup(track) }
         if !showsPopups {
             guard track.lit !== track.key else { return }
-            if let lit = track.lit { setPressed(lit, false) }
-            setPressed(track.key, true)
+            if let lit = track.lit { unlight(lit) }
+            light(track.key)
             track.lit = track.key
             return
         }
@@ -872,14 +897,35 @@ final class KeyboardLayoutView: UIView {
     private func removePopup(_ track: Track) {
         if let lit = track.lit {
             track.lit = nil
-            // Two fingers on one key (dd, oo): it stays lit while the other holds it.
-            if !tracks.values.contains(where: { $0.lit === lit }) { setPressed(lit, false) }
+            unlight(lit)
         }
         guard let popup = track.popup else { return }
         popup.isHidden = true
         sparePopups.append(popup)
         track.popup = nil
     }
+
+    private func light(_ key: Key) {
+        key.litBy += 1
+        key.litAt = CACurrentMediaTime()
+        setPressed(key, true)
+    }
+
+    /// A finger left the key. It goes dark once no finger holds it (two on one key: dd, oo), and not
+    /// before it has been lit 70 ms: near the screen edges iOS can hand over a touch and its lift
+    /// together, and a key lit and dark in the same moment never shows it was pressed.
+    private func unlight(_ key: Key) {
+        key.litBy = max(0, key.litBy - 1)
+        guard key.litBy == 0 else { return }
+        let shown = CACurrentMediaTime() - key.litAt
+        guard shown < Self.minimumLit else { return setPressed(key, false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.minimumLit - shown) { [weak self, weak key] in
+            guard let self, let key, key.litBy == 0 else { return }
+            self.setPressed(key, false)
+        }
+    }
+
+    private static let minimumLit: CFTimeInterval = 0.07
 
     private func scheduleLongPress(_ touch: UITouch, after delay: TimeInterval) {
         longPressTimer?.invalidate()

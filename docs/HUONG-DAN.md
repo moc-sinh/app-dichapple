@@ -89,7 +89,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
 - Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
 - Phím đang bấm chỉ sáng lên, không hiện chữ nổi che các phím bên cạnh (như bàn phím Apple khi tắt Xem trước ký tự). Muốn có chữ nổi, bật **Chữ nổi khi bấm phím** trong Cài đặt › Bàn phím.
-- Phím mặc định cao hơn bàn phím Apple một chút (cỡ **Lớn**) cho dễ bấm trúng. Đổi ở Cài đặt › Bàn phím › **Cỡ bàn phím**: Vừa (như bàn phím Apple), Lớn, Rất lớn. Đổi xong, mở lại bàn phím là thấy.
+- Mỗi phím nằm đúng chỗ, đúng cỡ như trên bàn phím iPhone (đo trên chính iPhone Pro Max của bạn: phím cao 45 pt, hàng cách nhau 56 pt), nên ngón tay quen bàn phím iPhone bấm trúng ngay. Muốn phím cao hơn: Cài đặt › Bàn phím › **Cỡ bàn phím** › Cao hơn một chút / Cao hơn. Đổi xong, mở lại bàn phím là thấy.
 
 ## Khi gõ bị sai hay mất chữ
 
@@ -123,7 +123,7 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 ## Cách app giữ nhẹ
 
 - Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
-- Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
+- Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím. Nền bàn phím không hoàn toàn trong suốt (mắt không thấy): iOS chuyển cú chạm vào chỗ trong suốt cho app phía sau, nên trước đây chạm vào khe giữa phím hay dải trống cạnh chữ a có lúc mất chữ.
 - Trang chữ, trang 123 và trang ký hiệu được tạo một lần rồi giữ lại: bấm 123/ABC chỉ đổi trang đang hiện, không dựng lại 33 phím. Chữ hoa và chữ thường trên phím được vẽ sẵn, nên đầu câu không phải vẽ lại cả bàn phím.
 - Bộ gõ Telex là TelexCore của VietTelex (mã nguồn mở, giấy phép MIT): gõ đúng cả 400 từ tiếng Việt và giữ đúng gần như mọi từ tiếng Anh trong bộ 9.091 trường hợp thử của VietTelex, bộ thử này chạy lại mỗi lần build. Mỗi phím mất khoảng 0,01 mili giây.
 - Phím sát mép màn hình (q, a, z, p, l, xóa, phím cách) không bị iOS giữ lại để chờ thao tác vuốt hệ thống; tiếng click và rung chạy sau khi phím đã hiện.

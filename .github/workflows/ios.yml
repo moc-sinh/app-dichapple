@@ -33,6 +33,9 @@ jobs:
           # VietTelex's 9,091 typing cases through the same composer.
           swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/Suite/main.swift -o telex-suite
           ./telex-suite Tests/Suite/telex_suite.tsv
+          # Key positions against Apple's keyboard.
+          swiftc Keyboard/KeyMetrics.swift Tests/Keys/main.swift -o key-tests
+          ./key-tests
 
       - name: Language detection tests
         run: |

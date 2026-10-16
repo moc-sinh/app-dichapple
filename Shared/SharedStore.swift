@@ -87,7 +87,7 @@ enum SharedStore {
     /// default, the key lights up instead, like the Apple keyboard with Character Preview off.
     static var keyPopups: Bool { defaults.bool(forKey: Key.keyPopups) }
     static var keyboardSize: KeyboardSize {
-        KeyboardSize(rawValue: defaults.object(forKey: Key.keyboardSize) as? Int ?? KeyboardSize.large.rawValue) ?? .large
+        KeyboardSize(rawValue: defaults.object(forKey: Key.keyboardSize) as? Int ?? KeyboardSize.medium.rawValue) ?? .medium
     }
 
     // MARK: State
