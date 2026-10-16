@@ -77,6 +77,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// A pause this long means the keys typed so far have reached the app.
     private static let settle: CFTimeInterval = 0.5
     private var benchmark: TypingBenchmark?
+    /// How tall the keys are (Cài đặt › Bàn phím › Cỡ bàn phím), read as the keyboard appears.
+    private var keySize = KeyboardSize.large
+    /// The language "Tự động" stands for on the pill. Working it out runs language detection over
+    /// the partner's messages, so it is done off the main thread and kept: the bar is drawn again
+    /// on the first key after a translation, and that key no longer waits for it.
+    private var pillTarget: Language?
+    private var pillTargetRequest = 0
+    private weak var languageButton: UIButton?
+    /// The shared context and history (JSON in the App Group) are read and written here, in order
+    /// and off the main thread: a translation coming back while the user types never holds up a key.
+    private static let store = DispatchQueue(label: "MSTrans.store", qos: .utility)
 
     // MARK: Lifecycle
 
@@ -146,7 +157,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         }
         let infoHeight = infoButton.heightAnchor.constraint(equalToConstant: 0)
         let barHeight = bar.heightAnchor.constraint(equalToConstant: 42)
-        let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: 216)
+        let keysHeight = keyboard.heightAnchor.constraint(equalToConstant: CGFloat(keySize.keysHeight.portrait))
         let bottom = keyboard.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         bottom.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
@@ -184,6 +195,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.playsOwnClicks = fullAccess
         keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
         keyboard.showsPopups = SharedStore.keyPopups
+        let size = SharedStore.keyboardSize
+        if size != keySize {
+            keySize = size
+            view.setNeedsLayout()
+        }
         globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
@@ -192,6 +208,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         matchAppearance()
         configureReturn()
         updateAutoCapitalization()
+        refreshPillTarget()
         mode = .normal
         info = .idle
         checkPasteboard(waitForTyping: false)
@@ -250,8 +267,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
         // Only real changes: a constraint set again asks for another layout of the keyboard.
+        let keys = keySize.keysHeight
         let heights: [(NSLayoutConstraint?, CGFloat)] = [(infoHeight, infoLineHeight), (barHeight, compact ? 36 : 42),
-                                                          (keysHeight, compact ? 160 : 216)]
+                                                          (keysHeight, CGFloat(compact ? keys.landscape : keys.portrait))]
         for (constraint, value) in heights where constraint?.constant != value { constraint?.constant = value }
         if !globeKnown { keyboard.showsGlobe = needsInputModeSwitchKey }
     }
@@ -323,11 +341,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         lastTyped = typed ? (composer: previous, edits: edits) : nil
         apply(edits)
         if !edits.isEmpty { editSentAt = now }
+        scheduleCheck()
+        edited()
+        // The whole key, the bar and Shift it updated included.
         let took = CACurrentMediaTime() - now
         TypingLog.add("\(Self.describe(action)) → \(edits.map(Self.describeEdit).joined()) | \(TypingLog.tail(composer.before ?? "?"))"
                       + (took > 0.002 ? " ⏱\(Int(took * 1000))ms" : ""))
-        scheduleCheck()
-        edited()
     }
 
     private static func describe(_ action: KeyAction) -> String {
@@ -447,11 +466,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private func edited() {
         switch mode {
-        case .done, .failed: mode = .normal
+        case .done, .failed:
+            TypingLog.add("▭ thanh dịch vẽ lại")
+            mode = .normal
         default: break
         }
         switch info {
-        case .outgoing, .message: info = .idle
+        case .outgoing, .message:
+            // The keyboard gets shorter: if a key is slow here, the log shows why.
+            TypingLog.add("ⓘ ẩn dòng báo")
+            info = .idle
         default: break
         }
         updateAutoCapitalization()
@@ -538,14 +562,51 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func languagePill() -> UIView {
-        let target = resolvedTarget(context: SharedStore.context())
-        let title = targetCode == Language.autoCode ? "Tự động · \(target.label)" : "Việt → \(target.label)"
-        let language = pill(title, image: "chevron.down", trailingImage: true) { [weak self] in self?.mode = .picking }
+        let target = shownTarget
+        let language = pill(pillTitle(target), image: "chevron.down", trailingImage: true) { [weak self] in self?.mode = .picking }
         language.accessibilityLabel = "Ngôn ngữ dịch: \(target.name)"
         // On narrow iPhones this pill gives way (and truncates) before the Dịch button does.
         language.configuration?.titleLineBreakMode = .byTruncatingTail
         language.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        languageButton = language
         return language
+    }
+
+    private func pillTitle(_ target: Language) -> String {
+        targetCode == Language.autoCode ? "Tự động · \(target.label)" : "Việt → \(target.label)"
+    }
+
+    /// The pill's language now: the one chosen, or for "Tự động" the one worked out last (until
+    /// then the partner language seen last, as `Language.target` falls back to).
+    private var shownTarget: Language {
+        guard targetCode == Language.autoCode else { return Language.named(targetCode) ?? Language.all[0] }
+        return pillTarget ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
+    }
+
+    /// Works out again, off the main thread, which language "Tự động" stands for: as the keyboard
+    /// appears and whenever the context changed.
+    private func refreshPillTarget() {
+        guard targetCode == Language.autoCode else { return }
+        pillTargetRequest += 1
+        let request = pillTargetRequest
+        Self.store.async { [weak self] in
+            let target = Language.target(code: Language.autoCode, context: SharedStore.context())
+            DispatchQueue.main.async {
+                guard let self, request == self.pillTargetRequest else { return }
+                self.pillTarget = target
+                self.updateLanguagePill()
+            }
+        }
+    }
+
+    /// Only the pill's title: the bar is not built again.
+    private func updateLanguagePill() {
+        guard let button = languageButton, button.superview != nil else { return }
+        let target = shownTarget
+        let title = pillTitle(target)
+        guard button.configuration?.title != title else { return }
+        button.configuration?.title = title
+        button.accessibilityLabel = "Ngôn ngữ dịch: \(target.name)"
     }
 
     // MARK: Info line
@@ -663,6 +724,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             let chip = pill(label, style: code == targetCode ? .primary : .plain) { [weak self] in
                 self?.targetCode = code
                 SharedStore.targetCode = code
+                self?.refreshPillTarget()
                 self?.mode = .normal
             }
             if code == targetCode { chip.accessibilityTraits.insert(.selected) }
@@ -845,6 +907,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             SharedStore.clearContext()
             self?.lastIncoming = nil
             self?.lastOutgoing = nil
+            self?.refreshPillTarget()
             self?.closePanel()
         }
     }
@@ -965,9 +1028,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     guard let self, !Task.isCancelled else { return }
                     self.original = text
                     self.replaceDocument(with: result.text) { [weak self] in
-                        SharedStore.remember(ChatLine(side: .me, text: result.text, date: Date()))
-                        SharedStore.addHistory(HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
-                                                           meaning: result.meaning, note: result.note))
+                        let line = ChatLine(side: .me, text: result.text, date: Date())
+                        let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
+                                               meaning: result.meaning, note: result.note)
+                        Self.store.async {
+                            SharedStore.remember(line)
+                            SharedStore.addHistory(item)
+                        }
+                        self?.refreshPillTarget()
                         self?.lastOutgoing = (result, text)
                         self?.mode = .done
                         self?.info = .outgoing(result, original: text)
@@ -1103,6 +1171,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// makes iOS ask for paste permission and blocks until it is answered, so that waits for a
     /// tap unless the user chose instant mode.
     private func pasteboardChecked(changeCount: Int, fresh: Bool) {
+        // The user started typing while the clipboard was asked: the info line would appear or go
+        // and change the keyboard's height under their thumbs. The next check (a second on) offers it.
+        if CACurrentMediaTime() - lastKeyAt < 1.5 { return }
         switch info {
         case .idle, .incoming, .outgoing:
             guard fresh else { return }
@@ -1142,6 +1213,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         // (a foreign message that names a Vietnamese person read as Vietnamese).
         SharedStore.handledPasteboard = changeCount
         SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
+        refreshPillTarget()
         translateIncoming(copied)
     }
 
@@ -1157,10 +1229,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         incomingTask = Task { [weak self] in
             do {
                 let result = try await Translator(apiKey: apiKey).translate(text, to: .vietnamese, context: context)
-                SharedStore.cacheIncoming(text, translation: result.text)
-                SharedStore.addHistory(HistoryItem(side: .partner, source: text, translation: result.text,
-                                                   languageCode: LanguageDetector.language(of: text)?.code ?? "",
-                                                   note: result.note))
+                // Language detection and the history's JSON: not on the main thread, where the user
+                // may already be typing the reply.
+                let translation = result.text, note = result.note
+                Self.store.async {
+                    SharedStore.cacheIncoming(text, translation: translation)
+                    SharedStore.addHistory(HistoryItem(side: .partner, source: text, translation: translation,
+                                                       languageCode: LanguageDetector.language(of: text)?.code ?? "",
+                                                       note: note))
+                }
                 guard let self, !Task.isCancelled else { return }
                 self.show(incoming: text, translation: result)
             } catch is CancellationError {

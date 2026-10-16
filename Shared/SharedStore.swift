@@ -36,6 +36,7 @@ enum SharedStore {
         static let typesOnTouchDown = "typesOnTouchDown"
         static let keySounds = "keySounds"
         static let keyPopups = "keyPopups"
+        static let keyboardSize = "keyboardSize"
     }
 
     // MARK: Settings
@@ -85,6 +86,9 @@ enum SharedStore {
     /// The enlarged letter above a pressed key (see `KeyboardLayoutView.showsPopups`); off by
     /// default, the key lights up instead, like the Apple keyboard with Character Preview off.
     static var keyPopups: Bool { defaults.bool(forKey: Key.keyPopups) }
+    static var keyboardSize: KeyboardSize {
+        KeyboardSize(rawValue: defaults.object(forKey: Key.keyboardSize) as? Int ?? KeyboardSize.large.rawValue) ?? .large
+    }
 
     // MARK: State
 

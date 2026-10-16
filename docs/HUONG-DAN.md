@@ -87,12 +87,13 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
 - Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
 - Phím đang bấm chỉ sáng lên, không hiện chữ nổi che các phím bên cạnh (như bàn phím Apple khi tắt Xem trước ký tự). Muốn có chữ nổi, bật **Chữ nổi khi bấm phím** trong Cài đặt › Bàn phím.
+- Phím mặc định cao hơn bàn phím Apple một chút (cỡ **Lớn**) cho dễ bấm trúng. Đổi ở Cài đặt › Bàn phím › **Cỡ bàn phím**: Vừa (như bàn phím Apple), Lớn, Rất lớn. Đổi xong, mở lại bàn phím là thấy.
 
 ## Khi gõ bị sai hay mất chữ
 
 Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
 
-Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms), rung lâu (⏱ rung mất … ms), và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms; dòng ngay trước nó cho biết lúc đó bàn phím làm gì, ví dụ ⓘ ẩn dòng báo hay ▭ thanh dịch vẽ lại), rung lâu (⏱ rung mất … ms), và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
 
 ## 6. Mỗi 7 ngày
 
