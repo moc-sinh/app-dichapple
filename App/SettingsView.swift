@@ -133,6 +133,10 @@ struct SettingsView: View {
         } footer: {
             Text("Giúp bản dịch xưng hô đúng và dùng đúng tiểu từ lịch sự (tiếng Thái, tiếng Nhật…). Thuật ngữ ngành: thêm ở tab Thuật ngữ.")
         }
+        // A partner message copied again is translated again, with these details.
+        .onChange(of: gender) { _, _ in SharedStore.clearIncomingCache() }
+        .onChange(of: addressing) { _, _ in SharedStore.clearIncomingCache() }
+        .onChange(of: profile) { _, _ in SharedStore.clearIncomingCache() }
     }
 
     private var incomingSection: some View {
@@ -201,7 +205,7 @@ struct SettingsView: View {
         } header: {
             Text("Dữ liệu")
         } footer: {
-            Text("Ngữ cảnh là vài tin gần nhất gửi kèm để dịch đúng xưng hô; tự hết hạn sau 45 phút. Lịch sử và key chỉ lưu trên iPhone này; OpenAI không lưu nội dung.")
+            Text("Ngữ cảnh là vài tin gần nhất gửi kèm để dịch đúng xưng hô; tự hết hạn sau 45 phút. Lịch sử và key chỉ lưu trên iPhone này; OpenAI không lưu tin vào tài khoản của bạn.")
         }
     }
 

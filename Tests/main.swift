@@ -283,15 +283,42 @@ do {
     fastChecks += 1
     var composer = Composer()
     var now = 0.0
-    composer.start(before: "", after: "", now: now)
+    composer.start(before: "ok ", after: "", now: now)
     _ = composer.letter("d", now: now)
     now += 0.06
     let edits = composer.letter("d", now: now)  // delete "d", insert "đ"; the app drops the insert
-    let waiting = composer.fieldChanged(before: "", after: "", now: now + 0.6)
-    let caughtUp = composer.fieldChanged(before: "", after: "", now: now + 1.6)
-    if edits != [.delete(1), .insert("đ")] || waiting || !caughtUp || composer.before != "" {
+    let waiting = composer.fieldChanged(before: "ok ", after: "", now: now + 0.6)
+    let caughtUp = composer.fieldChanged(before: "ok ", after: "", now: now + 1.6)
+    if edits != [.delete(1), .insert("đ")] || waiting || !caughtUp || composer.before != "ok " {
         failed += 1
         print("FAIL dropped edit: \(edits), waiting \(waiting), caught up \(caughtUp), before \(composer.before ?? "nil")")
+    }
+}
+
+// A short message sent within a moment of its last key, before the app reported any of it (while
+// keys go in the keyboard does not look at reports, see `KeyboardViewController.fieldReported`):
+// the emptied field may still trail the first key when it is reported, but half a second after the
+// last key it is taken, and the next message starts afresh.
+do {
+    fastChecks += 1
+    var field = LaggingField()
+    var composer = Composer()
+    var now = 0.0
+    composer.start(before: "", after: "", now: now)
+    for key in "ok" {
+        field.apply(composer.letter(key, now: now))
+        now += 0.1
+    }
+    now += 0.2
+    field.replace(with: "")
+    let atOnce = composer.fieldChanged(before: "", after: "", now: now)
+    now = 0.1 + 0.55
+    let afterPause = composer.fieldChanged(before: "", after: "", now: now)
+    now += 0.3
+    typeFast("chaof", lag: 2, into: &field, composer: &composer, now: &now)
+    if atOnce || !afterPause || field.text != "chào" {
+        failed += 1
+        print("FAIL sent quickly: at once \(atOnce), after the pause \(afterPause), then \(field.text), want chào")
     }
 }
 
@@ -371,6 +398,248 @@ do {
         if got != want {
             failed += 1
             print("FAIL holding \(c.held) after \(c.keys): \(got), want \(want)")
+        }
+    }
+}
+
+// The space bar as a trackpad: the cursor moves, and a key typed before the app reports the move
+// edits the word now at the cursor. Moved past what is known, the field is read again.
+do {
+    struct CursorField {
+        var before: String
+        var after: String
+        mutating func apply(_ edits: [Composer.Edit]) {
+            for edit in edits {
+                switch edit {
+                case .delete(let count): before = String(before.dropLast(count))
+                case .insert(let s): before += s
+                }
+            }
+        }
+        mutating func move(by offset: Int) {
+            let text = before + after
+            let at = max(0, min(text.count, before.count + offset))
+            before = String(text.prefix(at))
+            after = String(text.dropFirst(at))
+        }
+    }
+    func moveThenType(before: String, after: String, by offset: Int, _ keys: String) -> String {
+        var field = CursorField(before: before, after: after)
+        var composer = Composer()
+        composer.start(before: before, after: after, now: 0)
+        composer.moveCursor(by: offset, now: 1)
+        field.move(by: offset)
+        for key in keys {
+            // As the keyboard does when it no longer knows the text: it reads the field.
+            if composer.before == nil { composer.start(before: field.before, after: field.after, now: 1) }
+            field.apply(composer.letter(key, now: 1.1))
+        }
+        return field.before + "|" + field.after
+    }
+    for (before, after, offset, keys, want) in [("chao ban", "", -4, "f", "chào| ban"), ("chao", " ban", 4, "f", "chao bàn|"),
+                                                ("ok", "", -5, "a", "a|ok"), ("viêt", "", 1, "j", "việt|"),
+                                                ("tôi đi", "", -3, "s", "tối| đi")] {
+        fastChecks += 1
+        let got = moveThenType(before: before, after: after, by: offset, keys)
+        if got != want {
+            failed += 1
+            print("FAIL cursor moved \(offset) in \(before)|\(after), then \(keys): \(got), want \(want)")
+        }
+    }
+}
+
+// ⏎ taken as Send: the app empties the field. ⌫ on the empty field then has nothing to re-open,
+// and keys typed before the app said so stay.
+do {
+    func sendWithReturn(_ keys: String, then more: String, typedBeforeReport: String = "") -> String {
+        var field = LaggingField()
+        var composer = Composer()
+        var now = 0.0
+        composer.start(before: "", after: "", now: now)
+        for key in keys { field.apply(composer.letter(key, now: now)); now += 0.1 }
+        _ = composer.newline(now: now)
+        field.replace(with: "")
+        now += 0.1
+        for key in typedBeforeReport { field.apply(composer.letter(key, now: now)); now += 0.1 }
+        _ = composer.fieldChanged(before: "", after: "", now: now)
+        for key in more {
+            // As the keyboard does when it no longer knows the text: it reads the field.
+            if composer.before == nil { composer.start(before: field.text, after: "", now: now) }
+            field.apply(key == "\u{8}" ? composer.deleteBackward(now: now) : key == " " ? composer.space(now: now) : composer.letter(key, now: now))
+            now += 0.1
+        }
+        return field.text
+    }
+    for (keys, more, early, want) in [("ok", "\u{8}ddi", "", "đi"), ("ok", "\u{8}\u{8}chaof", "", "chào"),
+                                      ("vaang", "nhs", "a", "ánh"), ("ok", "nh ddi", "a", "anh đi")] {
+        fastChecks += 1
+        let got = sendWithReturn(keys, then: more, typedBeforeReport: early)
+        if got != want {
+            failed += 1
+            print("FAIL after ⏎ sent \(keys), then \(early)|\(more): \(got), want \(want)")
+        }
+    }
+}
+
+// Chatting: messages typed fast and sent, with the app's Send button or the return key, into apps
+// that apply each edit late, report the field now and then (some only once typing stops) and
+// empty it on sending. The keyboard's side is `KeyboardViewController`'s: reports while keys go in
+// only tell how far the app has caught up, an emptied field is looked at at once, the field is
+// read again on the first key after a pause and half a second and 1.6 s after the last key. Every
+// message must go out exactly as typed. Before the emptied-field rule, one chat in forty here had a
+// message go on from the one sent before it ("okchaof").
+do {
+    final class Random {
+        var seed: UInt64 = 7
+        func next() -> Double {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Double(seed >> 11) / Double(1 << 53)
+        }
+        func next(_ low: Double, _ high: Double) -> Double { low + (high - low) * next() }
+    }
+    let random = Random()
+
+    enum Event { case key(Character), sendTap, apply([Composer.Edit]), send, report(String), look }
+    final class Chat {
+        var events: [(at: Double, event: Event)] = []
+        func at(_ time: Double, _ event: Event) {
+            let i = events.firstIndex { $0.at > time } ?? events.count
+            events.insert((time, event), at: i)
+        }
+        // The app
+        var field = ""
+        var sent: [String] = []
+        var appliedUntil = 0.0
+        var reportedUntil = 0.0
+        let reports: Double
+        let lag: ClosedRange<Double>
+        let random: Random
+        // The keyboard: the field as last reported, and its own state.
+        var seen = ""
+        var composer = Composer()
+        var lastKeyAt = -10.0
+        var lookPending = false
+
+        init(reports: Double, lag: ClosedRange<Double>, random: Random) {
+            self.reports = reports
+            self.lag = lag
+            self.random = random
+            composer.start(before: "", after: "", now: 0)
+        }
+
+        func report(_ now: Double) {
+            // One connection: reports arrive in order.
+            reportedUntil = max(reportedUntil + 0.0001, now + random.next(0.002, 0.02))
+            at(reportedUntil, .report(field))
+        }
+
+        func reconcile(_ now: Double) {
+            // An app that hands over nothing although the field has text is not believed.
+            if seen.isEmpty, !field.isEmpty { return }
+            _ = composer.fieldChanged(before: seen, after: "", now: now)
+        }
+
+        func scheduleLook(_ now: Double) {
+            guard !lookPending else { return }
+            lookPending = true
+            at(now + max(0.05, lastKeyAt + 0.5 - now + 0.001), .look)
+        }
+
+        func run() {
+            while !events.isEmpty {
+                let (now, event) = events.removeFirst()
+                switch event {
+                case .key(let key):
+                    if now - lastKeyAt >= 0.5 { reconcile(now) }
+                    lastKeyAt = now
+                    let edits = key == " " ? composer.space(now: now) : key == "\n" ? composer.newline(now: now) : composer.letter(key, now: now)
+                    if !edits.isEmpty {
+                        appliedUntil = max(appliedUntil, now + random.next(lag.lowerBound, lag.upperBound))
+                        at(appliedUntil, .apply(edits))
+                    }
+                    scheduleLook(now)
+                case .sendTap:
+                    appliedUntil = max(appliedUntil, now)
+                    at(appliedUntil + 0.0001, .send)
+                case .send:
+                    sent.append(field)
+                    field = ""
+                    report(now)
+                case .apply(let edits):
+                    var sending = false
+                    for edit in edits {
+                        switch edit {
+                        case .delete(let count): field = String(field.dropLast(count))
+                        case .insert("\n"): sending = true
+                        case .insert(let s): field += s
+                        }
+                    }
+                    if sending {
+                        sent.append(field)
+                        field = ""
+                        report(now)
+                    } else if random.next() < reports {
+                        report(now)
+                    }
+                case .report(let text):
+                    seen = text
+                    if now - lastKeyAt < 0.5, !text.isEmpty {
+                        composer.fieldCaughtUp(before: text, after: "", now: now)
+                        scheduleLook(now)
+                    } else {
+                        reconcile(now)
+                    }
+                case .look:
+                    lookPending = false
+                    let idle = now - lastKeyAt
+                    if idle < 0.5 {
+                        scheduleLook(now)
+                    } else {
+                        reconcile(now)
+                        if idle < TypedText.lag + 0.1 {
+                            lookPending = true
+                            at(now + max(0.01, TypedText.lag + 0.1 - idle), .look)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let words = ["ok", "dda", "vaang", "chaof", "anh", "em", "guwir", "baos", "gias", "nhes", "khoong", "dduwowcj",
+                 "nguwowif", "muaw", "roofi", "xem", "giusp", "vowis", "aj", "hello", "google", "ww", "w", "tesst",
+                 "Tooi", "bieets", "laf", "naof", "camr", "own", "hofang", "tosan", "ddi", "ddaau"]
+    // Apps that report every change, half of them, none while typing, and a slow one.
+    let apps: [(reports: Double, lag: ClosedRange<Double>)] = [(1, 0.005...0.05), (0.5, 0.01...0.15), (0, 0.01...0.1), (0.2, 0.02...0.4)]
+    var chatsFailed = 0
+    for round in 0..<400 {
+        let app = apps[round % apps.count]
+        let chat = Chat(reports: app.reports, lag: app.lag, random: random)
+        var now = random.next(0.2, 1.5)
+        var messages: [String] = []
+        for _ in 0..<Int(random.next(2, 6)) {
+            let keys = (0..<Int(random.next(1, 4))).map { _ in words[Int(random.next() * Double(words.count))] }.joined(separator: " ")
+            messages.append(keys)
+            for key in keys {
+                chat.at(now, .key(key))
+                now += random.next(0.04, 0.2)
+            }
+            // A thumb going to Send and back to the keys takes a moment.
+            if random.next() < 0.5 {
+                now += random.next(0.25, 0.9)
+                chat.at(now, .sendTap)
+            } else {
+                chat.at(now, .key("\n"))
+            }
+            now += random.next(0.3, 2)
+        }
+        chat.run()
+        let want = messages.map { $0.split(separator: " ").map { typed(String($0)) }.joined(separator: " ") }
+        fastChecks += 1
+        if chat.sent != want {
+            chatsFailed += 1
+            failed += 1
+            if chatsFailed <= 3 { print("FAIL chat \(round): sent \(chat.sent), want \(want)") }
         }
     }
 }

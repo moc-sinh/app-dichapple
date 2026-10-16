@@ -77,6 +77,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// A pause this long means the keys typed so far have reached the app.
     private static let settle: CFTimeInterval = 0.5
     private var benchmark: TypingBenchmark?
+    /// The cursor is walking the field (`readDocument`, `replaceDocument`): keys wait until it is
+    /// back at the end and go in there, in order. Typed meanwhile, they went in wherever the walk
+    /// was (often the start of the message), or were wiped with the text being replaced.
+    private var walking = 0
+    private var heldKeys: [KeyAction] = []
+    /// Each walk belongs to one showing of the keyboard: hidden meanwhile, it stops (it would go on
+    /// in whatever field has the keyboard next).
+    private var walkGeneration = 0
     /// How tall the keys are (Cài đặt › Bàn phím › Cỡ bàn phím), read as the keyboard appears.
     private var keySize = KeyboardSize.medium
     /// The language "Tự động" stands for on the pill. Working it out runs language detection over
@@ -218,7 +226,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         mode = .normal
         info = .idle
         checkPasteboard(waitForTyping: false)
-        if fullAccess, SharedStore.apiKey != nil { Translator.warmUp() }
+        // Setting up the network session takes a moment: not on the main thread as the keys appear.
+        if fullAccess, SharedStore.apiKey != nil { Self.store.async { Translator.warmUp() } }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
     }
@@ -227,6 +236,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         super.viewDidAppear(animated)
         fullAccess = hasFullAccess
         SharedStore.noteKeyboard(fullAccess ? "4 đã hiện (có truy cập đầy đủ)" : "4 đã hiện (chưa có truy cập đầy đủ)")
+        // Turned off later in Settings, the app's setup and diagnostics say so again.
+        if SharedStore.keyboardHasFullAccess != fullAccess { SharedStore.keyboardHasFullAccess = fullAccess }
         keyboard.showsGlobe = needsInputModeSwitchKey
         globeKnown = true
         // iOS holds back touches near the screen edges (q, a, z, p, l, delete, space) while it
@@ -271,6 +282,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         pollTimer = nil
         task?.cancel()
         incomingTask?.cancel()
+        walkGeneration += 1
+        walking = 0
+        heldKeys = []
         TypingLog.add("■ đóng")
         TypingLog.save(now: true)
     }
@@ -317,6 +331,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     func keyboardLayoutView(_ view: KeyboardLayoutView, perform action: KeyAction) {
         TypingLog.mark("phím")
+        if walking > 0 {
+            heldKeys.append(action)
+            return
+        }
         let now = CACurrentMediaTime()
         if composer.before == nil {
             readField()
@@ -346,7 +364,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             edits = composer.newline(now: now)
         case .moveCursor(let offset):
             textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
-            composer.forget()
+            composer.moveCursor(by: offset, now: now)
             edits = []
         case .undoLast:
             if let last = lastTyped, let undo = Composer.inverse(of: last.edits, before: last.composer.before) {
@@ -432,6 +450,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             editSentAt = 0
         }
         if now - lastKeyAt < Self.settle, !(before.isEmpty && after.isEmpty && !proxy.hasText) {
+            composer.fieldCaughtUp(before: before, after: after, now: now)
             return scheduleCheck()
         }
         reconcile(before: before, after: after, now: now)
@@ -488,16 +507,36 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private func edited() {
         switch mode {
-        case .done, .failed:
-            TypingLog.add("▭ thanh dịch vẽ lại")
+        case .busy:
+            // The translation would replace the field, these keys with it.
+            TypingLog.add("▭ gõ tiếp: hủy dịch")
+            task?.cancel()
             mode = .normal
+        case .done, .failed:
+            // After this key's frame: building the bar again held up the first key after a translation.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch self.mode {
+                case .done, .failed:
+                    TypingLog.add("▭ thanh dịch vẽ lại")
+                    self.mode = .normal
+                default: break
+                }
+            }
         default: break
         }
         switch info {
         case .outgoing, .message:
-            // The keyboard gets shorter: if a key is slow here, the log shows why.
-            TypingLog.add("ⓘ ẩn dòng báo")
-            info = .idle
+            // After this key's frame too: the keyboard gets shorter.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch self.info {
+                case .outgoing, .message:
+                    TypingLog.add("ⓘ ẩn dòng báo")
+                    self.info = .idle
+                default: break
+                }
+            }
         default: break
         }
         updateAutoCapitalization()
@@ -517,7 +556,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             if before.isEmpty || before.hasSuffix("\n") {
                 on = true
             } else if before.hasSuffix(" "), let last = before.last(where: { $0 != " " && $0 != "\t" }) {
-                on = ".!?".contains(last)
+                on = ".!?\n".contains(last)
             } else {
                 on = false
             }
@@ -543,7 +582,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .continue: title = "Tiếp tục"
         default: title = "xuống dòng"
         }
-        let typed = !(composer.before ?? "").isEmpty
+        // The field's own answer trails the keys; a message just sent with this key ends in a newline
+        // and leaves the field empty.
+        let typed = composer.before.map { !$0.isEmpty && $0.last != "\n" } ?? false
         let enabled = !(proxy.enablesReturnKeyAutomatically ?? false) || proxy.hasText || typed
         keyboard.configureReturn(title: title, prominent: type != .default, enabled: enabled)
     }
@@ -903,9 +944,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     /// Behind the mark: the partner's last message, the check of what was sent, and the context.
+    /// The history and the context are read off the main thread (the history is a few hundred items).
     private func openOverview() {
+        let needsHistory = lastIncoming == nil || lastOutgoing == nil
+        Self.store.async {
+            let recent = needsHistory ? SharedStore.recentHistory() : []
+            let lines = SharedStore.context()
+            DispatchQueue.main.async { [weak self] in self?.showOverview(recent: recent, lines: lines) }
+        }
+    }
+
+    private func showOverview(recent: [HistoryItem], lines: [ChatLine]) {
         var parts: [(String, Bool)] = []
-        let recent = lastIncoming == nil || lastOutgoing == nil ? SharedStore.recentHistory() : []
 
         if let incoming = lastIncoming {
             parts += incomingParts(translation: incoming.translation.text)
@@ -917,15 +967,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             parts += outgoingParts(original: outgoing.original, translation: t.text, language: t.language.name,
                                    meaning: t.meaning)
         } else if let item = recent.first(where: { $0.side == .me }) {
-            parts += outgoingParts(original: item.source, translation: item.translation, language: item.languageName.lowercased(),
-                                   meaning: item.meaning)
+            parts += outgoingParts(original: item.source, translation: item.translation,
+                                   language: item.language?.name ?? item.languageName, meaning: item.meaning)
         }
 
-        let lines = SharedStore.context()
         parts.append((lines.isEmpty ? "Ngữ cảnh: chưa có tin nào" : "Ngữ cảnh: \(lines.count) tin gần đây", true))
         parts += lines.map { (($0.side == .partner ? "Đối tác: " : "Tôi: ") + $0.text, false) }
         showPanel(Brand.name, parts, button: "Cuộc mới (xóa ngữ cảnh)") { [weak self] in
-            SharedStore.clearContext()
+            Self.store.async { SharedStore.clearContext() }
             self?.lastIncoming = nil
             self?.lastOutgoing = nil
             self?.refreshPillTarget()
@@ -966,7 +1015,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// A long translation of the partner's message opens in full while nothing has been typed
     /// yet: reading comes before replying, and one tap closes it.
     private func expandIfLong(source: String, translation: Translation) {
-        guard mode == .normal, !textDocumentProxy.hasText, !fitsInfoLine(translation.text) else { return }
+        // Not while typing has begun: the panel hides the keys, and the field may not say it has
+        // text yet.
+        guard mode == .normal, CACurrentMediaTime() - lastKeyAt > 1.5, !textDocumentProxy.hasText,
+              !fitsInfoLine(translation.text) else { return }
         presentIncoming(source: source, translation: translation)
     }
 
@@ -1029,7 +1081,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private func translateDraft() {
         guard let apiKey = readyKey() else { return }
         let context = SharedStore.context()
-        let target = resolvedTarget(context: context)
+        // The language the pill shows ("Tự động" is worked out off the main thread as the context
+        // changes); only before that is done, here.
+        let target = targetCode == Language.autoCode && pillTarget == nil ? resolvedTarget(context: context) : shownTarget
         activeTarget = target
         mode = .busy
         task?.cancel()
@@ -1068,6 +1122,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func undo() {
+        if let sent = lastOutgoing?.translation.text {
+            Self.store.async { SharedStore.forgetLast(sent) }
+            refreshPillTarget()
+        }
         replaceDocument(with: original) { [weak self] in
             self?.lastOutgoing = nil
             self?.mode = .normal
@@ -1084,7 +1142,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let proxy = textDocumentProxy
         var collected = ""
         var steps = 0
-        composer.forget()
+        beginWalk()
+
+        func finish() {
+            TypingLog.add("▤ đọc ô: \(collected.count) ký tự, \(steps) bước")
+            let before = proxy.documentContextBeforeInput ?? "", after = proxy.documentContextAfterInput ?? ""
+            proxy.adjustTextPosition(byCharacterOffset: collected.utf16.count)
+            // Back at the end, as the app sees it, before the keys held meanwhile go in there.
+            afterMove(from: before, after, waitingUpTo: collected.isEmpty ? 1 : 12) { _ in
+                self.endWalk()
+                completion(collected)
+            }
+        }
 
         func back() {
             steps += 1
@@ -1093,7 +1162,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             if !before.isEmpty, steps < 80 {
                 collected = before + collected
                 proxy.adjustTextPosition(byCharacterOffset: -before.utf16.count)
-                return afterMove(from: before, after, waitingUpTo: 12) { _ in back() }
+                // A field that never reports the move would hand the same text over again: what was
+                // read is kept, once.
+                return afterMove(from: before, after, waitingUpTo: 40) { moved in moved ? back() : finish() }
             }
             // Nothing before the cursor means the start of the field, or of a paragraph: step
             // over one character and see whether the field moved.
@@ -1103,9 +1174,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     collected = "\n" + collected
                     return back()
                 }
-                TypingLog.add("▤ đọc ô: \(collected.count) ký tự, \(steps) bước")
-                proxy.adjustTextPosition(byCharacterOffset: collected.utf16.count)
-                self.tick { completion(collected) }
+                finish()
             }
         }
 
@@ -1124,7 +1193,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             let after = proxy.documentContextAfterInput ?? ""
             if !after.isEmpty, steps < 80 {
                 proxy.adjustTextPosition(byCharacterOffset: after.utf16.count)
-                return afterMove(from: before, after, waitingUpTo: 12) { _ in forward() }
+                return afterMove(from: before, after, waitingUpTo: 40) { moved in moved ? forward() : completion() }
             }
             proxy.adjustTextPosition(byCharacterOffset: 1)
             afterMove(from: before, after, waitingUpTo: 4) { moved in
@@ -1141,7 +1210,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let proxy = textDocumentProxy
         var steps = 0
         var emptyRounds = 0
-        composer.forget()
+        beginWalk()
         func clear() {
             steps += 1
             let before = proxy.documentContextBeforeInput ?? ""
@@ -1151,7 +1220,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 proxy.insertText(text)
                 // The field is read again before the next key.
                 composer.forget()
-                return completion()
+                completion()
+                return endWalk()
             }
             for _ in 0..<max(1, before.count) { proxy.deleteBackward() }
             tick(clear)
@@ -1174,10 +1244,29 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func tick(_ work: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
+        let generation = walkGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+            guard let self, generation == self.walkGeneration else { return }
             TypingLog.mark("đọc/thay ô")
             work()
         }
+    }
+
+    private func beginWalk() {
+        walking += 1
+        composer.forget()
+        // Holding a key now must not take back text where the walk has gone.
+        lastTyped = nil
+    }
+
+    /// The cursor is back at the end: the keys pressed meanwhile go in, in order.
+    private func endWalk() {
+        walking = max(0, walking - 1)
+        guard walking == 0, !heldKeys.isEmpty else { return }
+        let keys = heldKeys
+        heldKeys = []
+        TypingLog.add("▤ phím chờ lúc đọc/thay ô: \(keys.count)")
+        for action in keys { keyboardLayoutView(keyboard, perform: action) }
     }
 
     // MARK: Translating the partner's messages
@@ -1248,18 +1337,24 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         // Whatever was copied is translated into Vietnamese: no guessing whether it already is
         // (a foreign message that names a Vietnamese person read as Vietnamese).
         SharedStore.handledPasteboard = changeCount
-        SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
-        refreshPillTarget()
-        translateIncoming(copied)
+        if let cached = SharedStore.cachedIncoming(copied) {
+            Self.store.async { SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date())) }
+            refreshPillTarget()
+            return show(incoming: copied, translation: Translation(text: cached, meaning: nil, note: nil, language: .vietnamese))
+        }
+        // The context as it was before this message: the message itself goes in <message>, not twice.
+        Self.store.async {
+            let context = SharedStore.context()
+            SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshPillTarget()
+                self?.translateIncoming(copied, context: context)
+            }
+        }
     }
 
-    private func translateIncoming(_ text: String) {
-        if let cached = SharedStore.cachedIncoming(text) {
-            show(incoming: text, translation: Translation(text: cached, meaning: nil, note: nil, language: .vietnamese))
-            return
-        }
+    private func translateIncoming(_ text: String, context: [ChatLine]) {
         guard let apiKey = SharedStore.apiKey else { return }
-        let context = SharedStore.context()
         info = .incomingBusy
         incomingTask?.cancel()
         incomingTask = Task { [weak self] in

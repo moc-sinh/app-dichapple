@@ -80,12 +80,15 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 **Gõ phím**
 - Giữ một nguyên âm để chọn dấu (á à ả ã ạ ă â…).
 - Giữ phím cách rồi kéo để di chuyển con trỏ.
-- Chạm hai lần Shift để khóa chữ hoa; chạm hai lần phím cách để thêm dấu chấm.
+- Chạm hai lần Shift để khóa chữ hoa (cả lúc Shift đang tự bật ở đầu câu); khóa chữ hoa giữ nguyên khi qua trang 123 rồi về. Về trang chữ ở đầu câu thì Shift tự bật. Chạm hai lần phím cách để thêm dấu chấm.
 - Giữ phím xóa: xóa từng chữ, giữ lâu thì xóa cả từ.
 - Bỏ dấu ở đâu trong từ cũng được: `hofang` → hoàng, `tosan` → toán, `dduocwj` → được.
 - Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên; từ lỡ bị thêm dấu lúc gõ (gôgle) tự trở lại như đã gõ khi bạn gõ dấu cách hay dấu câu (google). Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`; ba chữ w liền nhau giữ nguyên (`www`).
 - Xóa dấu cách ngay sau một từ là sửa tiếp được từ đó: `thays` cách ⌫ `a` → thấy.
 - Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.
+- Gửi tin rồi gõ tin mới ngay (bằng nút Gửi của app hay phím Gửi): tin mới bắt đầu sạch, không dính chữ của tin vừa gửi, kể cả khi vừa bấm ⌫ trên ô trống.
+- Gõ lấn hai ngón (ngón này chưa nhấc, ngón kia đã chạm): phím chạm trước luôn vào trước, kể cả phím Gửi và phím cách.
+- Bấm **Dịch** rồi gõ tiếp: chữ gõ trong lúc bàn phím đang đọc ô được giữ lại rồi chèn vào cuối; bản dịch đang chờ bị hủy để không ghi đè chữ mới gõ.
 - Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
 - Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
 - Phím đang bấm chỉ sáng lên, không hiện chữ nổi che các phím bên cạnh (như bàn phím Apple khi tắt Xem trước ký tự). Muốn có chữ nổi, bật **Chữ nổi khi bấm phím** trong Cài đặt › Bàn phím.
@@ -118,11 +121,12 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 - **Chuẩn nhất** (mặc định): GPT-6.1 Sol, khoảng 0,003 USD mỗi tin (1.000 tin ≈ 3 USD).
 - **Nhanh**: GPT-6 Luna, rẻ hơn khoảng 20 lần, dùng khi cần tiết kiệm.
 - Mỗi tin của đối tác chỉ dịch một lần; app nhớ bản dịch nên không gọi lại.
-- Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh. OpenAI không lưu nội dung (`store: false`).
+- Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh (tin dài thì giữ phần cuối). OpenAI không lưu tin vào tài khoản của bạn (`store: false`).
+- Bản dịch kèm nghĩa dịch ngược: AI viết bản dịch trước rồi mới dịch ngược chính bản đó, nên dòng **Nghĩa** đúng là câu đối tác sẽ đọc. Tin quá dài bị cắt thì bàn phím báo lỗi, không bao giờ chèn nửa bản dịch vào ô chat.
 
 ## Cách app giữ nhẹ
 
-- Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
+- Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu tốc độ; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
 - Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím. Nền bàn phím không hoàn toàn trong suốt (mắt không thấy): iOS chuyển cú chạm vào chỗ trong suốt cho app phía sau, nên trước đây chạm vào khe giữa phím hay dải trống cạnh chữ a có lúc mất chữ.
 - Trang chữ, trang 123 và trang ký hiệu được tạo một lần rồi giữ lại: bấm 123/ABC chỉ đổi trang đang hiện, không dựng lại 33 phím. Chữ hoa và chữ thường trên phím được vẽ sẵn, nên đầu câu không phải vẽ lại cả bàn phím.
 - Bộ gõ Telex là TelexCore của VietTelex (mã nguồn mở, giấy phép MIT): gõ đúng cả 400 từ tiếng Việt và giữ đúng gần như mọi từ tiếng Anh trong bộ 9.091 trường hợp thử của VietTelex, bộ thử này chạy lại mỗi lần build. Mỗi phím mất khoảng 0,01 mili giây.

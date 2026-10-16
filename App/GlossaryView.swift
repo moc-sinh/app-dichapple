@@ -91,6 +91,8 @@ struct GlossaryView: View {
 
     private func save() {
         glossary = Glossary.format(terms)
+        // A partner message copied again is translated again, with the new terms.
+        SharedStore.clearIncomingCache()
     }
 }
 

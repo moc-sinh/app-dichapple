@@ -59,9 +59,41 @@ struct Composer {
 
     /// The field reported its text. True when it was changed elsewhere, not just catching up.
     mutating func fieldChanged(before: String, after: String, now: Double) -> Bool {
-        guard !text.explains(before: before, after: after, now: now) else { return false }
-        start(before: before, after: after, now: now)
-        return true
+        switch text.compare(before: before, after: after, now: now) {
+        case .caughtUp:
+            return false
+        case .sent:
+            // The word before the newline went with the message: ⌫ has nothing to re-open.
+            engine.reset()
+            shown = ""
+            literal = false
+            lastSpaceAt = -10
+            return true
+        case .changed:
+            start(before: before, after: after, now: now)
+            return true
+        }
+    }
+
+    /// The field reported its text while keys are going in. Nothing is taken from it then (see
+    /// `KeyboardViewController.fieldReported`), but text this keyboard typed tells how far the app
+    /// has caught up: a field emptied after it was sent, not a report trailing the first keys.
+    mutating func fieldCaughtUp(before: String, after: String, now: Double) {
+        guard !before.isEmpty || !after.isEmpty else { return }
+        _ = text.compare(before: before, after: after, now: now)
+    }
+
+    /// The cursor moved `offset` characters (the space bar as a trackpad): the known text moves
+    /// with it, so a key typed before the app reports the move still edits the word at the cursor.
+    /// Read straight away, the app's text could still be from before the move, and Telex edited the
+    /// word the cursor had left ("chao ban", cursor back to "chao|", f: "chàn ban"). Beyond what is
+    /// known, the field is read again.
+    mutating func moveCursor(by offset: Int, now: Double) {
+        text.move(by: offset, now: now)
+        engine.reset()
+        shown = ""
+        literal = false
+        lastSpaceAt = -10
     }
 
     /// The cursor moved or the whole field was replaced: read the field again before the next key.
@@ -346,6 +378,15 @@ struct TypedText {
     private static let history = 64
     /// How long an app may take to show an edit.
     static let lag = 1.5
+    /// An empty field reported once typing paused: the app emptied it (the message was sent), even
+    /// if it never reported the message itself, unless the keys typed into the empty field are
+    /// that recent. Only the first keys into an empty field can trail a report of it empty, and
+    /// those reach the app within a moment. With `lag`, a short message sent quickly ("ok") stayed
+    /// in this copy, and the next one went on from it ("okchaof").
+    static let emptiedLag = 0.5
+    /// How long after the last key a report counts as made once typing paused (a thumb going to the
+    /// app's Send button), not between keys.
+    static let paused = 0.2
 
     mutating func reset(before: String, after: String, now: Double) {
         let kept = String(before.suffix(Self.keep))
@@ -360,6 +401,27 @@ struct TypedText {
     mutating func forget() {
         before = nil
         recent.removeAll()
+    }
+
+    /// The cursor moved over `offset` UTF-16 units of the text (left when negative), as
+    /// `adjustTextPosition` counts them. Unknown when that leaves what is known, or splits a letter.
+    mutating func move(by offset: Int, now: Double) {
+        guard var b = before, offset != 0 else { return }
+        var a = after
+        if offset < 0 {
+            let units = b.utf16
+            guard let cut = units.index(units.endIndex, offsetBy: offset, limitedBy: units.startIndex),
+                  let i = cut.samePosition(in: b) else { return forget() }
+            a = String(b[i...]) + a
+            b = String(b[..<i])
+        } else {
+            let units = a.utf16
+            guard let cut = units.index(units.startIndex, offsetBy: offset, limitedBy: units.endIndex),
+                  let i = cut.samePosition(in: a) else { return forget() }
+            b += a[..<i]
+            a = String(a[i...])
+        }
+        reset(before: b, after: a, now: now)
     }
 
     mutating func insert(_ s: String, now: Double) {
@@ -389,25 +451,59 @@ struct TypedText {
         if recent.count > Self.history { recent.removeFirst(recent.count - Self.history) }
     }
 
-    /// Whether the field shows what this keyboard typed, now or a moment ago (the app has not
-    /// caught up yet). If not, the text was changed elsewhere.
-    mutating func explains(before field: String, after fieldAfter: String, now: Double) -> Bool {
-        guard before != nil, fieldAfter == after else { return false }
+    enum Report {
+        /// The field shows what this keyboard typed, now or a moment ago (the app has not caught up).
+        case caughtUp
+        /// Emptied right after a newline: the app took ⏎ as Send. The text up to the newline is gone,
+        /// what was typed after it stays. Kept, the sent message came back under ⌫ ("ok" ⏎ ⌫ "ddi"
+        /// gave "ddi", the keys going on from "ok").
+        case sent
+        /// Changed elsewhere.
+        case changed
+    }
+
+    mutating func compare(before field: String, after fieldAfter: String, now: Double) -> Report {
+        guard before != nil, fieldAfter == after else { return .changed }
+        let emptied = field.isEmpty && fieldAfter.isEmpty
         // Newest first. A text counts while it was on screen less than `lag` ago: until the next
         // edit replaced it, not since it was typed (the empty field read when the keyboard opened
         // stays current until the first key, however long that takes). Partial texts can match
         // several snapshots ("ha" and "haha"); the oldest is kept, so a later report is not
-        // taken for going back.
-        var match: Int?
+        // taken for going back. The text on screen now always counts.
+        let window = emptied && now - (recent.last?.at ?? now) >= Self.paused ? Self.emptiedLag : Self.lag
+        var match: Snapshot?
+        // Emptied, and the text on screen then ended in a newline. Taken before an older empty
+        // text the report could also be trailing: wrongly taken, it loses nothing after a newline.
+        var sentAt: Snapshot?
         var replacedAt = now
+        var current = true
         for snapshot in recent.reversed() {
-            guard snapshot.n >= shown, now - replacedAt < Self.lag else { break }
-            if Self.matches(snapshot.text, field) { match = snapshot.n }
+            guard snapshot.n >= shown, current || now - replacedAt < window else { break }
+            if Self.matches(snapshot.text, field) {
+                match = snapshot
+                if emptied, sentAt == nil, snapshot.text.last == "\n" { sentAt = snapshot }
+            }
             replacedAt = snapshot.at
+            current = false
         }
-        guard let match else { return false }
-        shown = match
-        return true
+        if let sentAt {
+            shown = sentAt.n
+            // What was typed since the newline is all the field holds.
+            let newer = recent.filter { $0.n >= sentAt.n }
+            guard newer.allSatisfy({ $0.text.hasPrefix(sentAt.text) }) else {
+                // The newline was deleted since: read the field again.
+                forget()
+                return .sent
+            }
+            let cut = sentAt.text.count
+            recent = newer.map { Snapshot(text: String($0.text.dropFirst(cut)), at: $0.at, n: $0.n) }
+            before = recent.last?.text ?? ""
+            length = before?.count ?? 0
+            return .sent
+        }
+        guard let match else { return .changed }
+        shown = match.n
+        return .caughtUp
     }
 
     /// The field often hands over only part of the text (the current paragraph or sentence).

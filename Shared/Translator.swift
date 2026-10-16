@@ -41,7 +41,8 @@ struct Translator {
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
+        // The answer comes in one piece once it is written: a long message can take a while.
+        config.timeoutIntervalForRequest = 90
         config.urlCache = nil
         return URLSession(configuration: config)
     }()
@@ -57,7 +58,9 @@ struct Translator {
             "instructions": instructions,
             "input": Prompt.input(text: text, context: context),
             "reasoning": ["effort": model.reasoningEffort],
-            "max_output_tokens": 4_000,
+            // Reasoning counts too. Only what is written is paid for; a long message with its
+            // meaning check went over 4,000 and came back cut off.
+            "max_output_tokens": 16_000,
             "store": false,
         ]
         let format: [String: Any] = [
@@ -75,10 +78,16 @@ struct Translator {
             body["text"] = nil
             json = try await send(body)
         }
+        // Cut off (too long): half a translation, or the start of its JSON, must never replace the message.
+        if json["status"] as? String == "incomplete" {
+            throw TranslateError.server("Tin quá dài, bản dịch bị cắt. Chia tin ra rồi dịch lại.")
+        }
         guard let output = Self.outputText(json), !output.isEmpty else {
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
-        return Self.parse(output, language: target)
+        let translation = Self.parse(output, language: target)
+        guard !translation.text.isEmpty else { throw TranslateError.server("Không nhận được bản dịch. Thử lại.") }
+        return translation
     }
 
     /// Opens the connection to OpenAI before it is needed, so the first Dịch doesn't also wait
@@ -108,13 +117,19 @@ struct Translator {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        // Sorted, so the schema asks for the translation before its meaning check (a dictionary's
+        // order changes from one launch to the next, and the model writes the fields in schema order:
+        // a "meaning" written first checks nothing).
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
 
         let result: (Data, URLResponse)
         do {
             result = try await Self.session.data(for: request)
         } catch {
-            if (error as? URLError)?.code == .cancelled || error is CancellationError { throw CancellationError() }
+            let code = (error as? URLError)?.code
+            if code == .cancelled || error is CancellationError { throw CancellationError() }
+            // Not tried again: it was probably still writing, and a second request is paid for too.
+            if code == .timedOut { throw TranslateError.server("OpenAI trả lời quá lâu. Thử lại, hoặc chia tin ngắn hơn.") }
             throw TranslateError.network
         }
         let (data, response) = result
@@ -154,7 +169,7 @@ struct Translator {
             return value.isEmpty ? nil : value
         }
         return Translation(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                           meaning: field("meaning_vi"), note: field("note_vi"), language: language)
+                           meaning: field(Prompt.meaningKey), note: nil, language: language)
     }
 
     private func explain(status: Int, message: String) -> String {
@@ -189,7 +204,7 @@ enum Prompt {
         """
         if let guide = guidance[target.code] { s += "\n- " + guide }
         s += aboutUser
-        s += "\n\nIn meaning_vi (when asked for), translate your translation back into Vietnamese faithfully, so the user can check exactly what the partner will read."
+        s += "\n\nIn \(meaningKey) (when asked for), translate your translation back into Vietnamese faithfully, so the user can check exactly what the partner will read."
         return s
     }
 
@@ -247,6 +262,10 @@ enum Prompt {
         return s + "<message>\n\(text)\n</message>"
     }
 
+    /// The meaning check's field. Its name sorts after "translation" (the request's keys are sorted),
+    /// so the model writes the translation first and then translates that back.
+    static let meaningKey = "translation_back_vi"
+
     /// Only the translation (and, when asked, its meaning back in Vietnamese): the user reads the
     /// translation, not notes about it, which also made every answer longer to wait for.
     static func schema(meaning: Bool) -> [String: Any] {
@@ -255,8 +274,8 @@ enum Prompt {
         ]
         var required = ["translation"]
         if meaning {
-            properties["meaning_vi"] = ["type": "string", "description": "The translation translated back into Vietnamese, faithfully."]
-            required.append("meaning_vi")
+            properties[meaningKey] = ["type": "string", "description": "The translation translated back into Vietnamese, faithfully."]
+            required.append(meaningKey)
         }
         return ["type": "object", "properties": properties, "required": required, "additionalProperties": false]
     }

@@ -125,6 +125,11 @@ final class KeyboardLayoutView: UIView {
     private var laidOut: [Page: CGSize] = [:]
     private var tracks: [UITouch: Track] = [:]
     private var lastShiftTap: CFTimeInterval = 0
+    /// Where the last Shift tap started from: a double tap from the capital a sentence starts with
+    /// locks capitals too.
+    private var lastShiftFrom = Shift.off
+    /// Caps Lock, kept while 123 shows.
+    private var capsLock = false
 
     private var returnTitle = "xuống dòng"
     private var returnProminent = false
@@ -140,6 +145,7 @@ final class KeyboardLayoutView: UIView {
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     /// A key went down: its sound and haptic play once the pop-up has gone to the screen.
     private var pendingSound: Sound?
+    private var pendingHaptic = true
     private var feedbackObserver: CFRunLoopObserver?
 
     /// The system keyboard's own sounds: letters, delete, and the other keys.
@@ -225,8 +231,13 @@ final class KeyboardLayoutView: UIView {
 
     // MARK: State from the controller
 
+    /// Whether the next letter starts a sentence, as last set: kept while 123 shows, so ABC turns
+    /// Shift back on at the start of a sentence, as the system keyboard does.
+    private var wantsAutoShift = false
+
     /// Sentence-start capitalisation; Caps Lock wins.
     func setAutoShift(_ on: Bool) {
+        wantsAutoShift = on
         guard shift != .locked, page == .letters else { return }
         let next: Shift = on ? .once : .off
         if next != shift {
@@ -247,8 +258,12 @@ final class KeyboardLayoutView: UIView {
     func showLetters() {
         guard page != .letters else { return }
         page = .letters
+        shift = lettersShift
         showPage()
     }
+
+    /// Shift as the letters come back: Caps Lock if it was on, else a capital at a sentence start.
+    private var lettersShift: Shift { capsLock ? .locked : wantsAutoShift ? .once : .off }
 
     // MARK: Building
 
@@ -580,8 +595,10 @@ final class KeyboardLayoutView: UIView {
     }
 
     private func setTrackpad(_ on: Bool) {
+        // Every page: the other thumb may switch pages while the bar is held.
+        let all = Array(built.values.joined().joined())
         UIView.animate(withDuration: 0.15) {
-            for key in self.keys {
+            for key in all {
                 key.label.alpha = on ? 0 : 1
                 key.capital?.alpha = on ? 0 : 1
                 key.icon.alpha = on ? 0 : 1
@@ -589,15 +606,16 @@ final class KeyboardLayoutView: UIView {
         }
     }
 
-    private func feedback(_ sound: Sound = .modifier) {
+    private func feedback(_ sound: Sound = .modifier, haptic: Bool = true) {
         pendingSound = sound
+        pendingHaptic = haptic
     }
 
     private func playFeedback() {
         guard let sound = pendingSound else { return }
         pendingSound = nil
         play(sound)
-        if hapticsEnabled {
+        if hapticsEnabled && pendingHaptic {
             let started = CACurrentMediaTime()
             haptics.impactOccurred(intensity: 0.5)
             haptics.prepare()
@@ -643,23 +661,50 @@ final class KeyboardLayoutView: UIView {
         lastTouchAt = now
         // Two fingers landing in the same instant: the earlier one types first.
         for touch in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
+            // Another key while a vowel's accent row is open: the row closes and its letter stays
+            // as typed. An accent chosen after it took back that other key instead ("aá").
+            if accentTouch != nil, accentTouch !== touch { closeAccents() }
+            // Typing with two thumbs: a key still held is typed by the time the next one goes down,
+            // in the order pressed (⏎ held while the next message's first letter landed sent that
+            // letter with the message), and it no longer opens its accents or the trackpad (another
+            // key was typed after it, so it can't be taken back).
+            for (other, track) in tracks where other !== touch {
+                cancelLongPress(other)
+                if !track.committed, other !== trackpadTouch { commitHeld(track) }
+            }
+            // Only now: a space typed just above may have brought back the letters.
             let point = touch.location(in: self)
             guard let key = hitKey(at: point) else { continue }
             // How long the touch took to get here: iOS holding it back, or the keyboard busy.
             let late = now - touch.timestamp
             if late > 0.03 { TypingLog.add("⌛ \(key.character ?? "phím") đến trễ \(Int(late * 1000))ms") }
             if point.y < 0 { TypingLog.add("↑ \(key.character ?? "?") (chạm cao)") }
-            // Typing with two thumbs: an earlier letter is typed by the time the next key goes down,
-            // and a key still held no longer opens its accents or the trackpad (another key was
-            // typed after it, so it can't be taken back).
-            for (other, track) in tracks where other !== touch && other !== accentTouch {
-                cancelLongPress(other)
-                if !track.committed && track.key.character != nil { commit(track) }
-            }
             let track = Track(key: key, start: point)
             tracks[touch] = track
             begin(track, touch: touch, event: event)
         }
+    }
+
+    /// A key still held when the next one goes down: typed now, as its lift would have.
+    private func commitHeld(_ track: Track) {
+        switch track.key.kind {
+        case .char:
+            commit(track)
+        case .space:
+            track.committed = true
+            delegate?.keyboardLayoutView(self, perform: .space)
+        case .ret:
+            track.committed = true
+            if returnEnabled { delegate?.keyboardLayoutView(self, perform: .newline) }
+        default:
+            break
+        }
+    }
+
+    private func closeAccents() {
+        accentTouch = nil
+        accentPicker?.removeFromSuperview()
+        accentPicker = nil
     }
 
     private func begin(_ track: Track, touch: UITouch?, event: UIEvent?) {
@@ -676,12 +721,17 @@ final class KeyboardLayoutView: UIView {
         case .shift:
             feedback()
             let now = CACurrentMediaTime()
+            let quick = now - lastShiftTap < 0.35
+            let from = shift
             switch shift {
             case .locked: shift = .off
-            case .once: shift = now - lastShiftTap < 0.35 ? .locked : .off
-            case .off: shift = .once
+            // A double tap locks capitals: from Shift tapped on, or from the capital a sentence
+            // starts with (the first tap turns that off).
+            case .once: shift = quick && lastShiftFrom == .off ? .locked : .off
+            case .off: shift = quick && lastShiftFrom == .once ? .locked : .once
             }
             lastShiftTap = now
+            lastShiftFrom = from
             applyShift()
             track.committed = true
             // Keys that type nothing are noted too: a tap that hit Shift is not read as a lost letter.
@@ -693,8 +743,9 @@ final class KeyboardLayoutView: UIView {
             startDeleteRepeat()
         case .page(let p):
             feedback()
+            if page == .letters { capsLock = shift == .locked }
             page = p
-            if p != .letters { shift = .off }
+            shift = p == .letters ? lettersShift : .off
             showPage()
             track.committed = true
             TypingLog.add(p == .letters ? "▦ ABC" : p == .numbers ? "▦ 123" : "▦ #+=")
@@ -805,8 +856,8 @@ final class KeyboardLayoutView: UIView {
             TypingLog.add("… bảng dấu đóng: \(cancelled ? "bị hủy" : accentPicker?.selected == 0 ? "giữ nguyên" : accentPicker?.selectedText ?? "?")")
             if !cancelled, let picker = accentPicker, let text = picker.selectedText {
                 if !track.typedOnDown {
-                    delegate?.keyboardLayoutView(self, perform: .text(text))
                     consumeOnceShift()
+                    delegate?.keyboardLayoutView(self, perform: .text(text))
                 } else if picker.selected != 0 {
                     // The plain letter went in as the finger landed: the accented one replaces it.
                     delegate?.keyboardLayoutView(self, perform: .undoLast)
@@ -833,7 +884,7 @@ final class KeyboardLayoutView: UIView {
             if !cancelled && !track.committed { delegate?.keyboardLayoutView(self, perform: .space) }
         case .ret:
             setPressed(track.key, false)
-            if !cancelled && returnEnabled { delegate?.keyboardLayoutView(self, perform: .newline) }
+            if !cancelled && returnEnabled && !track.committed { delegate?.keyboardLayoutView(self, perform: .newline) }
         case .globe:
             setPressed(track.key, false)
             if let event { delegate?.keyboardLayoutView(self, globeTouchedWith: event) }
@@ -853,12 +904,14 @@ final class KeyboardLayoutView: UIView {
         guard let s = track.key.character else { return }
         track.upper = shift != .off && page == .letters
         let text = track.upper ? s.uppercased() : s
+        // Before the controller hears of the key: it may turn Shift straight back on (a field in
+        // capitals; afterwards, every word after the first came out lower case).
+        consumeOnceShift()
         if page == .letters, let c = text.first {
             delegate?.keyboardLayoutView(self, perform: .letter(c))
         } else {
             delegate?.keyboardLayoutView(self, perform: .text(text))
         }
-        consumeOnceShift()
     }
 
     private func consumeOnceShift() {
@@ -992,8 +1045,10 @@ final class KeyboardLayoutView: UIView {
         deleteCount += 1
         let words = deleteCount > 16
         if words && deleteCount % 2 == 1 { return }
-        play(.delete)
         delegate?.keyboardLayoutView(self, perform: .delete(word: words))
+        // After the edit and its frame, as for every key: without Full Access the click waits on
+        // iOS's sound service, and each deletion waited behind it.
+        feedback(.delete, haptic: false)
     }
 
     private func stopDeleteRepeat() {
@@ -1040,11 +1095,15 @@ final class KeyboardLayoutView: UIView {
             stopDeleteRepeat()
             longPressTimer?.invalidate()
             longPressTimer = nil
-            for track in tracks.values { removePopup(track) }
-            tracks.removeAll()
-            accentPicker?.removeFromSuperview()
-            accentPicker = nil
             if trackpadTouch != nil { setTrackpad(false) }
+            for track in tracks.values {
+                removePopup(track)
+                // ⌫, space or ⏎ held as the keyboard went away: not drawn pressed when it comes back.
+                setPressed(track.key, false)
+            }
+            tracks.removeAll()
+            closeAccents()
+            trackpadTouch = nil
         } else {
             haptics.prepare()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.prepareHidden() }

@@ -24,6 +24,9 @@ struct TranslateView: View {
     @State private var setup = SetupStatus.current
     @State private var recent: [HistoryItem] = []
     @State private var selected: HistoryItem?
+    /// The partner's language, for "Tự động": worked out in `refresh`, not in `body`, which runs
+    /// again on every key typed here (language detection on each key made typing lag).
+    @State private var partnerLanguage: Language?
 
     init(showSettings: @escaping () -> Void, showHistory: @escaping () -> Void) {
         self.showSettings = showSettings
@@ -68,6 +71,11 @@ struct TranslateView: View {
     private func refresh() {
         setup = .current
         recent = Array(SharedStore.history().prefix(3))
+        partnerLanguage = Self.partnerLanguage()
+    }
+
+    private static func partnerLanguage() -> Language {
+        LanguageDetector.partnerLanguage(in: SharedStore.context()) ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
     }
 
     // MARK: Direction
@@ -134,8 +142,7 @@ struct TranslateView: View {
     /// "Tự động" answers in the partner's language, as on the keyboard.
     private var resolvedTarget: Language {
         if targetCode == Language.autoCode {
-            return LanguageDetector.partnerLanguage(in: SharedStore.context())
-                ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
+            return partnerLanguage ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
         }
         return Language.named(targetCode) ?? Language.all[0]
     }
@@ -338,6 +345,7 @@ struct TranslateView: View {
         }
         editing = false
         let outgoing = direction == .outgoing
+        if outgoing, targetCode == Language.autoCode { partnerLanguage = Self.partnerLanguage() }
         let target = outgoing ? resolvedTarget : Language.vietnamese
         let sourceLanguage = outgoing ? nil : LanguageDetector.language(of: source)
         let context = SharedStore.context()
