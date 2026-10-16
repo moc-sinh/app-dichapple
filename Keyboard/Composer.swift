@@ -75,8 +75,14 @@ struct Composer {
     mutating func letter(_ c: Character, now: Double) -> [Edit] {
         lastSpaceAt = -10
         follow()
-        if literal { return record([.insert(String(c))], now: now) }
-        return apply(engine.feed(c), typed: String(c), now: now)
+        if literal { return typeAsIs(c, now: now) }
+        _ = engine.feed(c)
+        // Longer than any word the engine holds (32 keys): the rest goes on as typed.
+        if engine.isOverflowed {
+            literal = true
+            return typeAsIs(c, now: now)
+        }
+        return show(liveWord(), now: now)
     }
 
     /// Digits, punctuation, or a letter from the accent picker, typed as is. Anything but a letter
@@ -118,15 +124,16 @@ struct Composer {
     mutating func deleteBackward(now: Double) -> [Edit] {
         lastSpaceAt = -10
         if !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown {
-            switch engine.backspace() {
-            case .passthrough:
-                // A word too long for the engine: the letter simply goes.
-                let edits = record([.delete(1)], now: now)
-                shown = Self.trailingWord(text.before ?? "")
-                return edits
-            case let action:
-                return apply(action, typed: "", now: now)
+            if shown == engine.composed {
+                _ = engine.backspace()
+                return show(liveWord(), now: now)
             }
+            // The word shows as typed ("good", not the engine's "gôd"): its last letter goes, and the
+            // rest stays as typed.
+            literal = true
+            let edits = record([.delete(1)], now: now)
+            shown = Self.trailingWord(text.before ?? "")
+            return edits
         }
         let canReopen = engine.canReopenLastCommit && !(text.before?.last?.isLetter ?? true)
         let edits = record([.delete(1)], now: now)
@@ -180,24 +187,101 @@ struct Composer {
             engine.reset()
             return []
         }
-        return apply(engine.commitBoundary(autoRestore: true), typed: "", now: now)
+        // What the engine commits, from what is on screen (the engine's own edit assumes its
+        // composed word is there, and it may show as typed already: `liveWord`).
+        let final = engine.peekCommitText(autoRestore: true)
+        _ = engine.commitBoundary(autoRestore: true)
+        return show(final, now: now)
     }
 
-    /// The engine's answer as edits; a letter it lets through is typed as is.
-    private mutating func apply(_ action: TelexAction, typed: String, now: Double) -> [Edit] {
-        var edits: [Edit] = []
-        switch action {
-        case .replace(let backspaces, let insert):
-            if backspaces > 0 { edits.append(.delete(backspaces)) }
-            if !insert.isEmpty { edits.append(.insert(insert)) }
-        case .passthrough:
-            if !typed.isEmpty { edits.append(.insert(typed)) }
-        case .none:
-            break
+    /// The word as it shows while typed: what the engine composed, unless that can no longer be
+    /// Vietnamese ("gôd", "ưe"); then what the word would be if it ended now ("good", "we"). The
+    /// engine alone keeps such marks until the word ends, and a message sent right after it went
+    /// out with them.
+    private func liveWord() -> String {
+        let composed = engine.composed
+        if Self.couldBeVietnamese(composed) { return composed }
+        return engine.peekCommitText(autoRestore: true)
+    }
+
+    /// Whether more keys could still make `word` a Vietnamese syllable: a known onset, then the
+    /// start of a known rime with the marks it has. A plain a, e, o, u or d may still get its mark
+    /// ("đuo" + w is "đươ"); a marked letter must be right where it is: "ưe" fits no rime. The
+    /// engine's own check is looser (it reads every marked letter as any of its marks) and let
+    /// "we" show as "ưe".
+    static func couldBeVietnamese(_ word: String) -> Bool {
+        var letters = ""
+        for c in word.lowercased() {
+            if let scalar = c.unicodeScalars.first, c.unicodeScalars.count == 1,
+               let (base, _) = Tables.detoneTable[scalar.value], let plain = Unicode.Scalar(base) {
+                letters.append(Character(plain))
+            } else {
+                letters.append(c)
+            }
         }
-        let recorded = record(edits, now: now)
+        for onset in onsetStarts.keys where letters.hasPrefix(onset) {
+            let rest = String(letters.dropFirst(onset.count))
+            // Still typing the onset ("q" of "qu", "ng" of "ngh"), or a rime begun after a whole one.
+            if rest.isEmpty || (onsetStarts[onset] == true && rimeStarts.contains(rest)) { return true }
+        }
+        return false
+    }
+
+    /// Every beginning of a standard onset; true when it is a whole onset.
+    private static let onsetStarts: [String: Bool] = {
+        var starts: [String: Bool] = [:]
+        for onset in SyllableValidator.onsets.subtracting(SyllableValidator.teencodeOnsets) {
+            var s = ""
+            for c in onset {
+                s.append(c)
+                if starts[s] == nil { starts[s] = false }
+            }
+            starts[onset] = true
+        }
+        // A plain d may still become đ.
+        starts["d"] = true
+        return starts
+    }()
+
+    /// Every beginning of a standard rime, also with any of its marks still missing (they come
+    /// with later keys): "iê", "ie", "ươ", "uơ", "uo"…
+    private static let rimeStarts: Set<String> = {
+        let plain: [Character: Character] = ["ă": "a", "â": "a", "ê": "e", "ô": "o", "ơ": "o", "ư": "u"]
+        var starts: Set<String> = []
+        for rime in SyllableValidator.rimes.subtracting(SyllableValidator.teencodeRimes) {
+            var variants: [String] = [""]
+            for c in rime {
+                variants = variants.flatMap { v -> [String] in
+                    plain[c].map { [v + String(c), v + String($0)] } ?? [v + String(c)]
+                }
+                starts.formUnion(variants)
+            }
+        }
+        return starts
+    }()
+
+    /// Puts `word` on screen in place of the word shown: only the part that changed.
+    private mutating func show(_ word: String, now: Double) -> [Edit] {
+        let edits = record(Self.diff(shown, word), now: now)
+        shown = word
+        return edits
+    }
+
+    private mutating func typeAsIs(_ c: Character, now: Double) -> [Edit] {
+        let edits = record([.insert(String(c))], now: now)
         shown = Self.trailingWord(text.before ?? "")
-        return recorded
+        return edits
+    }
+
+    /// Only the part of the word that changed, so the field never flickers.
+    static func diff(_ old: String, _ new: String) -> [Edit] {
+        let a = Array(old), b = Array(new)
+        var same = 0
+        while same < a.count, same < b.count, a[same] == b[same] { same += 1 }
+        var edits: [Edit] = []
+        if same < a.count { edits.append(.delete(a.count - same)) }
+        if same < b.count { edits.append(.insert(String(b[same...]))) }
+        return edits
     }
 
     private mutating func record(_ edits: [Edit], now: Double) -> [Edit] {

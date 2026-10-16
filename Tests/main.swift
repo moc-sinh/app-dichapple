@@ -76,6 +76,31 @@ for w in words {
     }
 }
 
+// What a message holds if it is sent right after its last word, with no space: an English word
+// shows as typed while it is typed, not with the marks the engine gave it on the way ("gôd").
+let live: [(String, String)] = [
+    ("good", "good"), ("we", "we"), ("meeting", "meeting"), ("WeChat", "WeChat"), ("add", "add"),
+    ("hello", "hello"), ("price", "price"), ("ok", "ok"), ("thanks", "thanks"), ("Deffault", "Default"),
+    ("vieejt", "việt"), ("nguwowif", "người"), ("dduocwj", "được"), ("ddc", "đc"), ("w", "ư"),
+]
+for (keys, want) in live {
+    var composer = Composer()
+    composer.start(before: "", after: "", now: 0)
+    var text: [Character] = []
+    for key in keys {
+        for edit in composer.letter(key, now: 0) {
+            switch edit {
+            case .delete(let count): text.removeLast(count)
+            case .insert(let s): text.append(contentsOf: s)
+            }
+        }
+    }
+    if String(text) != want {
+        failed += 1
+        print("FAIL while typing \(keys) -> \(String(text)), want \(want)")
+    }
+}
+
 // Keys, accents picked from the row and ⌫ in a row, into a field that starts with `before`.
 func sequence(_ before: String, _ steps: [String]) -> String {
     var composer = Composer()
@@ -109,6 +134,8 @@ let sequences: [(before: String, steps: [String], want: String)] = [
     ("", ["c", "+á", "n"], "cán"),
     // A word the engine cannot take up goes on as typed.
     ("google", ["s"], "googles"),
+    // ⌫ in an English word shown as typed takes its last letter as typed.
+    ("", ["g", "o", "o", "d", "⌫", "s"], "goos"),
     // Inside a word ⌫ takes the last letter shown and the word keeps composing.
     ("", ["k", "h", "o", "o", "⌫", "o", "o", "n", "g"], "không"),
 ]
@@ -370,7 +397,7 @@ if perKey > 100 {
     print("FAIL typing is too slow: \(perKey) µs per key")
 }
 
-let total = cases.count + words.count + sequences.count + fastChecks
+let total = cases.count + words.count + live.count + sequences.count + fastChecks
 print(failed == 0 ? "Telex: \(total) checks passed" : "Telex: \(failed) of \(total) failed")
 fflush(stdout)
 if failed > 0 { exit(1) }
