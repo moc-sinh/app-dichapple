@@ -33,6 +33,7 @@ enum SharedStore {
         static let keyboardStageAt = "keyboardStageAt"
         static let contextClearedAt = "contextClearedAt"
         static let typingLog = "typingLog"
+        static let typesOnTouchDown = "typesOnTouchDown"
     }
 
     // MARK: Settings
@@ -73,6 +74,9 @@ enum SharedStore {
     /// "Allow" for MSTrans, or iOS asks every time.
     static var instantIncoming: Bool { defaults.bool(forKey: Key.instantIncoming) }
     static var haptics: Bool { defaults.object(forKey: Key.haptics) as? Bool ?? true }
+    /// Keys type as the finger lands (see `KeyboardLayoutView.typesOnTouchDown`); off, as the
+    /// finger lifts, like the Apple keyboard.
+    static var typesOnTouchDown: Bool { defaults.object(forKey: Key.typesOnTouchDown) as? Bool ?? true }
 
     // MARK: State
 

@@ -72,6 +72,8 @@ targets:
         CFBundleDisplayName: MSTrans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # 120 Hz iPhones may show a key's pop-up on the next 120 Hz frame instead of a 60 Hz one.
+        CADisableMinimumFrameDurationOnPhone: true
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController

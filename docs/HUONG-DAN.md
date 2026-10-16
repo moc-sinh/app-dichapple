@@ -85,10 +85,13 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên. Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`.
 - Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.
 - Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
+- Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
 
 ## Khi gõ bị sai hay mất chữ
 
 Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
+
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), bàn phím xử lý lâu (⏱), tiếng click và rung lâu, và app chat hiện chữ chậm (⌛ app hiện chữ chậm nhất sau … ms). Nhờ vậy biết chậm do bàn phím hay do app đang chat.
 
 ## 6. Mỗi 7 ngày
 

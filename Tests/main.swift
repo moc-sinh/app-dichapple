@@ -234,6 +234,51 @@ do {
     }
 }
 
+// Keys type as the finger lands; holding one takes it back: an accent chosen instead, or the
+// space bar turned trackpad. Everything must then be as if the key had never been typed: the
+// field, and the typing that goes on from it.
+do {
+    func type(_ keys: String, into field: inout LaggingField, composer: inout Composer, now: inout Double) {
+        for key in keys {
+            field.apply(key == " " ? composer.space(now: now) : composer.letter(key, now: now))
+            now += 0.1
+        }
+    }
+    func result(_ keys: String, held: Character?, accent: String?, then more: String) -> String {
+        var field = LaggingField()
+        var composer = Composer()
+        composer.start(before: "", after: "", now: 0)
+        var now = 0.0
+        type(keys, into: &field, composer: &composer, now: &now)
+        if let held {
+            let saved = composer
+            let edits = held == " " ? composer.space(now: now) : composer.letter(held, now: now)
+            field.apply(edits)
+            guard let undo = Composer.inverse(of: edits, before: saved.before) else { return "no undo" }
+            field.apply(undo)
+            composer = saved
+        }
+        if let accent { field.apply(composer.insert(accent, now: now)) }
+        now += 0.5
+        type(more, into: &field, composer: &composer, now: &now)
+        return field.text
+    }
+    let cases: [(keys: String, held: Character, accent: String?, more: String)] = [
+        ("c", "a", "á", "n"), ("ca", "a", "à", "s"), ("d", "d", "đ", "i"), ("Vieej", "e", "ê", "t"),
+        ("ok ", " ", nil, "ok"), ("ok", " ", nil, "s"), ("nguwowi", "f", nil, "s"), ("ww", "w", nil, "w"),
+        ("chuaw", "w", nil, " ok"), ("ass", "s", nil, "ss"), ("aa", "a", "ă", "n"),
+    ]
+    for c in cases {
+        fastChecks += 1
+        let got = result(c.keys, held: c.held, accent: c.accent, then: c.more)
+        let want = result(c.keys, held: nil, accent: c.accent, then: c.more)
+        if got != want {
+            failed += 1
+            print("FAIL holding \(c.held) after \(c.keys): \(got), want \(want)")
+        }
+    }
+}
+
 // Speed: keys through the engine and the composer as the keyboard sends them, one at a time.
 let sample = ["nguwowif", "dduwowcj", "tieesng", "vieetj", "khoong", "aaaaaaaaaaaaaaaaaaaa",
               "hahahahahahahahahahahahahahahahahahahaha", "facebook", "guwir", "baos", "gias", "chuaw", "ngwoif"]

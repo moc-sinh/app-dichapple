@@ -58,6 +58,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var lastKeyAt: CFTimeInterval = 0
     /// A look at the field is due once typing pauses (`checkField`).
     private var checkPending = false
+    /// The key typed last and the typing as it was before it, so holding that key can take it
+    /// back (`KeyAction.undoLast`).
+    private var lastTyped: (composer: Composer, edits: [Composer.Edit])?
+    /// When the latest edit went to the app, until the app reports it; the slowest per burst of
+    /// typing goes to the typing log, to tell a slow app from a slow keyboard.
+    private var editSentAt: CFTimeInterval = 0
+    private var slowestApp: CFTimeInterval = 0
     /// A pause this long means the keys typed so far have reached the app.
     private static let settle: CFTimeInterval = 0.5
     private var benchmark: TypingBenchmark?
@@ -150,6 +157,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         if hasFullAccess { SharedStore.keyboardHasFullAccess = true }
         targetCode = SharedStore.targetCode
         keyboard.hapticsEnabled = hasFullAccess && SharedStore.haptics
+        keyboard.typesOnTouchDown = SharedStore.typesOnTouchDown
         keyboard.showsGlobe = needsInputModeSwitchKey
         readField()
         TypingLog.add("▶ mở: \(TypingLog.tail(composer.before ?? ""))|\(TypingLog.head(textDocumentProxy.documentContextAfterInput ?? ""))")
@@ -246,16 +254,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             reconcile(now: now)
         }
         lastKeyAt = now
+        let previous = composer
+        var typed = false
         let edits: [Composer.Edit]
         switch action {
         case .letter(let c):
             edits = composer.letter(c, now: now)
+            typed = true
         case .text(let s):
             edits = composer.insert(s, now: now)
+            typed = true
         case .delete(let word):
             edits = word ? composer.deleteWord(now: now) : composer.deleteBackward(now: now)
         case .space:
             edits = composer.space(now: now)
+            typed = true
             keyboard.showLetters()
         case .newline:
             edits = composer.newline(now: now)
@@ -263,9 +276,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
             composer.forget()
             edits = []
+        case .undoLast:
+            if let last = lastTyped, let undo = Composer.inverse(of: last.edits, before: last.composer.before) {
+                edits = undo
+                composer = last.composer
+            } else {
+                edits = []
+            }
         }
+        lastTyped = typed ? (composer: previous, edits: edits) : nil
         apply(edits)
-        TypingLog.add("\(Self.describe(action)) → \(edits.map(Self.describeEdit).joined()) | \(TypingLog.tail(composer.before ?? "?"))")
+        if !edits.isEmpty { editSentAt = now }
+        let took = CACurrentMediaTime() - now
+        TypingLog.add("\(Self.describe(action)) → \(edits.map(Self.describeEdit).joined()) | \(TypingLog.tail(composer.before ?? "?"))"
+                      + (took > 0.002 ? " ⏱\(Int(took * 1000))ms" : ""))
         scheduleCheck()
         edited()
     }
@@ -278,6 +302,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         case .space: return "␣"
         case .newline: return "⏎"
         case .moveCursor(let offset): return "↔\(offset)"
+        case .undoLast: return "↶"
         }
     }
 
@@ -327,7 +352,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let before = proxy.documentContextBeforeInput ?? "", after = proxy.documentContextAfterInput ?? ""
         let now = CACurrentMediaTime()
         TypingLog.add("ô \(TypingLog.tail(before))|\(TypingLog.head(after))")
-        guard composer.before != nil else { return updateAutoCapitalization() }
+        guard let mine = composer.before else { return updateAutoCapitalization() }
+        if editSentAt > 0, (before.isEmpty ? mine.isEmpty : mine.hasSuffix(before)) {
+            slowestApp = max(slowestApp, now - editSentAt)
+            editSentAt = 0
+        }
         if now - lastKeyAt < Self.settle, !(before.isEmpty && after.isEmpty && !proxy.hasText) {
             return scheduleCheck()
         }
@@ -346,6 +375,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         if before.isEmpty, after.isEmpty, textDocumentProxy.hasText { return }
         guard composer.fieldChanged(before: before, after: after, now: now) else { return }
         TypingLog.add("↺ theo ô: \(TypingLog.tail(before))")
+        lastTyped = nil
         updateAutoCapitalization()
     }
 
@@ -370,6 +400,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             checkPending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + (caughtUp - idle)) { [weak self] in self?.checkField() }
         } else {
+            if slowestApp > 0 {
+                TypingLog.add("⌛ app hiện chữ chậm nhất sau \(Int(slowestApp * 1000))ms")
+                slowestApp = 0
+            }
             TypingLog.save()
         }
     }

@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
     @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = false
     @AppStorage(SharedStore.Key.haptics, store: SharedStore.defaults) private var haptics = true
+    @AppStorage(SharedStore.Key.typesOnTouchDown, store: SharedStore.defaults) private var typesOnTouchDown = true
     @AppStorage(SharedStore.keepHistoryKey, store: SharedStore.defaults) private var keepHistory = true
     @Environment(\.scenePhase) private var scenePhase
     @State private var setup = SetupStatus.current
@@ -173,10 +174,11 @@ struct SettingsView: View {
     private var keyboardSection: some View {
         Section {
             Toggle("Rung khi gõ", isOn: $haptics)
+            Toggle("Ra chữ ngay khi chạm phím", isOn: $typesOnTouchDown)
         } header: {
             Text("Bàn phím")
         } footer: {
-            Text("Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
+            Text("Ra chữ ngay khi chạm: chữ vào ô nhập lúc ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Tắt để giống bàn phím Apple (chữ vào khi nhấc tay, trượt sang phím khác trước khi nhấc để đổi chữ). Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
         }
     }
 

@@ -38,6 +38,6 @@ enum TypingLog {
     }
 
     private static func visible(_ text: String) -> String {
-        text.replacingOccurrences(of: "\n", with: "⏎")
+        text.contains("\n") ? text.replacingOccurrences(of: "\n", with: "⏎") : text
     }
 }

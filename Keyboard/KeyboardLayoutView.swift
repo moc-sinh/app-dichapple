@@ -10,6 +10,9 @@ enum KeyAction {
     case space
     case newline
     case moveCursor(Int)
+    /// Takes back the key typed last: holding it chose an accent instead, or turned the space bar
+    /// into a trackpad.
+    case undoLast
 }
 
 protocol KeyboardLayoutViewDelegate: AnyObject {
@@ -47,6 +50,10 @@ final class KeyboardLayoutView: UIView {
     private final class Track {
         var key: Key
         var committed = false
+        /// Typed the moment the finger landed (see `typesOnTouchDown`); a long press takes it back.
+        var typedOnDown = false
+        /// Typed as a capital: its accents are offered as capitals too.
+        var upper = false
         var popup: KeyPopup?
         var anchorX: CGFloat = 0
         let start: CGPoint
@@ -63,6 +70,11 @@ final class KeyboardLayoutView: UIView {
 
     weak var delegate: KeyboardLayoutViewDelegate?
     var hapticsEnabled = true
+    /// Letters, digits, symbols and the space bar type as the finger lands, not as it lifts: the
+    /// text is in the app a whole press sooner (60–100 ms when typing fast). Holding a vowel still
+    /// offers its accents, and holding the space bar still moves the cursor: the key typed is
+    /// taken back. Return still waits for the lift, so a message is never sent by a graze.
+    var typesOnTouchDown = true
     var showsGlobe = false {
         didSet { if showsGlobe != oldValue { rebuild() } }
     }
@@ -428,11 +440,14 @@ final class KeyboardLayoutView: UIView {
     private func playFeedback() {
         guard feedbackPending else { return }
         feedbackPending = false
+        let started = CACurrentMediaTime()
         UIDevice.current.playInputClick()
         if hapticsEnabled {
             haptics.impactOccurred(intensity: 0.5)
             haptics.prepare()
         }
+        let took = CACurrentMediaTime() - started
+        if took > 0.004 { TypingLog.add("⏱ tiếng click và rung mất \(Int(took * 1000))ms") }
     }
 
     // MARK: Touches
@@ -455,15 +470,22 @@ final class KeyboardLayoutView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        lastTouchAt = CACurrentMediaTime()
-        for touch in touches {
+        let now = CACurrentMediaTime()
+        lastTouchAt = now
+        // Two fingers landing in the same instant: the earlier one types first.
+        for touch in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
             let point = touch.location(in: self)
             guard let key = hitKey(at: point) else { continue }
+            // How long the touch took to get here: iOS holding it back, or the keyboard busy.
+            let late = now - touch.timestamp
+            if late > 0.03 { TypingLog.add("⌛ \(key.character ?? "phím") đến trễ \(Int(late * 1000))ms") }
             if point.y < 0 { TypingLog.add("↑ \(key.character ?? "?") (chạm cao)") }
-            // Typing with two thumbs: an earlier letter is committed as soon as the next key goes down.
-            for (other, track) in tracks where other !== touch && other !== accentTouch && !track.committed && track.key.character != nil {
+            // Typing with two thumbs: an earlier letter is typed by the time the next key goes down,
+            // and a key still held no longer opens its accents or the trackpad (another key was
+            // typed after it, so it can't be taken back).
+            for (other, track) in tracks where other !== touch && other !== accentTouch {
                 cancelLongPress(other)
-                commit(track)
+                if !track.committed && track.key.character != nil { commit(track) }
             }
             let track = Track(key: key, start: point)
             tracks[touch] = track
@@ -476,6 +498,10 @@ final class KeyboardLayoutView: UIView {
         switch key.kind {
         case .char(let s):
             showPopup(track)
+            if typesOnTouchDown {
+                track.typedOnDown = true
+                type(track)
+            }
             feedback()
             if let touch, Self.accents[s.lowercased()] != nil { scheduleLongPress(touch, after: 0.4) }
         case .shift:
@@ -503,6 +529,11 @@ final class KeyboardLayoutView: UIView {
         case .space:
             feedback()
             setPressed(key, true)
+            if typesOnTouchDown {
+                track.committed = true
+                track.typedOnDown = true
+                delegate?.keyboardLayoutView(self, perform: .space)
+            }
             if let touch {
                 track.anchorX = touch.location(in: self).x
                 scheduleLongPress(touch, after: 0.35)
@@ -580,9 +611,15 @@ final class KeyboardLayoutView: UIView {
         }
         if touch === accentTouch {
             accentTouch = nil
-            if !cancelled, let text = accentPicker?.selectedText {
-                delegate?.keyboardLayoutView(self, perform: .text(text))
-                consumeOnceShift()
+            if !cancelled, let picker = accentPicker, let text = picker.selectedText {
+                if !track.typedOnDown {
+                    delegate?.keyboardLayoutView(self, perform: .text(text))
+                    consumeOnceShift()
+                } else if picker.selected != 0 {
+                    // The plain letter went in as the finger landed: the accented one replaces it.
+                    delegate?.keyboardLayoutView(self, perform: .undoLast)
+                    delegate?.keyboardLayoutView(self, perform: .text(text))
+                }
             }
             accentPicker?.removeFromSuperview()
             accentPicker = nil
@@ -601,7 +638,7 @@ final class KeyboardLayoutView: UIView {
             setPressed(track.key, false)
         case .space:
             setPressed(track.key, false)
-            if !cancelled { delegate?.keyboardLayoutView(self, perform: .space) }
+            if !cancelled && !track.committed { delegate?.keyboardLayoutView(self, perform: .space) }
         case .ret:
             setPressed(track.key, false)
             if !cancelled && returnEnabled { delegate?.keyboardLayoutView(self, perform: .newline) }
@@ -614,10 +651,16 @@ final class KeyboardLayoutView: UIView {
     }
 
     private func commit(_ track: Track) {
-        track.committed = true
         removePopup(track)
+        type(track)
+    }
+
+    /// Types the key's character; its pop-up stays up while the finger does.
+    private func type(_ track: Track) {
+        track.committed = true
         guard let s = track.key.character else { return }
-        let text = shift != .off && page == .letters ? s.uppercased() : s
+        track.upper = shift != .off && page == .letters
+        let text = track.upper ? s.uppercased() : s
         if page == .letters, let c = text.first {
             delegate?.keyboardLayoutView(self, perform: .letter(c))
         } else {
@@ -674,12 +717,13 @@ final class KeyboardLayoutView: UIView {
 
     @objc private func longPressFired() {
         longPressTimer = nil
-        guard let touch = longPressTouch, let track = tracks[touch], !track.committed else { return }
+        guard let touch = longPressTouch, let track = tracks[touch], !track.committed || track.typedOnDown else { return }
         longPressTouch = nil
         switch track.key.kind {
         case .char(let s):
             guard let options = Self.accents[s.lowercased()] else { return }
-            let shown = shift != .off && page == .letters ? options.map { $0.uppercased() } : options
+            let upper = track.typedOnDown ? track.upper : shift != .off && page == .letters
+            let shown = upper ? options.map { $0.uppercased() } : options
             removePopup(track)
             let picker = AccentPicker(options: shown, keyFrame: track.key.cap.frame, width: bounds.width)
             overlay.addSubview(picker)
@@ -688,6 +732,8 @@ final class KeyboardLayoutView: UIView {
             accentTouch = touch
             if hapticsEnabled { haptics.impactOccurred(intensity: 0.7) }
         case .space:
+            // The space typed as the finger landed goes: holding the bar moves the cursor instead.
+            if track.typedOnDown { delegate?.keyboardLayoutView(self, perform: .undoLast) }
             trackpadTouch = touch
             track.anchorX = touch.location(in: self).x
             setTrackpad(true)

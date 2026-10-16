@@ -107,6 +107,25 @@ struct Composer {
         return edits
     }
 
+    /// The edits that take a key back, given the text before the cursor as it was before the key:
+    /// what it inserted goes, what it deleted comes back. Nil when what it deleted is not known.
+    static func inverse(of edits: [Edit], before: String?) -> [Edit]? {
+        var deleted = 0, inserted = 0
+        for edit in edits {
+            switch edit {
+            case .delete(let count): deleted += count
+            case .insert(let s): inserted += s.count
+            }
+        }
+        // A key's edits delete first, then insert.
+        var undo: [Edit] = inserted > 0 ? [.delete(inserted)] : []
+        if deleted > 0 {
+            guard let gone = before?.suffix(deleted), gone.count == deleted else { return nil }
+            undo.append(.insert(String(gone)))
+        }
+        return undo
+    }
+
     /// Only the part of the word that changed, so the field never flickers.
     static func diff(_ old: String, _ new: String) -> [Edit] {
         let a = Array(old), b = Array(new)
