@@ -18,9 +18,7 @@ final class TypingBenchmark: NSObject {
         ("người×6", " nguwowif nguwowif nguwowif nguwowif nguwowif nguwowif"),
         ("hahaha", " hahahahahahahahahahahahahahahahahahahaha"),
     ]
-    /// The text field before delete is held (ci/typing-benchmark.py checks it).
-    static let expected = "Chào anh bên em đã gửi báo giá rồi nhé. Anh xem giúp em với ạ aaaaaaaaaaaaaaaaaaaa "
-        + "người người người người người người hahahahahahahahahahahahahahahahahahahaha"
+    // ci/typing-benchmark.py checks the field held the expected text before delete was held.
     private static let deleteKey: Character = "\u{8}"
     private static let deleteHold: TimeInterval = 2
 
