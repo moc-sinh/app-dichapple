@@ -25,7 +25,8 @@ final class TypingBenchmark: NSObject {
     private let keyboard: KeyboardLayoutView
     private let finished: (String) -> Void
     private var queue: [(part: String, key: Character)] = []
-    private var busy: [String: [Double]] = [:]
+    private var busy: [String: [(ms: Double, what: String)]] = [:]
+    private var pressed = 0
     private var order: [String] = []
     private var frames: [CFTimeInterval] = []
     private var link: CADisplayLink?
@@ -56,11 +57,13 @@ final class TypingBenchmark: NSObject {
     private func step() {
         guard !queue.isEmpty else { return holdDelete() }
         let (part, character) = queue.removeFirst()
-        mark(part)
+        pressed += 1
+        let name = "#\(pressed) '\(character == " " ? "␣" : String(character))'"
+        mark(part, "\(name) down")
         let token = keyboard.benchmarkPress(character)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [self] in
             if let token {
-                mark(part)
+                mark(part, "\(name) up")
                 keyboard.benchmarkRelease(token)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [self] in step() }
@@ -70,8 +73,12 @@ final class TypingBenchmark: NSObject {
     /// Holding delete: letters first, then whole words, each repeat measured.
     private func holdDelete() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-            keyboard.onRepeat = { [weak self] in self?.mark("xóa giữ") }
-            mark("xóa giữ")
+            var repeats = 0
+            keyboard.onRepeat = { [weak self] in
+                repeats += 1
+                self?.mark("xóa giữ", "repeat \(repeats)")
+            }
+            mark("xóa giữ", "down")
             let token = keyboard.benchmarkPress(Self.deleteKey)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.deleteHold) { [self] in
                 if let token { keyboard.benchmarkRelease(token) }
@@ -83,10 +90,10 @@ final class TypingBenchmark: NSObject {
 
     /// Starts timing an event: main-thread time from now until the run loop is about to sleep,
     /// which is after Core Animation has laid out and committed whatever the event changed.
-    private func mark(_ part: String) {
+    private func mark(_ part: String, _ what: String) {
         let start = CACurrentMediaTime()
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, 3_000_000) { [weak self] observer, _ in
-            self?.busy[part, default: []].append((CACurrentMediaTime() - start) * 1000)
+            self?.busy[part, default: []].append(((CACurrentMediaTime() - start) * 1000, what))
             CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
@@ -100,11 +107,13 @@ final class TypingBenchmark: NSObject {
         link?.invalidate()
         link = nil
         let parts = order.map { name -> String in
-            let sorted = (busy[name] ?? []).sorted()
-            guard !sorted.isEmpty else { return "\(name): none" }
+            let events = busy[name] ?? []
+            let sorted = events.map(\.ms).sorted()
+            guard let slowest = events.max(by: { $0.ms < $1.ms }) else { return "\(name): none" }
             let average = sorted.reduce(0, +) / Double(sorted.count)
             let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
-            return String(format: "%@: %d events avg=%.2fms p95=%.2fms max=%.2fms", name, sorted.count, average, p95, sorted.last ?? 0)
+            return String(format: "%@: %d events avg=%.2fms p95=%.2fms max=%.2fms (%@)",
+                          name, sorted.count, average, p95, slowest.ms, slowest.what)
         }
         let intervals = zip(frames.dropFirst(), frames).map { ($0 - $1) * 1000 }
         let typical = intervals.isEmpty ? 0 : intervals.sorted()[intervals.count / 2]

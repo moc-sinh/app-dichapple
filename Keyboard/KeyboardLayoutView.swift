@@ -119,6 +119,13 @@ final class KeyboardLayoutView: UIView {
         overlay.isUserInteractionEnabled = false
         overlay.clipsToBounds = false
         addSubview(overlay)
+        // Two thumbs: two pop-ups can show at once. Made now, not on the first key press.
+        for _ in 0..<2 {
+            let popup = KeyPopup()
+            popup.isHidden = true
+            overlay.addSubview(popup)
+            sparePopups.append(popup)
+        }
         rebuild()
     }
 

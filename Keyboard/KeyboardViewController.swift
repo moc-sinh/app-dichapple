@@ -87,8 +87,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func viewDidLoad() {
         super.viewDidLoad()
         SharedStore.noteKeyboard("2 tạo giao diện")
-        // The first language check loads a model; do it now, off the main thread, not on a key press.
-        DispatchQueue.global(qos: .utility).async { _ = LanguageDetector.isVietnamese("Xin chào") }
+        // The first language check loads a model and the first Telex key builds its tables;
+        // do both now, off the main thread, not on the first key press.
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = Telex.output(for: "nguwowif")
+            _ = LanguageDetector.isVietnamese("Xin chào")
+        }
 
         infoButton.contentHorizontalAlignment = .leading
         infoButton.addAction(UIAction { [weak self] _ in self?.openInfo() }, for: .touchUpInside)
