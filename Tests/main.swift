@@ -21,7 +21,8 @@ let cases: [(String, String)] = [
     ("WeChat", "WeChat"), ("class", "class"), ("access", "access"), ("process", "process"),
     ("staff", "staff"), ("check", "check"), ("file", "file"),
     // One key again and again, long words: still exactly as typed
-    ("aaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaa"), ("hahahahahahahahahahahahahahahahahahahaha", "hahahahahahahahahahahahahahahahahahahaha"),
+    // Twenty a's give nineteen: the third takes the hat off "â" (aa -> â, aaa -> aa), as in Unikey.
+    ("aaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaa"), ("hahahahahahahahahahahahahahahahahahahaha", "hahahahahahahahahahahahahahahahahahahaha"),
     ("kkkkkkkkkkkkkkkk", "kkkkkkkkkkkkkkkk"), ("ddddddd", "ddddddd"), ("facebookfacebookfacebook", "facebookfacebookfacebook"),
     ("nghieengs", "nghiếng"), ("khuyeenr", "khuyển"),
 ]
@@ -67,4 +68,5 @@ if perKey > 100 {
 
 let total = cases.count + words.count
 print(failed == 0 ? "Telex: \(total) checks passed" : "Telex: \(failed) of \(total) failed")
+fflush(stdout)
 if failed > 0 { fatalError("Telex tests failed") }
