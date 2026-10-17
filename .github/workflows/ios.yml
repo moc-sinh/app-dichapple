@@ -52,9 +52,14 @@ jobs:
       - name: Build for iPhone (unsigned)
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild -project MSTrans.xcodeproj -scheme MSTrans -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO build | tail -40
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee build/xcodebuild.log | tail -40
+          # The compiler's warnings for the app's own code, so none goes into a release unseen.
+          echo "Warnings:"
+          grep -E ": warning: " build/xcodebuild.log | grep -E "/(App|Keyboard|Shared)/" | sed "s|$PWD/||" | sort -u | head -80 || true
 
       # A free Apple ID can install this IPA with AltStore or SideStore, which re-sign it. Not Sideloadly or
       # Feather: on iOS 26 their re-signed keyboard lacks the main-binary flag and is killed at launch.
