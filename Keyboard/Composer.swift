@@ -26,6 +26,10 @@ struct Composer {
     /// The letter typed last turned a Vietnamese word into the keys typed ("không" + k shows
     /// "khoongk"): a ⌫ right after it takes that letter back.
     private var turnedAsTyped = false
+    /// Letters after a Vietnamese word that spoilt it, shown after it as typed ("đưng" + d is
+    /// "đưngd"): a stray key, not an English word (`isStrayLetterTypo`). The engine holds them too,
+    /// so the word ends as it always did; ⌫ takes them back one by one and the word goes on.
+    private var stray = 0
     /// The word at the cursor is one the engine cannot take up ("google", "iPhone"): letters
     /// go on it as typed until the word ends.
     private var literal = false
@@ -61,6 +65,7 @@ struct Composer {
         engine.resetContext()
         shown = ""
         literal = false
+        stray = 0
         lastSpaceAt = -10
     }
 
@@ -74,6 +79,7 @@ struct Composer {
             engine.reset()
             shown = ""
             literal = false
+            stray = 0
             lastSpaceAt = -10
             return true
         case .changed:
@@ -100,6 +106,7 @@ struct Composer {
         engine.reset()
         shown = ""
         literal = false
+        stray = 0
         lastSpaceAt = -10
     }
 
@@ -109,6 +116,7 @@ struct Composer {
         engine.reset()
         shown = ""
         literal = false
+        stray = 0
     }
 
     mutating func letter(_ c: Character, now: Double) -> [Edit] {
@@ -119,13 +127,23 @@ struct Composer {
         if engine.isEmpty { seeded = nil }
         if literal { return typeAsIs(c, now: now) }
         let wasVietnamese = vietnameseShown
+        let wasShown = shown
         _ = engine.feed(c)
         // Longer than any word the engine holds (32 keys): the rest goes on as typed.
         if engine.isOverflowed {
             literal = true
             return typeAsIs(c, now: now)
         }
-        let edits = show(liveWord(), now: now)
+        if stray > 0 {
+            stray += 1
+            return show((wasShown + String(c), false), now: now)
+        }
+        var live = liveWord()
+        if wasVietnamese, !live.vietnamese, live.word == engine.rawKeystrokes, Self.isStrayLetterTypo(live.word) {
+            stray = 1
+            live = (wasShown + String(c), false)
+        }
+        let edits = show(live, now: now)
         turnedAsTyped = wasVietnamese && !vietnameseShown && shown == engine.rawKeystrokes
         return edits
     }
@@ -139,6 +157,7 @@ struct Composer {
         let edits = record([.insert(s)], now: now)
         engine.reset()
         literal = false
+        stray = 0
         shown = ""
         return edits
     }
@@ -170,6 +189,25 @@ struct Composer {
         lastSpaceAt = -10
         let turned = turnedAsTyped
         turnedAsTyped = false
+        if stray > 0, Self.trailingWord(text.before ?? "") == shown {
+            // The stray letter goes; with the last one gone the word is Vietnamese again and goes on.
+            let edits = record([.delete(1)], now: now)
+            stray -= 1
+            let keys = engine.rawKeystrokes.dropLast()
+            engine.reset()
+            for key in keys { _ = engine.feed(key) }
+            let word = Self.trailingWord(text.before ?? "")
+            let live = liveWord()
+            if stray == 0, live.word == word {
+                shown = word
+                vietnameseShown = live.vietnamese
+            } else if stray == 0 {
+                take(word)
+            } else {
+                shown = word
+            }
+            return edits
+        }
         if !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown {
             if turned, case let keys = engine.rawKeystrokes, !Self.isKnownEnglish(keys) {
                 // The letter just typed turned the word into its keys ("không" + k showed
@@ -215,6 +253,7 @@ struct Composer {
         lastSpaceAt = -10
         engine.reset()
         literal = false
+        stray = 0
         let edits = record([.delete(max(1, before.count - i))], now: now)
         shown = ""
         return edits
@@ -232,6 +271,7 @@ struct Composer {
     /// go on as typed.
     private mutating func take(_ word: String) {
         engine.reset()
+        stray = 0
         shown = word
         literal = !word.isEmpty && !engine.seed(word)
         seeded = literal || word.isEmpty ? nil : (word, engine.rawKeystrokes)
@@ -251,6 +291,7 @@ struct Composer {
         defer {
             shown = ""
             literal = false
+            stray = 0
         }
         guard !literal, !engine.isEmpty, Self.trailingWord(text.before ?? "") == shown else {
             engine.reset()
@@ -280,6 +321,40 @@ struct Composer {
         if Self.couldBeVietnamese(composed) { return (composed, true) }
         return (ending(), false)
     }
+
+    /// Keys that spell no English word: a Vietnamese word with a stray letter (d next to f, q next
+    /// to w), which stays as it was with the letter after it ("đưngd", one ⌫ from "đưng") rather
+    /// than turning into its keys ("dduwngd", which had to be deleted whole and typed again). Only
+    /// marks Telex alone types say so: đ as dd at the start, the horn as uw, â as aa, a tone's j
+    /// before a consonant; "ee", "oo", "ow" or an s are English too (good, new), and so is any
+    /// beginning of an English word the engine knows ("majo" is "major" on its way).
+    static func isStrayLetterTypo(_ keys: String) -> Bool {
+        let lower = keys.lowercased()
+        guard lower.contains(where: { "aeiouy".contains($0) }), !englishStarts.contains(lower) else { return false }
+        if lower.hasPrefix("dd") || lower.contains("uw") || lower.contains("aa") { return true }
+        var previous: Character = " "
+        for c in lower {
+            if previous == "j", !"aeiouy".contains(c) { return true }
+            previous = c
+        }
+        return false
+    }
+
+    /// Every beginning of an English word the engine knows, so "majo" is still "major" on its way.
+    private static let englishStarts: Set<String> = {
+        var starts: Set<String> = []
+        for list in [EnglishContextWords.words, EnglishCollisions.words, EnglishContextWords.neutralLoanwords,
+                     EnglishContextWords.restoreOnly] {
+            for word in list {
+                var s = ""
+                for c in word {
+                    s.append(c)
+                    starts.insert(s)
+                }
+            }
+        }
+        return starts
+    }()
 
     /// Whether more keys could still make `word` a Vietnamese syllable: a known onset, then the
     /// start of a known rime with the marks it has. A plain a, e, o, u or d may still get its mark

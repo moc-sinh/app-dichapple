@@ -84,6 +84,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Giữ phím xóa: xóa từng chữ, giữ lâu thì xóa cả từ.
 - Bỏ dấu ở đâu trong từ cũng được: `hofang` → hoàng, `tosan` → toán, `dduocwj` → được.
 - Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên; từ lỡ bị thêm dấu lúc gõ (gôgle) tự trở lại như đã gõ khi bạn gõ dấu cách hay dấu câu (google). Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`; ba chữ w liền nhau giữ nguyên (`www`).
+- Gõ lạc phím trong từ tiếng Việt (`đưng` + d thay vì f): chữ lạc hiện ngay sau từ (`đưngd`), bấm ⌫ một lần là từ về như cũ và gõ tiếp bình thường (`đừng`). Chỉ khi bạn gõ dấu cách luôn thì cả từ mới trở lại các phím đã gõ.
 - Xóa dấu cách ngay sau một từ là sửa tiếp được từ đó: `thays` cách ⌫ `a` → thấy.
 - Lỡ gõ thừa một chữ làm từ tiếng Việt hiện thành phím gõ (`khoongk`): bấm ⌫ là từ trở lại `không`. Trong từ tiếng Anh, ⌫ chỉ xóa đúng chữ cuối (`are` ⌫ → `ar`).
 - Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.

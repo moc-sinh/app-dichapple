@@ -84,6 +84,11 @@ let live: [(String, String)] = [
     ("good", "good"), ("we", "we"), ("meeting", "meeting"), ("WeChat", "WeChat"), ("add", "add"),
     ("hello", "hello"), ("price", "price"), ("ok", "ok"), ("thanks", "thanks"), ("Deffault", "Default"),
     ("vieejt", "việt"), ("nguwowif", "người"), ("dduocwj", "được"), ("ddc", "đc"), ("w", "ư"),
+    // A stray letter on a Vietnamese word (d next to f, q next to w) leaves the word as it was with
+    // that letter after it, not the keys ("dduwngd" had to be deleted whole); English words with
+    // the same marks (oo, ee, ow) still show as typed.
+    ("dduwngd", "đưngd"), ("dduq", "đuq"), ("vieetjk", "việtk"), ("new", "new"), ("power", "power"),
+    ("ddddddd", "dddddd"), ("mootjt", "mộtt"),
 ]
 for (keys, want) in live {
     var composer = Composer()
@@ -145,6 +150,13 @@ let sequences: [(before: String, steps: [String], want: String)] = [
     ("", ["k", "h", "o", "o", "n", "g", "k", "⌫", " "], "không "),
     ("", ["t", "i", "e", "e", "n", "g", "s", "p", "⌫", " "], "tiếng "),
     ("", ["n", "g", "u", "w", "o", "w", "i", "f", "k", "⌫", " "], "người "),
+    // The stray letter shows after the word (see `live`): ⌫ takes it, and the word goes on.
+    ("", ["d", "d", "u", "w", "n", "g", "d", "⌫", "f", " "], "đừng "),
+    ("", ["d", "d", "u", "q", "⌫", "w", "n", "g", "s", " "], "đứng "),
+    ("", ["d", "d", "u", "w", "n", "g", "s", "d", "⌫", " "], "đứng "),
+    ("", ["d", "d", "u", "w", "n", "g", "d", "x", "⌫", "⌫", "f", " "], "đừng "),
+    // Ended with the stray letter on it, the word is still put back as typed, as before.
+    ("", ["d", "d", "u", "w", "n", "g", "d", " "], "dduwngd "),
     // ⌫ in an English word takes only its last letter ("are" ⌫ gave "ả", "after" ⌫⌫ "at").
     ("", ["a", "r", "e", "⌫"], "ar"),
     ("", ["a", "f", "t", "e", "r", "⌫", "⌫"], "aft"),

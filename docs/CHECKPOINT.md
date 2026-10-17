@@ -32,6 +32,13 @@
   **Chưa soát kỹ:** `KeyboardLayoutView` phần bố cục/hit-test cũ (đã có Tests/Keys), các màn SwiftUI
   trong `App/`, `TranslateIntent`. API key vẫn nằm trong UserDefaults của App Group (chưa chuyển Keychain).
 
+- **Nhật ký gõ bản 1.5.0 (54) từ iPhone (17/10):** mỗi phím dưới 2 ms, không mất phím, không
+  "bàn phím bận" lúc gõ; mở bàn phím mất 26–48 ms. Vấn đề duy nhất: gõ lạc một phím trong từ Việt
+  ("đưng" + d, "đu" + q) làm cả từ lật thành phím thô ("dduwngd") và phải xóa cả từ. **1.5.1** sửa:
+  chữ lạc hiện sau từ ("đưngd"), ⌫ một lần là về "đưng" (`Composer.stray`, `isStrayLetterTypo`:
+  chỉ khi các phím không thể là tiếng Anh — dd đầu từ, uw, aa, j trước phụ âm; gõ dấu cách thì vẫn
+  về phím thô như trước, nên bộ 9.091 case và các sàn không đổi).
+
 ## Việc tiếp theo (theo thứ tự)
 
 1. Chờ CI của bản 1.5.0, gửi link IPA dạng
