@@ -39,6 +39,29 @@
   chỉ khi các phím không thể là tiếng Anh — dd đầu từ, uw, aa, j trước phụ âm; gõ dấu cách thì vẫn
   về phím thô như trước, nên bộ 9.091 case và các sàn không đổi).
 
+- **Rà soát production 1.6.0 (17/10, tối):** soát lại chữ lạc 1.5.1 (fuzz 200.000 lượt gõ ngẫu nhiên có
+  ⌫/cách/xuống dòng: chữ trong ô luôn khớp bản sao của bàn phím, không crash) và các phần còn lại,
+  mỗi phát hiện đọc lại trong mã trước khi sửa. Đã sửa:
+  1. Ô email/link/tên đăng nhập/mã/số thẻ/số điện thoại (`keyboardType`, `textContentType`) gõ chữ thô,
+     không Telex (`plainTyping`); ô chỉ nhận số mở sẵn trang số. Ô tên-hoặc-số vẫn có Telex.
+  2. Nhật ký gõ: chữ số luôn thành `#`, ô ở mục 1 chỉ ghi `•`; lưu nhật ký theo một hàng đợi (bản cũ
+     không ghi đè bản mới). Chép nhật ký/báo cáo ra bộ nhớ tạm chỉ trên máy này, hết hạn sau 15 phút.
+  3. Dịch: kết quả không thay vào ô khác nếu đã sang ô nhập khác (`documentIdentifier`; khi đó báo
+     "Bấm Dịch lại"); lịch sử lưu trước khi thay ô (bàn phím bị ẩn giữa chừng vẫn còn bản dịch trong app).
+  4. Tin đối tác: chỉ đánh dấu "đã xử lý" khi dịch xong (lỗi mạng thì dòng "chạm để dịch" hiện lại);
+     dòng "Nghĩa" sau khi Dịch không bị bản sao chép cũ đè; Dịch ngay không tự gửi thứ trông như mật
+     khẩu/mã/link/email; tin chép lại không vào ngữ cảnh 2 lần.
+  5. OpenAI: báo đúng lỗi hết tiền (insufficient_quota), khu vực (VPN), model, key sai; model từ chối
+     thì nói rõ; đã yêu cầu JSON mà nhận chữ khác thì báo lỗi, không bao giờ chèn JSON thô vào ô chat.
+  6. Lịch sử: một mục hỏng không làm mất cả danh sách. Bàn phím theo `.light` của app như bàn phím Apple.
+  7. App: sửa chữ sau khi dịch thì bỏ kết quả cũ (không chép nhầm bản dịch của câu trước), đổi chiều
+     hủy yêu cầu đang chạy; "Kiểm tra kết nối" không hiện kết quả của key cũ; Phím tắt tự dừng sau
+     25 giây kèm lời báo (iOS cắt ở ~30 giây), và chạy lại trên bản dịch vừa chép thì không coi đó là
+     tin đối tác.
+  **Còn lại, cố ý chưa làm:** API key vẫn ở UserDefaults App Group (Keychain dùng chung cần
+  keychain-access-groups, dễ hỏng khi AltStore ký lại); timer kiểm tra clipboard dùng target (đã
+  invalidate khi ẩn, không rò thực tế); nhật ký gõ vẫn ghi khi tắt "Lưu lịch sử" (cần để chẩn đoán).
+
 ## Việc tiếp theo (theo thứ tự)
 
 1. Chờ CI của bản 1.5.0, gửi link IPA dạng

@@ -124,6 +124,8 @@ struct TranslateView: View {
     private var swapButton: some View {
         Button {
             withAnimation(.snappy) { direction = direction == .outgoing ? .incoming : .outgoing }
+            task?.cancel()
+            busy = false
             result = nil
             error = nil
         } label: {
@@ -164,6 +166,14 @@ struct TranslateView: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 112)
                     .accessibilityLabel(direction == .outgoing ? "Tin bạn muốn gửi" : "Tin của đối tác")
+                    // The text changed: a translation of the text before (shown, or still on its way)
+                    // must not be copied for it.
+                    .onChange(of: text) { _, _ in
+                        guard result != nil || busy else { return }
+                        task?.cancel()
+                        busy = false
+                        result = nil
+                    }
             }
             HStack(spacing: 10) {
                 // One coloured control at a time: Paste while empty, then Translate.
@@ -370,7 +380,8 @@ struct TranslateView: View {
             } catch {
                 self.error = error.localizedDescription
             }
-            busy = false
+            // A cancelled translation leaves the one that replaced it busy.
+            if !Task.isCancelled { busy = false }
         }
     }
 }

@@ -245,16 +245,20 @@ struct SettingsView: View {
     private func test() {
         testing = true
         testResult = nil
+        let tested = apiKey
         let translator = Translator(apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                                     model: TranslationModel(rawValue: model) ?? .sol)
         Task {
+            let outcome: (ok: Bool, text: String)
             do {
                 let result = try await translator.translate("Anh gửi giúp em báo giá trước thứ Sáu nhé.",
                                                             to: Language.named("en") ?? Language.all[0], checkMeaning: true)
-                testResult = (true, "Kết nối ổn: \(result.text)")
+                outcome = (true, "Kết nối ổn: \(result.text)")
             } catch {
-                testResult = (false, error.localizedDescription)
+                outcome = (false, error.localizedDescription)
             }
+            // A key pasted meanwhile is not the one this answer is about.
+            if apiKey == tested { testResult = outcome }
             testing = false
         }
     }

@@ -157,6 +157,10 @@ let sequences: [(before: String, steps: [String], want: String)] = [
     ("", ["d", "d", "u", "w", "n", "g", "d", "x", "⌫", "⌫", "f", " "], "đừng "),
     // Ended with the stray letter on it, the word is still put back as typed, as before.
     ("", ["d", "d", "u", "w", "n", "g", "d", " "], "dduwngd "),
+    // Fields for an e-mail address, a link or a code take letters as typed
+    // (`KeyboardViewController.plainTyping` sends each through `insert`), ⌫ included.
+    ("", ["+d", "+d", "+u", "+w", "+o", "+w", "+c", "+j", "⌫", "+s", "+@", "+a", "+a", "+.", "+v", "+n", " "], "dduwowcs@aa.vn "),
+    ("ab", ["⌫", "+d", "+d", "+s"], "adds"),
     // ⌫ in an English word takes only its last letter ("are" ⌫ gave "ả", "after" ⌫⌫ "at").
     ("", ["a", "r", "e", "⌫"], "ar"),
     ("", ["a", "f", "t", "e", "r", "⌫", "⌫"], "aft"),

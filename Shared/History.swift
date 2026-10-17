@@ -67,10 +67,16 @@ extension SharedStore {
     }
 
     /// Throws when saved history cannot be read, so the writers below leave it untouched
-    /// instead of replacing it with an empty list.
+    /// instead of replacing it with an empty list. One item that cannot be read is left out
+    /// rather than costing the whole list (and every translation saved after it).
     private static func storedHistory() throws -> [HistoryItem] {
         guard let data = defaults.data(forKey: historyKey) else { return [] }
-        return try JSONDecoder().decode([HistoryItem].self, from: data)
+        return try JSONDecoder().decode([LossyItem].self, from: data).compactMap(\.item)
+    }
+
+    private struct LossyItem: Decodable {
+        let item: HistoryItem?
+        init(from decoder: Decoder) throws { item = try? HistoryItem(from: decoder) }
     }
 
     static func addHistory(_ item: HistoryItem) {

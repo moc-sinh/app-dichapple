@@ -83,10 +83,13 @@ struct Translator {
             throw TranslateError.server("Tin quá dài, bản dịch bị cắt. Chia tin ra rồi dịch lại.")
         }
         guard let output = Self.outputText(json), !output.isEmpty else {
+            if Self.refused(json) { throw TranslateError.server("OpenAI từ chối dịch tin này.") }
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
-        let translation = Self.parse(output, language: target)
-        guard !translation.text.isEmpty else { throw TranslateError.server("Không nhận được bản dịch. Thử lại.") }
+        guard let translation = Self.parse(output, language: target, structured: body["text"] != nil),
+              !translation.text.isEmpty else {
+            throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
+        }
         return translation
     }
 
@@ -136,13 +139,14 @@ struct Translator {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard status == 200 else {
-            let message = (json["error"] as? [String: Any])?["message"] as? String ?? ""
+            let error = json["error"] as? [String: Any]
+            let message = error?["message"] as? String ?? ""
             if status == 400, body["text"] != nil,
                ["text.format", "json_schema", "response_format"].contains(where: { message.contains($0) }) {
                 throw TranslateError.formatUnsupported
             }
             if (500...599).contains(status) { throw TranslateError.busy }
-            throw TranslateError.server(explain(status: status, message: message))
+            throw TranslateError.server(explain(status: status, code: error?["code"] as? String ?? "", message: message))
         }
         return json
     }
@@ -158,10 +162,22 @@ struct Translator {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parse(_ output: String, language: Language) -> Translation {
+    /// The model declined (a refusal comes instead of the text).
+    private static func refused(_ json: [String: Any]) -> Bool {
+        let items = json["output"] as? [[String: Any]] ?? []
+        return items.contains { item in
+            (item["content"] as? [[String: Any]] ?? []).contains { $0["type"] as? String == "refusal" }
+        }
+    }
+
+    /// The translation from the model's JSON. Without the JSON format (a model that has none), the
+    /// text is the translation; asked for JSON, text that is not the JSON asked for is no
+    /// translation, and never goes into the chat.
+    private static func parse(_ output: String, language: Language, structured: Bool) -> Translation? {
         guard let data = output.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let text = object["translation"] as? String else {
+            if structured || output.hasPrefix("{") { return nil }
             return Translation(text: output, meaning: nil, note: nil, language: language)
         }
         func field(_ key: String) -> String? {
@@ -172,11 +188,26 @@ struct Translator {
                            meaning: field(Prompt.meaningKey), note: nil, language: language)
     }
 
-    private func explain(status: Int, message: String) -> String {
+    private func explain(status: Int, code: String, message: String) -> String {
+        // OpenAI's own code first: a 429 is either no credit left (waiting does not help) or too
+        // many requests at once.
+        switch code {
+        case "insufficient_quota":
+            return "Tài khoản OpenAI đã hết tiền. Nạp thêm tại platform.openai.com (Billing) rồi thử lại."
+        case "unsupported_country_region_territory":
+            return "OpenAI không phục vụ mạng ở khu vực này. Tắt VPN hoặc đổi mạng rồi thử lại."
+        case "model_not_found":
+            return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
+        case "invalid_api_key":
+            return "API key không đúng. Kiểm tra lại trong app MSTrans."
+        default:
+            break
+        }
         switch status {
         case 401: return "API key không đúng. Kiểm tra lại trong app MSTrans."
+        case 403: return "OpenAI từ chối key này (403)" + (message.isEmpty ? "." : ": \(message)")
         case 404: return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
-        case 429: return "Hết hạn mức hoặc gọi quá nhanh. Thử lại sau ít phút."
+        case 429: return "OpenAI đang giới hạn số lần gọi. Thử lại sau ít phút."
         default:
             if message.localizedCaseInsensitiveContains("model") {
                 return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."

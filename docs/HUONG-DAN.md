@@ -53,7 +53,7 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 3. Một dòng hiện lên trên thanh Dịch với **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc. Gõ tiếp là dòng này ẩn đi: lúc bình thường bàn phím chỉ có thanh Dịch.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt. Thứ vừa sao chép trông như mật khẩu, mã, link hay email thì **Dịch ngay** không tự gửi đi dịch, chỉ hiện dòng “chạm để dịch”. Dịch lỗi (mất mạng) thì gõ tiếp một phím là dòng “chạm để dịch” hiện lại để thử lần nữa.
 - Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
 
 **Không thấy MSTrans trong một app (ví dụ Zalo)**
@@ -90,6 +90,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 - Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.
 - Gửi tin rồi gõ tin mới ngay (bằng nút Gửi của app hay phím Gửi): tin mới bắt đầu sạch, không dính chữ của tin vừa gửi, kể cả khi vừa bấm ⌫ trên ô trống.
 - Gõ lấn hai ngón (ngón này chưa nhấc, ngón kia đã chạm): phím chạm trước luôn vào trước, kể cả phím Gửi và phím cách.
+- Ô nhập email, đường link, tên đăng nhập hay mã (OTP, số thẻ, số điện thoại): chữ vào đúng như gõ, không bỏ dấu Telex (`dd` vẫn là `dd`). Ô chỉ nhận số thì bàn phím mở sẵn trang số.
 - Bấm **Dịch** rồi gõ tiếp: chữ gõ trong lúc bàn phím đang đọc ô được giữ lại rồi chèn vào cuối; bản dịch đang chờ bị hủy để không ghi đè chữ mới gõ.
 - Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
 - Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
@@ -98,7 +99,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 
 ## Khi gõ bị sai hay mất chữ
 
-Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
+Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Chữ số luôn được thay bằng `#` (số điện thoại, số tài khoản, mã), và ô email, mật khẩu, mã, số thẻ chỉ ghi dấu `•`. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
 
 Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), chạm bị iOS giữ lại tới lúc nhấc tay (⌛ … iOS giữ lại), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms · việc bàn phím đang làm lúc đó, ví dụ phím, kiểm tra ô, thanh dịch; “không rõ” là lúc đó không có việc nào của MSTrans được ghi tên: iOS tự làm, hoặc vẽ lại), rung lâu (⏱ rung mất … ms), và lúc app chat báo lại chữ (⌛ app báo lại chữ chậm nhất sau … ms; nhiều app chỉ thỉnh thoảng mới báo, nên đây không hẳn là lúc chữ hiện). Nhờ vậy biết chậm do bàn phím hay do app đang chat. Mỗi lần Dịch có một dòng ⇄ ghi số ký tự và thời gian từng phần: đọc ô, OpenAI, thay ô (tin đối tác: thời gian OpenAI, hoặc “đã dịch trước đó”), nên biết Dịch chậm ở đâu.
 

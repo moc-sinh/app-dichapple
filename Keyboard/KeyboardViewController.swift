@@ -53,6 +53,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var checkingPasteboard = false
     /// The clipboard already read (or asked about) in instant mode, so iOS isn't asked twice.
     private var attemptedPasteboard: Int?
+    /// The clipboard's change count at the last look, and at the last translation of the user's
+    /// message: a copy older than that translation does not take the line showing its meaning.
+    private var seenPasteboard: Int?
+    private var pasteboardAtOutgoing: Int?
+    /// The field the keyboard is typing in (`documentIdentifier`): another one means another text
+    /// field, where a translation of the text read from the first must not go.
+    private var fieldID: UUID?
+    /// The field takes text as typed: an e-mail address, a link, a user name, a code or a number
+    /// (`readFieldTraits`). Letters go in without Telex ("dd" in an address stayed "dd", not "đ").
+    private var plainTyping = false
+    /// The field is for digits, and the keyboard opened on the number page for it.
+    private var digitField = false
 
     private var composer = Composer()
     private var lastKeyAt: CFTimeInterval = 0
@@ -216,6 +228,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         keyboard.extraKeyHeight = CGFloat(keySize.extraKeyHeight)
         globeKnown = false
         keyboard.showsGlobe = needsInputModeSwitchKey
+        readFieldTraits(appearing: true)
         readField()
         typedSinceAppear = false
         TypingLog.add("▶ mở: \(TypingLog.tail(composer.before ?? ""))|\(TypingLog.head(textDocumentProxy.documentContextAfterInput ?? ""))")
@@ -307,9 +320,44 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        // Another text field took the keyboard without it going away: what it is for is read again.
+        if textDocumentProxy.documentIdentifier != fieldID { readFieldTraits(appearing: false) }
         matchAppearance()
         fieldReported()
         configureReturn()
+    }
+
+    /// What the field is for. An e-mail address, a link, a user name or a code is typed as is,
+    /// digits open on the number page, and the typing log keeps nothing typed in such a field.
+    private func readFieldTraits(appearing: Bool) {
+        let proxy = textDocumentProxy
+        let switched = fieldID != nil && proxy.documentIdentifier != fieldID
+        fieldID = proxy.documentIdentifier
+        let type = proxy.keyboardType ?? .default
+        let content: UITextContentType? = proxy.textContentType ?? nil
+        // Not the name-or-phone pad: a Vietnamese name needs its marks.
+        let plainTypes: [UIKeyboardType] = [.emailAddress, .URL, .numberPad, .phonePad, .decimalPad, .asciiCapableNumberPad]
+        let plainContent: [UITextContentType] = [.emailAddress, .URL, .username, .password, .newPassword, .oneTimeCode,
+                                                 .creditCardNumber, .telephoneNumber]
+        let digitTypes: [UIKeyboardType] = [.numberPad, .phonePad, .decimalPad, .asciiCapableNumberPad, .numbersAndPunctuation]
+        let digitContent: [UITextContentType] = [.oneTimeCode, .creditCardNumber, .telephoneNumber]
+        plainTyping = plainTypes.contains(type) || content.map { plainContent.contains($0) } == true
+        TypingLog.hidesText = plainTyping
+        let digits = digitTypes.contains(type) || content.map { digitContent.contains($0) } == true
+        // As the keyboard appears, or as a field of the other kind takes it; never while typing.
+        if appearing || (switched && digits != digitField) {
+            if digits { keyboard.showNumbers() } else { keyboard.showLetters() }
+        }
+        digitField = digits
+        if switched {
+            TypingLog.add("▶ ô khác")
+            if mode == .busy {
+                // The text being translated was read from the other field: it must not replace this one.
+                task?.cancel()
+                mode = .failed(Self.fieldSwitched)
+            }
+            composer.forget()
+        }
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
@@ -318,7 +366,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func matchAppearance() {
-        let style: UIUserInterfaceStyle = textDocumentProxy.keyboardAppearance == .dark ? .dark : .unspecified
+        // An app that asks for a light or dark keyboard gets it whatever the system's setting.
+        let style: UIUserInterfaceStyle
+        switch textDocumentProxy.keyboardAppearance ?? .default {
+        case .dark: style = .dark
+        case .light: style = .light
+        default: style = .unspecified
+        }
         // Setting it again would make every key resolve its colours again.
         if view.overrideUserInterfaceStyle != style { view.overrideUserInterfaceStyle = style }
     }
@@ -349,7 +403,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         let edits: [Composer.Edit]
         switch action {
         case .letter(let c):
-            edits = composer.letter(c, now: now)
+            edits = plainTyping ? composer.insert(String(c), now: now) : composer.letter(c, now: now)
             typed = true
         case .text(let s):
             edits = composer.insert(s, now: now)
@@ -387,8 +441,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     private static func describe(_ action: KeyAction) -> String {
         switch action {
-        case .letter(let c): return String(c)
-        case .text(let s): return s
+        case .letter(let c): return TypingLog.typed(String(c))
+        case .text(let s): return TypingLog.typed(s)
         case .delete(let word): return word ? "⌫⌫" : "⌫"
         case .space: return "␣"
         case .newline: return "⏎"
@@ -400,7 +454,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private static func describeEdit(_ edit: Composer.Edit) -> String {
         switch edit {
         case .delete(let count): return "-\(count)"
-        case .insert(let s): return "+" + s.replacingOccurrences(of: "\n", with: "⏎")
+        case .insert(let s): return "+" + TypingLog.typed(s).replacingOccurrences(of: "\n", with: "⏎")
         }
     }
 
@@ -1098,24 +1152,31 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 return
             }
             let read = CACurrentMediaTime()
+            let field = self.textDocumentProxy.documentIdentifier
             self.task = Task { [weak self] in
                 do {
                     let result = try await Translator(apiKey: apiKey)
                         .translate(text, to: target, context: context, checkMeaning: SharedStore.checkMeaning)
                     let answered = CACurrentMediaTime()
                     guard let self, !Task.isCancelled else { return }
+                    // Another text field has the keyboard now: its text is not the one translated.
+                    guard self.textDocumentProxy.documentIdentifier == field else {
+                        self.mode = .failed(Self.fieldSwitched)
+                        return
+                    }
                     self.original = text
+                    // In the history first: hidden while the field is being replaced, the keyboard
+                    // stops, and the translation is still there to copy from the app.
+                    let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
+                                           meaning: result.meaning, note: result.note)
+                    Self.store.async { SharedStore.addHistory(item) }
                     self.replaceDocument(with: result.text) { [weak self] in
                         TypingLog.mark("kết quả dịch")
                         TypingLog.add("⇄ Dịch \(text.count)→\(result.text.count) ký tự: đọc ô \(Int((read - tapped) * 1000))ms"
                                       + " · OpenAI \(Int((answered - read) * 1000))ms · thay ô \(Int((CACurrentMediaTime() - answered) * 1000))ms")
                         let line = ChatLine(side: .me, text: result.text, date: Date())
-                        let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
-                                               meaning: result.meaning, note: result.note)
-                        Self.store.async {
-                            SharedStore.remember(line)
-                            SharedStore.addHistory(item)
-                        }
+                        Self.store.async { SharedStore.remember(line) }
+                        self?.pasteboardAtOutgoing = self?.seenPasteboard
                         self?.refreshPillTarget()
                         self?.lastOutgoing = (result, text)
                         self?.mode = .done
@@ -1129,6 +1190,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             }
         }
     }
+
+    private static let fieldSwitched = "Đã sang ô nhập khác. Bấm Dịch lại."
 
     private func undo() {
         // Replacing the field takes a moment and the Hoàn tác button stays where it is: a second
@@ -1309,15 +1372,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// tap unless the user chose instant mode.
     private func pasteboardChecked(changeCount: Int, fresh: Bool) {
         TypingLog.mark("clipboard")
+        seenPasteboard = changeCount
         // The user started typing while the clipboard was asked: the info line would appear or go
         // and change the keyboard's height under their thumbs. The next check (a second on) offers it.
         if CACurrentMediaTime() - lastKeyAt < 1.5 { return }
         switch info {
         case .idle, .incoming, .outgoing:
             guard fresh else { return }
+            // The meaning of the message just translated stays: only something copied after it
+            // takes its place.
+            if case .outgoing = info, changeCount == pasteboardAtOutgoing { return }
             if SharedStore.instantIncoming, attemptedPasteboard != changeCount {
                 attemptedPasteboard = changeCount
-                translateCopied()
+                translateCopied(automatically: true)
             } else {
                 info = .copied
             }
@@ -1330,7 +1397,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     /// Translates the copied message, off the main thread so the keys stay responsive while iOS
     /// asks for paste permission.
-    private func translateCopied() {
+    private func translateCopied(automatically: Bool = false) {
         guard readyKey() != nil else { return }
         if case .panel = mode { mode = .normal }
         info = .incomingBusy
@@ -1338,37 +1405,52 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             // Both ask the clipboard's process: not on the main thread.
             let changeCount = UIPasteboard.general.changeCount
             let copied = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            DispatchQueue.main.async { self?.received(copied: copied, changeCount: changeCount) }
+            DispatchQueue.main.async { self?.received(copied: copied, changeCount: changeCount, automatically: automatically) }
         }
     }
 
-    private func received(copied: String, changeCount: Int) {
+    /// A password, a code, a link or an e-mail address: one word of plain letters with digits or
+    /// signs in it. Copied, it is not a message, and instant mode does not send it to OpenAI by
+    /// itself (a tap still translates it).
+    static func looksLikeSecret(_ text: String) -> Bool {
+        text.count >= 6 && text.unicodeScalars.allSatisfy { $0.isASCII && !CharacterSet.whitespacesAndNewlines.contains($0) }
+            && text.contains { $0.isNumber || "@/:._-#$%&*+=\\|~^".contains($0) }
+    }
+
+    private func received(copied: String, changeCount: Int, automatically: Bool) {
         // Nothing read usually means paste was not allowed; keep offering it so it can be retried.
         guard !copied.isEmpty else {
             info = .message("Chưa đọc được tin đã sao chép. Khi iOS hỏi, chọn “Cho phép dán”.")
             return
         }
+        if automatically, Self.looksLikeSecret(copied) {
+            info = .copied
+            return
+        }
         // Whatever was copied is translated into Vietnamese: no guessing whether it already is
         // (a foreign message that names a Vietnamese person read as Vietnamese).
-        SharedStore.handledPasteboard = changeCount
         if let cached = SharedStore.cachedIncoming(copied) {
+            SharedStore.handledPasteboard = changeCount
             TypingLog.add("⇄ Tin đối tác \(copied.count) ký tự: đã dịch trước đó")
             Self.store.async { SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date())) }
             refreshPillTarget()
             return show(incoming: copied, translation: Translation(text: cached, meaning: nil, note: nil, language: .vietnamese))
         }
-        // The context as it was before this message: the message itself goes in <message>, not twice.
+        // The context as it was before this message: the message itself goes in <message>, not twice
+        // (copied again, it is the context's last line already).
         Self.store.async {
-            let context = SharedStore.context()
+            var context = SharedStore.context()
+            if context.last?.side == .partner, context.last?.text == copied { context.removeLast() }
             SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date()))
             DispatchQueue.main.async { [weak self] in
                 self?.refreshPillTarget()
-                self?.translateIncoming(copied, context: context)
+                self?.translateIncoming(copied, context: context, changeCount: changeCount)
             }
         }
     }
 
-    private func translateIncoming(_ text: String, context: [ChatLine]) {
+    /// The copy counts as handled once translated: one that failed (no network) is offered again.
+    private func translateIncoming(_ text: String, context: [ChatLine], changeCount: Int) {
         guard let apiKey = SharedStore.apiKey else { return }
         info = .incomingBusy
         incomingTask?.cancel()
@@ -1387,6 +1469,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                                                        note: note))
                 }
                 guard let self, !Task.isCancelled else { return }
+                SharedStore.handledPasteboard = changeCount
                 self.show(incoming: text, translation: result)
             } catch is CancellationError {
             } catch {

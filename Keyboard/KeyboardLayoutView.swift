@@ -262,6 +262,15 @@ final class KeyboardLayoutView: UIView {
         showPage()
     }
 
+    /// The number page, as the keyboard opens on a field for digits (a code, a phone number).
+    func showNumbers() {
+        guard page != .numbers else { return }
+        if page == .letters { capsLock = shift == .locked }
+        page = .numbers
+        shift = .off
+        showPage()
+    }
+
     /// Shift as the letters come back: Caps Lock if it was on, else a capital at a sentence start.
     private var lettersShift: Shift { capsLock ? .locked : wantsAutoShift ? .once : .off }
 
@@ -677,8 +686,8 @@ final class KeyboardLayoutView: UIView {
             guard let key = hitKey(at: point) else { continue }
             // How long the touch took to get here: iOS holding it back, or the keyboard busy.
             let late = now - touch.timestamp
-            if late > 0.03 { TypingLog.add("⌛ \(key.character ?? "phím") đến trễ \(Int(late * 1000))ms") }
-            if point.y < 0 { TypingLog.add("↑ \(key.character ?? "?") (chạm cao)") }
+            if late > 0.03 { TypingLog.add("⌛ \(TypingLog.typed(key.character ?? "phím")) đến trễ \(Int(late * 1000))ms") }
+            if point.y < 0 { TypingLog.add("↑ \(TypingLog.typed(key.character ?? "?")) (chạm cao)") }
             let track = Track(key: key, start: point)
             tracks[touch] = track
             begin(track, touch: touch, event: event)
@@ -800,7 +809,7 @@ final class KeyboardLayoutView: UIView {
                     // key without lifting) is told from one the screen never passed on.
                     if track.slidTo != s {
                         track.slidTo = s
-                        TypingLog.add("↝ \(track.key.character ?? "?") trượt sang \(s), không gõ \(s)")
+                        TypingLog.add("↝ \(TypingLog.typed(track.key.character ?? "?")) trượt sang \(TypingLog.typed(s)), không gõ")
                     }
                     continue
                 }
@@ -833,7 +842,7 @@ final class KeyboardLayoutView: UIView {
         // A real tap lasts 30 ms or more: one that began and ended together was held back by iOS
         // until the finger lifted (the edge delay `KeyboardViewController.viewDidAppear` turns off).
         if !cancelled, let s = track.key.character, CACurrentMediaTime() - track.beganAt < 0.012 {
-            TypingLog.add("⌛ \(s) iOS giữ lại tới lúc nhấc tay")
+            TypingLog.add("⌛ \(TypingLog.typed(s)) iOS giữ lại tới lúc nhấc tay")
         }
         var cancelled = cancelled
         if cancelled, track.key.character != nil, !track.committed {
@@ -841,7 +850,7 @@ final class KeyboardLayoutView: UIView {
             // that barely moved was a key press, and is typed rather than lost.
             let point = touch.location(in: self)
             let quick = CACurrentMediaTime() - track.beganAt < 0.35 && hypot(point.x - track.start.x, point.y - track.start.y) < 14
-            TypingLog.add("x \(track.key.character ?? "?") bị iOS hủy, \(quick ? "vẫn gõ" : "bỏ")")
+            TypingLog.add("x \(TypingLog.typed(track.key.character ?? "?")) bị iOS hủy, \(quick ? "vẫn gõ" : "bỏ")")
             if quick { cancelled = false }
         }
 
@@ -853,7 +862,7 @@ final class KeyboardLayoutView: UIView {
         }
         if touch === accentTouch {
             accentTouch = nil
-            TypingLog.add("… bảng dấu đóng: \(cancelled ? "bị hủy" : accentPicker?.selected == 0 ? "giữ nguyên" : accentPicker?.selectedText ?? "?")")
+            TypingLog.add("… bảng dấu đóng: \(cancelled ? "bị hủy" : accentPicker?.selected == 0 ? "giữ nguyên" : TypingLog.typed(accentPicker?.selectedText ?? "?"))")
             if !cancelled, let picker = accentPicker, let text = picker.selectedText {
                 if !track.typedOnDown {
                     consumeOnceShift()
@@ -1003,7 +1012,7 @@ final class KeyboardLayoutView: UIView {
         case .char(let s):
             guard let options = Self.accents[s.lowercased()] else { return }
             // Lifting on the plain letter types nothing more: noted, so it is not read as a lost key.
-            TypingLog.add("… giữ \(s): bảng dấu")
+            TypingLog.add("… giữ \(TypingLog.typed(s)): bảng dấu")
             let upper = track.typedOnDown ? track.upper : shift != .off && page == .letters
             let shown = upper ? options.map { $0.uppercased() } : options
             removePopup(track)

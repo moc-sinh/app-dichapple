@@ -255,7 +255,7 @@ struct DiagnosticsView: View {
                     .foregroundStyle(.secondary)
                 Button {
                     report = Diagnostics.report()
-                    Clipboard.copy(report)
+                    Clipboard.copyPrivately(report)
                     copied = true
                 } label: {
                     Label(copied ? "Đã sao chép báo cáo" : "Sao chép báo cáo", systemImage: copied ? "checkmark" : "doc.on.doc")
@@ -276,7 +276,7 @@ struct DiagnosticsView: View {
                 Button {
                     let info = Bundle.main.infoDictionary
                     let header = "Nhật ký gõ MSTrans \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) · iOS \(UIDevice.current.systemVersion)"
-                    Clipboard.copy(([header] + typingLog).joined(separator: "\n"))
+                    Clipboard.copyPrivately(([header] + typingLog).joined(separator: "\n"))
                     typingLogCopied = true
                 } label: {
                     Label(typingLogCopied ? "Đã sao chép nhật ký gõ" : "Sao chép nhật ký gõ (\(typingLog.count) dòng)",

@@ -4,12 +4,18 @@ import QuartzCore
 /// The last few hundred typing events: keys and the edits they made, what the app reported, taps
 /// iOS cancelled, and when the keyboard took the field's text. Cài đặt › Chẩn đoán copies it when
 /// keys go wrong. It stays on this iPhone and holds the end of what was typed recently (password
-/// fields always get the Apple keyboard, never this one).
+/// fields always get the Apple keyboard, never this one). Digits never go in (phone and account
+/// numbers, codes), and nothing typed does in fields for codes, card numbers or e-mail addresses.
 enum TypingLog {
     private static var lines: [String] = []
     private static var unsaved = false
     private static let limit = 600
     private static let started = CACurrentMediaTime()
+    /// Saves go out in order: an older snapshot written after a newer one lost the end of the log.
+    private static let queue = DispatchQueue(label: "MSTrans.typingLog", qos: .utility)
+    /// The field is for a code, a card number, an e-mail address or the like
+    /// (`KeyboardViewController.readFieldTraits`): what is typed shows as dots.
+    static var hidesText = false
 
     static func add(_ line: String) {
         let ms = Int((CACurrentMediaTime() - started) * 1000)
@@ -27,9 +33,9 @@ enum TypingLog {
         unsaved = false
         let snapshot = Array(lines.suffix(limit))
         if now {
-            SharedStore.typingLog = snapshot
+            queue.sync { SharedStore.typingLog = snapshot }
         } else {
-            DispatchQueue.global(qos: .utility).async { SharedStore.typingLog = snapshot }
+            queue.async { SharedStore.typingLog = snapshot }
         }
     }
 
@@ -77,7 +83,16 @@ enum TypingLog {
         visible(String(text.prefix(count)))
     }
 
+    /// What was typed, as the log may hold it: digits as #, everything as dots in a field for
+    /// codes or card numbers.
+    static func typed(_ text: String) -> String {
+        if hidesText { return String(repeating: "•", count: text.count) }
+        guard text.contains(where: \.isNumber) else { return text }
+        return String(text.map { $0.isNumber ? "#" : $0 })
+    }
+
     private static func visible(_ text: String) -> String {
-        text.contains("\n") ? text.replacingOccurrences(of: "\n", with: "⏎") : text
+        let text = typed(text)
+        return text.contains("\n") ? text.replacingOccurrences(of: "\n", with: "⏎") : text
     }
 }
