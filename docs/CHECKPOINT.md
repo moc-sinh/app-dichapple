@@ -9,23 +9,37 @@
   https://github.com/moc-sinh/app-dichapple/actions/runs/38931720644/artifacts/12059641042
   Sửa lỗi bản dịch bị lặp 2 lần (đọc ô nhập trước khi Zalo kịp báo con trỏ đã dời) và bỏ phần
   "Lưu ý" + không chép lại tin gốc trong bảng dịch.
-- **Mã sau 1.3.1, đã lên 1.4.0 trong `project.yml` nhưng CHƯA có IPA được gửi cho người dùng:**
+- **Mã sau 1.3.1 (1.4.0, giờ gộp vào 1.5.0), CHƯA có IPA nào được gửi cho người dùng:**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
   ⌫ sau chữ lạc lấy lại từ tiếng Việt; gõ nhanh gấp 3; benchmark CI đo lại khi máy CI khựng;
   CI in cảnh báo trình biên dịch. Run 52 của CI xanh, không có cảnh báo trong mã app.
-- **Đang dở:** rà soát toàn diện trước khi phát hành 1.5.0. Phiên kia đã xong 2 phần (soát mã mới,
-  mô phỏng gõ quy mô lớn — kết quả đã thành commit 98dd629 và 7df07ad). Hai phần chưa có kết quả:
-  vòng đời bàn phím/bộ nhớ và luồng dịch/dữ liệu/quyền riêng tư. Phiên này đã chạy các trợ lý rà soát
-  nhưng bị dừng vì hết hạn mức; chưa có phát hiện nào được ghi lại.
+- **Rà soát trước 1.5.0 (17/10, đọc tay, không dùng trợ lý):** đã soát `KeyboardViewController`
+  (toàn bộ: vòng đời, luồng Dịch, đọc/thay ô, clipboard), `Composer` + `TypedText`, `Translator`
+  (phần đổi từ 1.3.1), `SharedStore`, `History`, `TypingLog`, phần đổi của `KeyboardLayoutView`
+  (rollover, Shift/Caps, bảng dấu, trackpad, xóa lặp) và CI (`ios.yml`, `keyboard-smoke.sh`,
+  `typing-benchmark.py`). Sửa 2 lỗi:
+  1. Bấm "Hoàn tác" hai lần trong lúc bàn phím còn đang thay chữ (nút không đổi trạng thái) chạy
+     hai lượt thay chồng nhau → câu gốc bị chèn 2 lần; Dịch bấm trong lúc đó cũng đọc ô đang bị xóa
+     dở. Giờ `undo()`/`translateDraft()` bỏ qua khi còn đang đi con trỏ, nút đổi thành "Đang lấy lại…".
+  2. Lời nhắc OpenAI chưa nói rõ chữ trong `<message>` chỉ để dịch: tin đối tác chứa câu lệnh có thể
+     bị model làm theo thay vì dịch. Đã thêm một dòng cho cả hai chiều.
+  Đã xem và thấy ổn: timer/closure đều `[weak self]` hoặc được invalidate khi ẩn; mọi vòng đi con trỏ
+  dừng khi ẩn (`walkGeneration`); log/snapshot/cache đều có giới hạn; đếm xóa luôn ≥ 1, không âm;
+  `adjustTextPosition` dùng UTF-16 nhất quán với `TypedText.move`; retry chỉ khi lỗi mạng/5xx, timeout
+  không retry; `status: incomplete` bị coi là lỗi; schema strict hợp lệ cả hai dạng; clipboard chỉ đọc
+  `.string` khi người dùng bấm, còn lại chỉ `changeCount`/`hasStrings`; "Lưu lịch sử" tắt thì không
+  ghi history và cache; benchmark CI đo lại chỉ khi CPU bàn phím nhỏ, lần 2 chậm vẫn fail.
+  **Chưa soát kỹ:** `KeyboardLayoutView` phần bố cục/hit-test cũ (đã có Tests/Keys), các màn SwiftUI
+  trong `App/`, `TranslateIntent`. API key vẫn nằm trong UserDefaults của App Group (chưa chuyển Keychain).
 
 ## Việc tiếp theo (theo thứ tự)
 
-1. Chạy lại rà soát với **ít trợ lý** (2 cái một lúc là đủ), theo đề bài ở cuối file này; mỗi phát
-   hiện phải được đọc lại trong mã trước khi sửa.
-2. Sửa các phát hiện thật, chạy test (xem dưới), commit, push.
-3. Lên `MARKETING_VERSION` 1.5.0, chờ CI, gửi link IPA dạng
+1. Chờ CI của bản 1.5.0, gửi link IPA dạng
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
    (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, không ảnh hưởng file cài).
+2. Nếu còn hạn mức: soát nốt các phần "chưa soát kỹ" ở trên, mỗi lần 1 trợ lý hoặc tự đọc; mỗi phát
+   hiện phải được đọc lại trong mã trước khi sửa.
+3. Nghe người dùng dùng thử 1.5.0 rồi đọc nhật ký gõ họ gửi.
 
 ## Quy tắc đã thống nhất với người dùng
 

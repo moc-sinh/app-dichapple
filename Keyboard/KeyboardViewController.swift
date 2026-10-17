@@ -1079,7 +1079,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func translateDraft() {
-        guard let apiKey = readyKey() else { return }
+        // The cursor is still walking the field for an undo (the panel's Xong brings Dịch back
+        // meanwhile): a second walk over the same field would read it half deleted.
+        guard walking == 0, let apiKey = readyKey() else { return }
         let context = SharedStore.context()
         // The language the pill shows ("Tự động" is worked out off the main thread as the context
         // changes); only before that is done, here.
@@ -1122,6 +1124,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     private func undo() {
+        // Replacing the field takes a moment and the Hoàn tác button stays where it is: a second
+        // tap started a second walk, and both put the original back ("câu gốc câu gốc").
+        guard walking == 0 else { return }
+        panelButton.configuration?.title = "Đang lấy lại…"
         if let sent = lastOutgoing?.translation.text {
             Self.store.async { SharedStore.forgetLast(sent) }
             refreshPillTarget()
