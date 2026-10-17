@@ -1089,20 +1089,26 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         activeTarget = target
         mode = .busy
         task?.cancel()
+        // Where the time of a Dịch goes (reading the field, OpenAI, replacing the text), for the log.
+        let tapped = CACurrentMediaTime()
         readDocument { [weak self] text in
             guard let self, self.mode == .busy, self.view.window != nil else { return }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.mode = .failed(TranslateError.empty.errorDescription ?? "")
                 return
             }
+            let read = CACurrentMediaTime()
             self.task = Task { [weak self] in
                 do {
                     let result = try await Translator(apiKey: apiKey)
                         .translate(text, to: target, context: context, checkMeaning: SharedStore.checkMeaning)
+                    let answered = CACurrentMediaTime()
                     guard let self, !Task.isCancelled else { return }
                     self.original = text
                     self.replaceDocument(with: result.text) { [weak self] in
                         TypingLog.mark("kết quả dịch")
+                        TypingLog.add("⇄ Dịch \(text.count)→\(result.text.count) ký tự: đọc ô \(Int((read - tapped) * 1000))ms"
+                                      + " · OpenAI \(Int((answered - read) * 1000))ms · thay ô \(Int((CACurrentMediaTime() - answered) * 1000))ms")
                         let line = ChatLine(side: .me, text: result.text, date: Date())
                         let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
                                                meaning: result.meaning, note: result.note)
@@ -1117,6 +1123,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     }
                 } catch is CancellationError {
                 } catch {
+                    TypingLog.add("⇄ Dịch lỗi sau \(Int((CACurrentMediaTime() - tapped) * 1000))ms: \(error.localizedDescription)")
                     self?.mode = .failed(error.localizedDescription)
                 }
             }
@@ -1345,6 +1352,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         // (a foreign message that names a Vietnamese person read as Vietnamese).
         SharedStore.handledPasteboard = changeCount
         if let cached = SharedStore.cachedIncoming(copied) {
+            TypingLog.add("⇄ Tin đối tác \(copied.count) ký tự: đã dịch trước đó")
             Self.store.async { SharedStore.remember(ChatLine(side: .partner, text: copied, date: Date())) }
             refreshPillTarget()
             return show(incoming: copied, translation: Translation(text: cached, meaning: nil, note: nil, language: .vietnamese))
@@ -1364,9 +1372,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         guard let apiKey = SharedStore.apiKey else { return }
         info = .incomingBusy
         incomingTask?.cancel()
+        let started = CACurrentMediaTime()
         incomingTask = Task { [weak self] in
             do {
                 let result = try await Translator(apiKey: apiKey).translate(text, to: .vietnamese, context: context)
+                TypingLog.add("⇄ Tin đối tác \(text.count)→\(result.text.count) ký tự: OpenAI \(Int((CACurrentMediaTime() - started) * 1000))ms")
                 // Language detection and the history's JSON: not on the main thread, where the user
                 // may already be typing the reply.
                 let translation = result.text, note = result.note
@@ -1380,6 +1390,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 self.show(incoming: text, translation: result)
             } catch is CancellationError {
             } catch {
+                TypingLog.add("⇄ Tin đối tác lỗi sau \(Int((CACurrentMediaTime() - started) * 1000))ms: \(error.localizedDescription)")
                 self?.info = .message(error.localizedDescription)
             }
         }
