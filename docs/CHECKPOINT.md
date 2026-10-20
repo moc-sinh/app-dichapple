@@ -1,15 +1,13 @@
-# Checkpoint — 17/10/2026
+# Checkpoint — 20/10/2026
 
 Điểm dừng để phiên mới làm tiếp. Mọi mã đã được push lên nhánh `claude/funny-gates-s6pl2c`
 (PR #1 nháp vào `claude/stoic-hopper-f60iid`). Không có thay đổi nào chưa commit.
 
 ## Tình trạng
 
-- **Bản mới nhất đã build:** 1.3.1 (run 46) —
-  https://github.com/moc-sinh/app-dichapple/actions/runs/38931720644/artifacts/12059641042
-  Sửa lỗi bản dịch bị lặp 2 lần (đọc ô nhập trước khi Zalo kịp báo con trỏ đã dời) và bỏ phần
-  "Lưu ý" + không chép lại tin gốc trong bảng dịch.
-- **Mã sau 1.3.1 (1.4.0, giờ gộp vào 1.5.0), CHƯA có IPA nào được gửi cho người dùng:**
+- **Bản mới nhất:** 1.8.1 (run 62 của CI, artifact `MSTrans-ipa`); 1.8.0 (run 61) đã gửi người dùng. Người dùng
+  thấy 1.7.0 "khá ổn"; chưa thử 1.8.x trên máy thật. Các mục bên dưới là lịch sử theo từng bản.
+- **Mã sau 1.3.1 (1.4.0, đã gộp vào 1.5.0 và gửi người dùng):**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
   ⌫ sau chữ lạc lấy lại từ tiếng Việt; gõ nhanh gấp 3; benchmark CI đo lại khi máy CI khựng;
   CI in cảnh báo trình biên dịch. Run 52 của CI xanh, không có cảnh báo trong mã app.
@@ -95,14 +93,36 @@
   bằng bản giả; Swift 6.1.2 lấy từ mirror.gcr.io (download.swift.org bị chặn).
   **Chưa thử trên máy thật:** giọng iPhone đọc ra có đủ (AVSpeechSynthesizer.write), cuộn theo câu mới.
 
+- **1.8.1: rà riêng phần dịch Hội thoại (20/10, khuya).** Người dùng chỉ muốn rà phần này. Đọc tay hết
+  `App/Conversation`, sửa:
+  1. Giữ **Tôi nói** quá 2 phút: lượt tự kết thúc ở `Listener` nhưng nút vẫn "đang nghe bạn", phần nói sau đó bị
+     coi là lời người khác, thả tay không làm gì. Giờ không còn giới hạn: lượt dài được giao từng đoạn ≤ 20 giây,
+     cắt ở chỗ lặng nhất trong 6 giây cuối (`SpeechSegmenter.split`, dùng chung với cắt câu dài), đoạn đầu được
+     dịch ngay trong lúc còn nói; chỉ báo "Chưa nghe thấy bạn nói" khi cả lượt không có tiếng.
+  2. Đọc to sai thứ tự: 3 câu dịch song song, câu dịch xong trước được đọc trước. Giờ câu nào cũng chờ (tối đa
+     8 giây) các câu nói trước nó cùng phía (của bạn / của người khác) dịch xong (`waitForEarlier`). Câu của bạn
+     xếp hàng nhận giọng theo đúng thứ tự (trước đây chèn lên đầu nên lượt dài bị đảo).
+  3. Phòng nói liên tục: mỗi câu chờ khoảng lặng 10 giây nối tiếp nhau, giọng tụt lại rất xa. Giờ hạn 10 giây tính
+     từ lúc câu dịch xong, quá hạn thì chỉ hiện chữ.
+  4. Bấm Tôi nói lúc điện thoại đang đọc: 0,3 giây âm cũ đưa vào câu của bạn là giọng của chính điện thoại. Giờ bỏ.
+  5. **Cuộc họp mới** bấm ngay sau Dừng làm mất câu cuối đang nhận/dịch (và vẫn trả tiền nhận giọng), bấm lúc đang
+     tóm tắt thì bản tóm tắt ghi vào cuộc họp mới. Giờ chờ các câu cuối và bản tóm tắt (`canStartNewMeeting`).
+  6. Dịch liền rớt kết nối: OpenAI báo đóng 2 lần (sự kiện `session.closed` rồi socket) nên mở 2 phiên mới, một
+     phiên bị bỏ mà không đóng. Giờ phiên rớt được đóng và bỏ ngay, chỉ mở lại một lần. `LiveSession` giờ xử lý
+     mọi thứ trên main queue (trước đây đụng `task`/`closing` từ hàng đợi của URLSession).
+  7. Bỏ mã thừa: `AudioIO.playingAlone`, `PCM.int16([Float])`, `SpeechSegmenter.level`, `LiveGate.isOpen`.
+  Test: `Tests/Conversation` 88 kiểm tra. Mô phỏng cuộc họp trên Linux (không vào repo, xem mục 1.8.0) 43 kiểm tra,
+  thêm 6 cảnh cho các lỗi trên; chạy lại trên mã cũ thì trượt 10 kiểm tra, đúng các lỗi đã sửa.
+  **Biết mà chưa làm:** Dừng ngay khi người khác vừa nói xong ở Dịch liền thì mất 1–2 giây bản dịch cuối (phiên bị
+  đóng trước khi chữ về); Chính xác đọc liền các câu đang chờ trong lúc tạm không nghe (đúng như hướng dẫn ghi).
+
 ## Việc tiếp theo (theo thứ tự)
 
-1. Chờ CI của bản 1.5.0, gửi link IPA dạng
-   `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
-   (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, không ảnh hưởng file cài).
-2. Nếu còn hạn mức: soát nốt các phần "chưa soát kỹ" ở trên, mỗi lần 1 trợ lý hoặc tự đọc; mỗi phát
-   hiện phải được đọc lại trong mã trước khi sửa.
-3. Nghe người dùng dùng thử 1.5.0 rồi đọc nhật ký gõ họ gửi.
+1. Người dùng thử 1.8.1 trên iPhone thật: micro cách 1–2 m trong phòng họp, Dịch liền với key của họ, giọng iPhone,
+   cuộn theo câu mới, giữ Tôi nói lâu. Nghe phản hồi rồi sửa theo đó.
+2. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
+   (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, chụp màn Hội thoại để xem).
+3. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).
 
 ## Quy tắc đã thống nhất với người dùng
 

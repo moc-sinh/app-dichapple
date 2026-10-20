@@ -33,7 +33,7 @@ struct ConversationView: View {
             .sheet(isPresented: $showingSummary) { SummarySheet(model: model) }
             .fullScreenCover(item: $enlarged) { entry in EnlargedTranslation(entry: entry) }
             .onChange(of: model.talking) { _, talking in
-                // Ended by itself (two minutes) or by stopping: the next tap starts a new turn.
+                // Ended by stopping: the next tap starts a new turn.
                 if !talking, !model.starting { latched = false }
             }
         }
@@ -331,7 +331,7 @@ struct ConversationView: View {
             } label: {
                 Label("Cuộc họp mới", systemImage: "plus.bubble")
             }
-            .disabled(model.running || model.meeting.lines.isEmpty)
+            .disabled(!model.canStartNewMeeting)
             Button {
                 showingSaved = true
             } label: {

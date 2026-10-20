@@ -54,6 +54,7 @@ enum LiveEvent: Equatable {
 
 /// One live translation session: sound goes in, and its translation into one language comes back
 /// as text and voice while the speaker is still talking. Two-way talk needs one per direction.
+/// Used on the main queue only: what the socket says is handled there too.
 final class LiveSession {
     /// The languages OpenAI's live translation can speak (any of 70 can be heard).
     static let outputLanguages: Set<String> = ["vi", "en", "zh", "ja", "ko", "es", "pt", "fr", "de", "ru", "it", "hi", "id"]
@@ -112,38 +113,45 @@ final class LiveSession {
 
     private func send(_ message: String) {
         task?.send(.string(message)) { [weak self] error in
-            guard let error, let self, !self.closing else { return }
-            self.deliver(.failed(code: "network", message: error.localizedDescription))
+            guard let error else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.closing else { return }
+                self.deliver(.failed(code: "network", message: error.localizedDescription))
+            }
         }
     }
 
     private func receive(_ task: URLSessionWebSocketTask) {
         task.receive { [weak self] result in
-            guard let self, task === self.task || self.closing else { return }
-            switch result {
-            case .success(let message):
-                let text: String?
-                switch message {
-                case .string(let string): text = string
-                case .data(let data): text = String(data: data, encoding: .utf8)
-                @unknown default: text = nil
-                }
-                if let text, let event = LiveEvent.parse(text) { self.deliver(event) }
-                self.receive(task)
-            case .failure(let error):
-                let wasClosing = self.closing
-                if task === self.task { self.task = nil }
-                self.isOpen = false
-                if !wasClosing {
-                    // Refused at the start: a wrong key, or one without live translation.
-                    switch (task.response as? HTTPURLResponse)?.statusCode ?? 0 {
-                    case 401: self.deliver(.failed(code: "invalid_api_key", message: ""))
-                    case 403, 404: self.deliver(.failed(code: "model_not_available", message: ""))
-                    default: self.deliver(.failed(code: "network", message: error.localizedDescription))
-                    }
-                }
-                self.deliver(.closed)
+            DispatchQueue.main.async { [weak self] in self?.received(result, from: task) }
+        }
+    }
+
+    private func received(_ result: Result<URLSessionWebSocketTask.Message, Error>, from task: URLSessionWebSocketTask) {
+        guard task === self.task || closing else { return }
+        switch result {
+        case .success(let message):
+            let text: String?
+            switch message {
+            case .string(let string): text = string
+            case .data(let data): text = String(data: data, encoding: .utf8)
+            @unknown default: text = nil
             }
+            if let text, let event = LiveEvent.parse(text) { deliver(event) }
+            receive(task)
+        case .failure(let error):
+            let wasClosing = closing
+            if task === self.task { self.task = nil }
+            isOpen = false
+            if !wasClosing {
+                // Refused at the start: a wrong key, or one without live translation.
+                switch (task.response as? HTTPURLResponse)?.statusCode ?? 0 {
+                case 401: deliver(.failed(code: "invalid_api_key", message: ""))
+                case 403, 404: deliver(.failed(code: "model_not_available", message: ""))
+                default: deliver(.failed(code: "network", message: error.localizedDescription))
+                }
+            }
+            deliver(.closed)
         }
     }
 
@@ -179,8 +187,6 @@ struct LiveGate {
         if buffered.count > Self.preroll { buffered.removeFirst(buffered.count - Self.preroll) }
         return []
     }
-
-    var isOpen: Bool { left > 0 }
 
     mutating func reset() {
         buffered = []

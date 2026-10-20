@@ -23,8 +23,6 @@ struct SpeechSegmenter {
 
     /// Someone is speaking now.
     private(set) var speaking = false
-    /// The latest loudness (dBFS), for the level meter.
-    private(set) var level: Double = -100
     /// The microphone is not listened to while the phone speaks a translation aloud (its own
     /// voice would be translated again).
     private(set) var muted = false
@@ -109,9 +107,8 @@ struct SpeechSegmenter {
 
     private mutating func process(_ frame: ArraySlice<Int16>) -> Utterance? {
         position += frame.count
-        let db = PCM.dbfs(frame)
-        level = db
         if muted { return nil }
+        let db = PCM.dbfs(frame)
         remember(db)
         let onset = max(Self.minimumSpeechDb, floorDb + 10)
         let release = max(Self.minimumSpeechDb - 6, floorDb + 5)
@@ -169,27 +166,32 @@ struct SpeechSegmenter {
         return Utterance(samples: Array(kept), start: Double(currentStart) / Double(PCM.rate))
     }
 
-    /// Splits a long speech at the quietest 20 ms of its last six seconds (a breath between
-    /// sentences, usually), never in its first half.
+    /// Splits a long speech where it is quietest.
     private mutating func cut() -> Utterance {
-        let frames = current.count / Self.frame
-        let earliest = max(frames / 2, frames - 300)
-        var quietest = frames
-        var quietestDb = Double.infinity
-        for index in earliest..<frames {
-            let start = index * Self.frame
-            let db = PCM.dbfs(current[start..<start + Self.frame])
-            if db < quietestDb {
-                quietestDb = db
-                quietest = index
-            }
-        }
-        let split = min(current.count, (quietest + 1) * Self.frame)
+        let split = Self.split(current)
         let utterance = Utterance(samples: Array(current[..<split]), start: Double(currentStart) / Double(PCM.rate))
         current = Array(current[split...])
         currentStart += split
         lead = 0
         quietFrames = 0
         return utterance
+    }
+
+    /// Where long speech is split: after the quietest 20 ms of its last six seconds (a breath
+    /// between sentences, usually), never in its first half.
+    static func split(_ samples: [Int16]) -> Int {
+        let frames = samples.count / frame
+        let earliest = max(frames / 2, frames - 300)
+        var quietest = frames
+        var quietestDb = Double.infinity
+        for index in earliest..<frames {
+            let start = index * frame
+            let db = PCM.dbfs(samples[start..<start + frame])
+            if db < quietestDb {
+                quietestDb = db
+                quietest = index
+            }
+        }
+        return min(samples.count, (quietest + 1) * frame)
     }
 }

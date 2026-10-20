@@ -12,20 +12,24 @@ final class Listener: @unchecked Sendable {
     /// down as they start speaking.
     private var recent: [Int16] = []
     private var mine: [Int16]?
+    /// Pieces of the user's turn already given (a long turn goes piece by piece).
+    private var minePieces = 0
     private var chunk: [Int16] = []
     private var sinceLevel = 0
     /// Live mode: the sound itself is wanted.
     let streams: Bool
     var onUtterance: ((SpeechSegmenter.Utterance) -> Void)?
-    /// What the user said while holding the button.
-    var onMine: (([Int16]) -> Void)?
+    /// What the user said while holding the button: the whole turn, or a long turn piece by piece
+    /// (`first` and `last` piece of the turn).
+    var onMine: ((_ samples: [Int16], _ first: Bool, _ last: Bool) -> Void)?
     var onLevel: ((Double, Bool) -> Void)?
     /// A tenth of a second of sound, and whether someone is speaking in it.
     var onChunk: ((Data, Bool) -> Void)?
 
     private static let recentSamples = PCM.rate * 3 / 10
-    /// The button held longer than this ends by itself.
-    private static let longestMine = PCM.rate * 120
+    /// A turn longer than this goes on as it is said, a piece at a time (cut at a breath), so
+    /// its translation is ready soon after the button goes up.
+    private static let longestPiece = PCM.rate * 20
 
     init(silence: Double, streams: Bool) {
         segmenter = SpeechSegmenter(silence: silence)
@@ -35,7 +39,7 @@ final class Listener: @unchecked Sendable {
     func take(_ samples: [Int16]) {
         if mine != nil {
             mine?.append(contentsOf: samples)
-            if (mine?.count ?? 0) >= Self.longestMine { endMine() }
+            if (mine?.count ?? 0) >= Self.longestPiece { giveMine(last: false) }
         } else {
             for utterance in segmenter.push(samples) { deliver(utterance) }
         }
@@ -60,17 +64,29 @@ final class Listener: @unchecked Sendable {
     }
 
     /// The button went down: what the others were saying goes out, and from now on (and the
-    /// moment before) the sound is the user's.
+    /// moment before, unless that was the phone's own voice) the sound is the user's.
     func beginMine() {
         guard mine == nil else { return }
+        let phoneSpoke = segmenter.muted
         if let utterance = segmenter.flush() { deliver(utterance) }
-        mine = recent
+        mine = phoneSpoke ? [] : recent
+        minePieces = 0
     }
 
     func endMine() {
-        guard let samples = mine else { return }
-        mine = nil
-        DispatchQueue.main.async { [weak self] in self?.onMine?(samples) }
+        giveMine(last: true)
+    }
+
+    /// The turn so far: all of it at the end, otherwise up to its last breath (the rest stays
+    /// for the next piece).
+    private func giveMine(last: Bool) {
+        guard let held = mine else { return }
+        let split = last ? held.count : SpeechSegmenter.split(held)
+        let piece = Array(held[..<split])
+        mine = last ? nil : Array(held[split...])
+        let first = minePieces == 0
+        minePieces += 1
+        DispatchQueue.main.async { [weak self] in self?.onMine?(piece, first, last) }
     }
 
     func mute() {
@@ -244,7 +260,9 @@ final class ConversationModel {
     @ObservationIgnored private var listener: Listener?
     @ObservationIgnored private var apiKey: String?
     @ObservationIgnored private var wantsToTalk = false
-    @ObservationIgnored private var waiting: [(id: UUID, samples: [Int16])] = []
+    /// Something loud enough was said in the user's current turn.
+    @ObservationIgnored private var heardThisTurn = false
+    @ObservationIgnored private var waiting: [(id: UUID, samples: [Int16], mine: Bool)] = []
     @ObservationIgnored private var inFlight = 0
     /// Sound of sentences that could not be recognised (no network), to try again.
     @ObservationIgnored private var unrecognised: [UUID: [Int16]] = [:]
@@ -315,7 +333,7 @@ final class ConversationModel {
         apiKey = key
         let listener = Listener(silence: silence, streams: engine == .live)
         listener.onUtterance = { [weak self] utterance in self?.heard(utterance) }
-        listener.onMine = { [weak self] samples in self?.said(samples) }
+        listener.onMine = { [weak self] samples, first, last in self?.said(samples, first: first, last: last) }
         listener.onLevel = { [weak self] level, speaking in self?.heard(level: level, speaking: speaking) }
         listener.onChunk = { [weak self] data, speech in self?.stream(data, speech: speech) }
         self.listener = listener
@@ -356,9 +374,16 @@ final class ConversationModel {
         MeetingStore.save(meeting)
     }
 
+    /// Sentences still being recognised or translated.
+    private var settling: Bool { entries.contains { $0.state == .recognizing || $0.state == .translating } }
+
+    /// A new meeting can start once listening has stopped and the last sentences (and a summary
+    /// being written) are in this one.
+    var canStartNewMeeting: Bool { !running && !summarizing && !settling && !entries.isEmpty }
+
     /// The meeting so far goes to the saved ones; the next starts empty.
     func newMeeting() {
-        guard !running else { return }
+        guard !running, !summarizing, !settling else { return }
         billLive()
         MeetingStore.save(meeting)
         meeting = Meeting()
@@ -415,17 +440,19 @@ final class ConversationModel {
         enqueue(utterance.samples, mine: false, at: Date().addingTimeInterval(-utterance.duration))
     }
 
-    /// The user let go of the button.
-    private func said(_ samples: [Int16]) {
+    /// The user let go of the button (`last`), or a long turn goes on piece by piece.
+    private func said(_ samples: [Int16], first: Bool, last: Bool) {
         guard apiKey != nil else { return }
+        if first { heardThisTurn = false }
         let seconds = Double(samples.count) / Double(PCM.rate)
-        // Nothing louder than the room: the button was tapped, nobody spoke.
+        // Nothing louder than the room: the button was tapped, nobody spoke (or not in this piece).
         let loudest = stride(from: 0, to: samples.count - SpeechSegmenter.frame, by: SpeechSegmenter.frame)
             .map { PCM.dbfs(samples[$0..<$0 + SpeechSegmenter.frame]) }.max() ?? -100
         guard seconds >= 0.5, loudest > -50 else {
-            problem = "Chưa nghe thấy bạn nói. Giữ nút Tôi nói trong lúc nói nhé."
+            if last, !heardThisTurn { problem = "Chưa nghe thấy bạn nói. Giữ nút Tôi nói trong lúc nói nhé." }
             return
         }
+        heardThisTurn = true
         enqueue(samples, mine: true, at: Date().addingTimeInterval(-seconds))
     }
 
@@ -434,8 +461,9 @@ final class ConversationModel {
                           translation: "", target: mine ? partnerLanguage.code : Language.vietnamese.code,
                           state: .recognizing)
         entries.append(entry)
-        // The user's own words go first: the room is waiting for them.
-        if mine { waiting.insert((entry.id, samples), at: 0) } else { waiting.append((entry.id, samples)) }
+        // The user's own words go first (in the order said): the room is waiting for them.
+        let place = mine ? (waiting.firstIndex(where: { !$0.mine }) ?? waiting.count) : waiting.count
+        waiting.insert((entry.id, samples, mine), at: place)
         pump()
     }
 
@@ -509,7 +537,7 @@ final class ConversationModel {
                 $0.state = .done
             }
             record(id)
-            if entry.mine || readAloud { say(translation, mine: entry.mine, language: target) }
+            if entry.mine || readAloud { say(translation, mine: entry.mine, language: target, entry: id) }
         } catch is CancellationError {
         } catch {
             update(id) { $0.state = .failed(error.localizedDescription) }
@@ -628,14 +656,29 @@ final class ConversationModel {
 
     // MARK: Reading aloud
 
-    /// Each translation is fetched as soon as it is ready and read after the one before.
-    /// `mine`: the user's words, in the partners' language; otherwise the others', in Vietnamese.
-    /// `requested`: Đọc lại, read even in Chỉ chữ and without waiting for the room to pause.
-    private func say(_ text: String, mine: Bool, language: Language, requested: Bool = false) {
+    /// Each translation is fetched as soon as it is ready and read after the one before, in the
+    /// order the sentences were said (`entry`: one translated sooner waits a little for those said
+    /// before it on the same side). `mine`: the user's words, in the partners' language; otherwise
+    /// the others', in Vietnamese. `requested`: Đọc lại, read at once (after what is being read),
+    /// even in Chỉ chữ and without waiting for the room to pause.
+    private func say(_ text: String, mine: Bool, language: Language, requested: Bool = false, entry id: UUID? = nil) {
         guard let apiKey, running else { return }
-        let voice = voice
         let generation = speechGeneration
+        let ready = Date()
         let fetch = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
+        guard let id else {
+            return queueSpeech(fetch, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+        }
+        Task {
+            await waitForEarlier(than: id)
+            queueSpeech(fetch, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+        }
+    }
+
+    /// Read after what is already queued (unless the queue was dropped meanwhile).
+    private func queueSpeech(_ fetch: Task<Result<Data, Error>, Never>, text: String, mine: Bool, requested: Bool,
+                             generation: Int, ready: Date) {
+        guard generation == speechGeneration else { return }
         let previous = speechChain
         speechChain = Task { [weak self] in
             await previous?.value
@@ -643,10 +686,25 @@ final class ConversationModel {
             guard let self, generation == self.speechGeneration else { return }
             switch result {
             case .success(let pcm):
-                await self.play(pcm, text: text, generation: generation, mine: mine, requested: requested)
+                await self.play(pcm, text: text, generation: generation, mine: mine, requested: requested, ready: ready)
             case .failure(let error):
                 if !(error is CancellationError) { self.problem = Self.voiceProblem(error) }
             }
+        }
+    }
+
+    /// Until the sentences said shortly before `id` on its side (the user's, or the others') are
+    /// recognised and translated, eight seconds at most.
+    private func waitForEarlier(than id: UUID) async {
+        for _ in 0..<80 {
+            guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+            let entry = entries[index]
+            let earlierBusy = entries[..<index].contains {
+                $0.mine == entry.mine && entry.at.timeIntervalSince($0.at) < 60
+                    && ($0.state == .recognizing || $0.state == .translating)
+            }
+            guard earlierBusy else { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
@@ -695,17 +753,17 @@ final class ConversationModel {
         return "Không đọc to được: \(error.localizedDescription) Bản dịch vẫn hiện trên màn hình."
     }
 
-    private func play(_ pcm: Data, text: String, generation: Int, mine: Bool, requested: Bool) async {
+    private func play(_ pcm: Data, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date) async {
         // Never over the user: a translation ready while they speak waits until they let go.
         while talking, running { try? await Task.sleep(nanoseconds: 100_000_000) }
         // Like an interpreter, the others' words are read once the room pauses: read over someone
-        // still talking, Chính xác would stop listening to them. Someone who talks on for ten
-        // seconds without a pause gets the text only.
+        // still talking, Chính xác would stop listening to them. A sentence that finds no pause
+        // within ten seconds of being translated gets the text only (so the voice never falls
+        // far behind a room that talks on).
         if !mine, !requested, engine == .accurate {
-            var waited = 0
-            while hearsSpeech, running, waited < 100, generation == speechGeneration {
+            let latest = ready.addingTimeInterval(10)
+            while hearsSpeech, running, Date() < latest, generation == speechGeneration {
                 try? await Task.sleep(nanoseconds: 100_000_000)
-                waited += 1
             }
             if hearsSpeech { return }
         }
@@ -849,19 +907,21 @@ final class ConversationModel {
             }
         case .closed:
             guard running, engine == .live else { return }
-            // Dropped (network, a time limit): opened again, a few times.
+            // Dropped (network, a time limit): opened again, a few times. Let go of at once, so
+            // a second word of it closing (the server's, then the socket's) opens nothing more.
+            session.close()
+            if fromOthers { liveToVietnamese = nil } else { liveToPartner = nil }
             liveRetries += 1
             guard liveRetries <= 5 else {
-                problem = "Không nối lại được Dịch liền. Kiểm tra mạng rồi bấm Bắt đầu lại."
+                problem = "Không nối lại được Dịch liền. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
                 return stop()
             }
             Task {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard self.running, self.engine == .live else { return }
                 if fromOthers {
-                    self.liveToVietnamese = self.makeSession(Language.vietnamese.code)
+                    if self.liveToVietnamese == nil { self.liveToVietnamese = self.makeSession(Language.vietnamese.code) }
                 } else {
-                    self.liveToPartner = nil
                     self.openPartnerSession()
                 }
             }

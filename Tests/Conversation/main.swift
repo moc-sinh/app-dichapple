@@ -92,6 +92,14 @@ do {
     check(total > 21 && total < 24, "nothing lost when cut, got \(total)")
 }
 
+// The user's long turn (Tôi nói held) goes piece by piece, split at a breath, not mid-word.
+do {
+    let held = speech(16) + quiet(0.3) + speech(4)
+    let seconds = Double(SpeechSegmenter.split(held)) / 24_000
+    check(seconds > 16 && seconds < 16.35, "a long turn split at the breath, got \(seconds)")
+    check(SpeechSegmenter.split([1, 2, 3]) == 3, "a scrap of sound is not split")
+}
+
 // Muted while the phone speaks: what was said goes out, the rest is not heard.
 do {
     var segmenter = SpeechSegmenter()
@@ -204,7 +212,7 @@ do {
     var after = 0
     for _ in 0..<100 { after += gate.feed(chunk(0), speech: false).count }
     check(after == LiveGate.hold, "three seconds after the last word, then nothing, got \(after)")
-    check(!gate.isOpen, "closed again")
+    check(gate.feed(chunk(7), speech: true).count == LiveGate.preroll + 1, "the next words open it again, with the half second before")
     _ = gate.feed(chunk(1), speech: true)
     gate.reset()
     check(gate.feed(chunk(2), speech: false).isEmpty, "reset closes it")

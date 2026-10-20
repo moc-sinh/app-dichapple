@@ -153,8 +153,6 @@ final class AudioIO: NSObject {
         aloneFinished(ObjectIdentifier(player))
     }
 
-    var playingAlone: Bool { alone != nil }
-
     private func aloneFinished(_ player: ObjectIdentifier) {
         guard let alone, ObjectIdentifier(alone) == player else { return }
         self.alone = nil

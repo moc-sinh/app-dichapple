@@ -8,10 +8,6 @@ enum PCM {
         samples.map { Int16(max(-1, min(1, $0)) * 32767) }
     }
 
-    static func int16(_ samples: [Float]) -> [Int16] {
-        samples.withUnsafeBufferPointer { int16($0) }
-    }
-
     static func data(_ samples: ArraySlice<Int16>) -> Data {
         var data = Data(capacity: samples.count * 2)
         for sample in samples {
