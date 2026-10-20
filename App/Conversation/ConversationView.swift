@@ -101,6 +101,9 @@ struct ConversationView: View {
                 guard let last else { return }
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
             }
+            .onAppear {
+                if let last = model.entries.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 
@@ -109,7 +112,7 @@ struct ConversationView: View {
             Label("Cách dùng", systemImage: "info.circle.fill")
                 .font(.headline)
                 .foregroundStyle(Color.brandGreen)
-            Text("Bấm **Bắt đầu nghe** rồi đặt iPhone giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")
+            Text("Bấm **nút tròn bên trái** (sóng âm) để bắt đầu nghe, rồi đặt iPhone giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")
             if model.readAloud {
                 Text("**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Hợp nói chuyện 1–1: lúc điện thoại đang đọc, app tạm không nghe.")
             } else {
@@ -324,7 +327,8 @@ struct StatusLine: View {
     private func text(at now: Date) -> String {
         if model.starting { return "Đang mở micro…" }
         guard model.running, let started = model.startedAt else {
-            return model.meeting.lines.isEmpty ? "Chưa nghe" : "Đã dừng · \(model.meeting.lines.count) câu trong biên bản"
+            return model.meeting.lines.isEmpty ? "Bấm nút tròn để bắt đầu nghe"
+                : "Đã dừng · \(model.meeting.lines.count) câu · bấm nút tròn để nghe tiếp"
         }
         if model.interrupted { return "Tạm dừng: micro đang bận (cuộc gọi)" }
         if model.speakingMine { return "Đang đọc câu của bạn cho đối tác…" }
