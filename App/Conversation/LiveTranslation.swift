@@ -151,3 +151,39 @@ final class LiveSession {
         DispatchQueue.main.async { [weak self] in self?.onEvent?(event) }
     }
 }
+
+/// Dịch liền is paid by the minute of sound sent, so a quiet room is not sent: sound goes to a
+/// session while someone speaks, with the half second before (the first syllable) and the three
+/// seconds after (so it finishes the sentence), and nothing while nobody speaks.
+struct LiveGate {
+    /// In chunks of a tenth of a second.
+    static let preroll = 5
+    static let hold = 30
+
+    private var buffered: [Data] = []
+    private var left = 0
+
+    /// The next tenth of a second, and whether someone is speaking in it; returns what to send now.
+    mutating func feed(_ chunk: Data, speech: Bool) -> [Data] {
+        if speech {
+            left = Self.hold
+            let out = buffered + [chunk]
+            buffered = []
+            return out
+        }
+        if left > 0 {
+            left -= 1
+            return [chunk]
+        }
+        buffered.append(chunk)
+        if buffered.count > Self.preroll { buffered.removeFirst(buffered.count - Self.preroll) }
+        return []
+    }
+
+    var isOpen: Bool { left > 0 }
+
+    mutating func reset() {
+        buffered = []
+        left = 0
+    }
+}

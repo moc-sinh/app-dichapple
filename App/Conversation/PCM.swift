@@ -35,8 +35,10 @@ enum PCM {
     }
 
     /// A WAV file around the samples, for the transcription upload.
-    static func wav(_ samples: [Int16], rate: Int = rate) -> Data {
-        let body = data(samples)
+    static func wav(_ samples: [Int16], rate: Int = rate) -> Data { wav(pcm: data(samples), rate: rate) }
+
+    /// A WAV file around PCM16 bytes (a translation played again with the microphone off).
+    static func wav(pcm body: Data, rate: Int = rate) -> Data {
         var header = Data()
         func put(_ text: String) { header.append(contentsOf: Array(text.utf8)) }
         func put32(_ value: UInt32) { withUnsafeBytes(of: value.littleEndian) { header.append(contentsOf: $0) } }
@@ -46,6 +48,8 @@ enum PCM {
         put("data"); put32(UInt32(body.count))
         return header + body
     }
+
+    static func seconds(_ pcm: Data) -> Double { Double(pcm.count / 2) / Double(rate) }
 
     /// Loudness in dB below full scale; -100 for silence.
     static func dbfs(_ samples: ArraySlice<Int16>) -> Double {

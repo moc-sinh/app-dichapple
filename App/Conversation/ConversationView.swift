@@ -10,6 +10,11 @@ struct ConversationView: View {
     @State private var showingSaved = false
     @State private var showingSummary = false
     @State private var enlarged: ConversationModel.Entry?
+    /// The transcript keeps its last sentence in view, until the user scrolls up to read.
+    @State private var following = true
+    @State private var unseen = false
+
+    private static let bottom = "bottom"
 
     var body: some View {
         NavigationStack {
@@ -81,28 +86,67 @@ struct ConversationView: View {
 
     // MARK: Transcript
 
+    /// The others' sentences come up once they are recognised: a cough or a chair, dropped then,
+    /// never flashes up as a card. Meanwhile one line at the bottom says something is coming.
     private var transcript: some View {
-        ScrollViewReader { proxy in
+        let shown = model.entries.filter { $0.mine || $0.state != .recognizing }
+        let pending = model.entries.count - shown.count
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if model.entries.isEmpty { hint }
-                    ForEach(model.entries) { entry in
+                    ForEach(shown) { entry in
                         ConversationEntryRow(entry: entry,
+                                             size: model.textSize,
                                              retry: { model.retry(entry.id) },
                                              repeatAloud: { model.repeatAloud(entry.id) },
                                              enlarge: { enlarged = entry })
                             .id(entry.id)
                     }
+                    if pending > 0 {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text(pending > 1 ? "Đang nhận \(pending) câu vừa nói…" : "Đang nhận câu vừa nói…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
+                    }
+                    Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
-            .onChange(of: model.entries.last) { _, last in
-                guard let last else { return }
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
+            .modifier(FollowsBottom(following: $following))
+            .onChange(of: TranscriptEnd(last: shown.last, count: shown.count, pending: pending)) { _, _ in
+                if following {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                } else {
+                    unseen = true
+                }
             }
-            .onAppear {
-                if let last = model.entries.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            .onChange(of: following) { _, now in
+                if now { unseen = false }
+            }
+            .onAppear { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+            .overlay(alignment: .bottom) {
+                if unseen, !following {
+                    Button {
+                        following = true
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                    } label: {
+                        Label("Câu mới", systemImage: "arrow.down")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(.white)
+                            .background(Color.brandGreenFill, in: Capsule())
+                    }
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+                }
             }
         }
     }
@@ -120,7 +164,7 @@ struct ConversationView: View {
             }
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
             if model.engine == .live {
-                Text("Cách dịch: Dịch liền, chữ chạy ngay khi người khác đang nói. Tốn hơn, khoảng 0,034 USD mỗi phút nghe.")
+                Text("Cách dịch: Dịch liền, chữ chạy ngay khi người khác đang nói. Đổi trong menu ⋯.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if !model.liveSpeaksPartner {
@@ -131,6 +175,9 @@ struct ConversationView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+            Text("Chi phí OpenAI với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
         .font(.body)
     }
@@ -170,6 +217,11 @@ struct ConversationView: View {
     }
 
     private var talkDisabled: Bool { model.engine == .live && !model.liveSpeaksPartner }
+
+    private var hourlyCost: Double {
+        CostMeter.perHour(live: model.engine == .live, model: model.quality.model, readAloud: model.readAloud,
+                          openAIVoice: model.voice != ConversationModel.iPhoneVoice)
+    }
 
     private var talkButton: some View {
         HStack(spacing: 10) {
@@ -235,6 +287,13 @@ struct ConversationView: View {
             }
             .pickerStyle(.menu)
             .disabled(model.running || model.starting)
+            Picker(selection: $model.quality) {
+                ForEach(ConversationModel.Quality.allCases) { Text($0.title).tag($0) }
+            } label: {
+                Label("Dịch lời đối phương", systemImage: "dollarsign.circle")
+            }
+            .pickerStyle(.menu)
+            .disabled(model.engine == .live)
             Picker(selection: $model.silence) {
                 ForEach(ConversationModel.silenceChoices, id: \.self) { seconds in
                     Text(String(format: "%.1f giây", seconds).replacingOccurrences(of: ".", with: ",")).tag(seconds)
@@ -247,6 +306,12 @@ struct ConversationView: View {
                 ForEach(ConversationModel.voices, id: \.id) { Text($0.name).tag($0.id) }
             } label: {
                 Label("Giọng đọc", systemImage: "speaker.wave.2")
+            }
+            .pickerStyle(.menu)
+            Picker(selection: $model.textSize) {
+                ForEach(ConversationModel.TextSize.allCases) { Text($0.title).tag($0) }
+            } label: {
+                Label("Cỡ chữ", systemImage: "textformat.size")
             }
             .pickerStyle(.menu)
             Divider()
@@ -272,6 +337,11 @@ struct ConversationView: View {
             } label: {
                 Label("Cuộc họp đã lưu", systemImage: "folder")
             }
+            Divider()
+            Button {} label: {
+                Label("Cuộc họp này: \(CostMeter.text(model.spent)) (ước tính)", systemImage: "chart.bar")
+            }
+            .disabled(true)
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -343,6 +413,7 @@ struct StatusLine: View {
 /// One sentence: the Vietnamese to read (or, for the user's own, what the partners heard).
 struct ConversationEntryRow: View {
     let entry: ConversationModel.Entry
+    var size: ConversationModel.TextSize = .medium
     var retry: () -> Void
     var repeatAloud: () -> Void
     var enlarge: () -> Void
@@ -371,13 +442,13 @@ struct ConversationEntryRow: View {
         let original = entry.translation.isEmpty ? "" : entry.text
         if !main.isEmpty {
             Text(main)
-                .font(entry.mine ? Font.title3.weight(.medium) : Font.title3)
+                .font(entry.mine ? mainFont.weight(.medium) : mainFont)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         if !original.isEmpty {
             Text(original)
-                .font(.subheadline)
+                .font(originalFont)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
         }
@@ -414,6 +485,22 @@ struct ConversationEntryRow: View {
                 .buttonStyle(.borderless)
                 .tint(entry.mine ? Color.brandGreen : Color.brandOrange)
             }
+        }
+    }
+
+    private var mainFont: Font {
+        switch size {
+        case .medium: return .title3
+        case .large: return .title2
+        case .extraLarge: return .title
+        }
+    }
+
+    private var originalFont: Font {
+        switch size {
+        case .medium: return .subheadline
+        case .large: return .body
+        case .extraLarge: return .title3
         }
     }
 
@@ -579,6 +666,12 @@ struct MeetingDetailView: View {
                     Text(problem).foregroundStyle(.red)
                 }
             }
+            if let cost = meeting.cost {
+                Section {
+                    Text("Chi phí OpenAI ước tính: \(CostMeter.text(cost.dollars))")
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section("Biên bản") {
                 ForEach(Array(meeting.lines.enumerated()), id: \.offset) { _, line in
                     VStack(alignment: .leading, spacing: 4) {
@@ -612,10 +705,48 @@ struct MeetingDetailView: View {
         problem = nil
         defer { summarizing = false }
         do {
-            meeting.summary = try await ConversationModel.summarize(meeting)
+            let summary = try await ConversationModel.summarize(meeting)
+            meeting.summary = summary.text
+            var cost = meeting.cost ?? CostMeter()
+            cost.used(summary.usage, by: summary.model)
+            meeting.cost = cost
             MeetingStore.save(meeting)
         } catch {
             problem = error.localizedDescription
+        }
+    }
+}
+
+/// What the transcript's end shows: when it changes, the transcript follows it down.
+private struct TranscriptEnd: Equatable {
+    let last: ConversationModel.Entry?
+    let count: Int
+    let pending: Int
+}
+
+/// Follows the transcript's end while it is in view; stops once the user scrolls up to read
+/// (and starts again when they scroll back down). Before iOS 18 it always follows.
+private struct FollowsBottom: ViewModifier {
+    @Binding var following: Bool
+    @State private var userScrolling = false
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in
+                    userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.visibleRect.maxY >= geometry.contentSize.height - 80
+                } action: { _, atBottom in
+                    if atBottom {
+                        following = true
+                    } else if userScrolling {
+                        following = false
+                    }
+                }
+        } else {
+            content
         }
     }
 }

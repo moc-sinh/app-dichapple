@@ -77,6 +77,24 @@
   Linux với dịch vụ giả (không vào repo). **Chưa thử trên máy thật**: độ nhạy micro trong phòng họp, Dịch
   liền với key của người dùng.
 
+- **1.8.0: soát và tiết kiệm cho Hội thoại (20/10, tối).** Sửa **Đọc lại**: trước đây không đọc gì khi đã
+  Dừng nghe, khi đang ở Chỉ chữ, hoặc khi phòng còn người nói (chờ 10 giây rồi bỏ); giờ đọc ngay ở mọi trường hợp
+  (sau Dừng: `AudioIO.playAlone`, chỉ loa). Giọng đã làm được giữ (`VoiceCache`, 12 MB) nên đọc lại không trả tiền
+  lần nữa. Giọng OpenAI được dặn đúng ngôn ngữ (đỡ giọng Anh khi đọc tiếng Việt). Phần chữ: câu của người khác chỉ
+  hiện khi đã nhận ra chữ (không còn thẻ "Đang nghe…" hiện lên rồi biến mất vì tiếng ho), một dòng chờ ở cuối; tự
+  cuộn theo câu mới trừ khi người dùng kéo lên đọc (iOS 18+, nút "Câu mới"); menu **Cỡ chữ**.
+  Chi phí (giá 10/2026: gpt-transcribe 0,0045 USD/phút, Sol 2/10 USD mỗi triệu token, Luna 0,1/0,5,
+  gpt-4o-mini-tts ~0,015 USD/phút, gpt-realtime-translate 0,034 USD/phút): trước đây Chính xác + Sol + đọc to
+  ~3,4 USD/giờ, đắt hơn cả Dịch liền. Giờ **Dịch lời đối phương** mặc định Luna (Tiết kiệm), câu Tôi nói vẫn dùng
+  model của Cài đặt; **Giọng iPhone** miễn phí (`AppleVoice`, AVSpeechSynthesizer.write → PCM 24 kHz, đi chung
+  đường phát/chống vọng); Dịch liền không gửi tiếng lúc phòng im (`LiveGate`: 0,5 s trước, 3 s sau lời nói; chưa
+  chắc OpenAI có tính tiền khoảng lặng hay không, gửi ít đi thì không thiệt). `CostMeter` cộng chi phí theo token
+  OpenAI báo về và theo phút, lưu trong `Meeting.cost`, hiện ở menu ⋯ và Cuộc họp đã lưu.
+  Test: `Tests/Conversation` 86 kiểm tra (thêm cache, gate, chi phí, usage). Mô phỏng cuộc họp trên Linux với dịch
+  vụ giả và AudioIO giả (20 kiểm tra, không vào repo). Trên Linux, Tests/Conversation cần thay NaturalLanguage
+  bằng bản giả; Swift 6.1.2 lấy từ mirror.gcr.io (download.swift.org bị chặn).
+  **Chưa thử trên máy thật:** giọng iPhone đọc ra có đủ (AVSpeechSynthesizer.write), cuộn theo câu mới.
+
 ## Việc tiếp theo (theo thứ tự)
 
 1. Chờ CI của bản 1.5.0, gửi link IPA dạng

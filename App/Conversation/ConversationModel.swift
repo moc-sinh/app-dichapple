@@ -20,7 +20,8 @@ final class Listener: @unchecked Sendable {
     /// What the user said while holding the button.
     var onMine: (([Int16]) -> Void)?
     var onLevel: ((Double, Bool) -> Void)?
-    var onChunk: ((Data) -> Void)?
+    /// A tenth of a second of sound, and whether someone is speaking in it.
+    var onChunk: ((Data, Bool) -> Void)?
 
     private static let recentSamples = PCM.rate * 3 / 10
     /// The button held longer than this ends by itself.
@@ -42,10 +43,11 @@ final class Listener: @unchecked Sendable {
         if recent.count > Self.recentSamples { recent.removeFirst(recent.count - Self.recentSamples) }
         if streams {
             chunk.append(contentsOf: samples)
+            let speech = mine != nil || segmenter.speaking
             while chunk.count >= PCM.rate / 10 {
                 let data = PCM.data(chunk[..<(PCM.rate / 10)])
                 chunk.removeFirst(PCM.rate / 10)
-                DispatchQueue.main.async { [weak self] in self?.onChunk?(data) }
+                DispatchQueue.main.async { [weak self] in self?.onChunk?(data, speech) }
             }
         }
         sinceLevel += samples.count
@@ -95,16 +97,21 @@ final class Listener: @unchecked Sendable {
     }
 }
 
-/// The calls to OpenAI, replaceable in a test.
+/// The calls to OpenAI (and the iPhone's own voice), replaceable in a test.
 struct ConversationServices {
     var transcribe: (_ apiKey: String, _ wav: Data, _ prompt: String) async throws -> SpeechServices.Transcript
-    var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: [ChatLine]) async throws -> String
-    var speak: (_ apiKey: String, _ text: String, _ voice: String) async throws -> Data
+    var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: [ChatLine],
+                    _ model: TranslationModel) async throws -> Translation
+    /// 24 kHz mono PCM16 of `text`, in `language`.
+    var speak: (_ apiKey: String, _ text: String, _ voice: String, _ language: Language) async throws -> Data
 
     static let openAI = ConversationServices(
         transcribe: { try await SpeechServices(apiKey: $0).transcribe(wav: $1, prompt: $2) },
-        translate: { try await Translator(apiKey: $0).translate($1, to: $2, context: $3, spoken: true).text },
-        speak: { try await SpeechServices(apiKey: $0).speak($1, voice: $2) })
+        translate: { try await Translator(apiKey: $0, model: $4).translate($1, to: $2, context: $3, spoken: true) },
+        speak: { apiKey, text, voice, language in
+            if voice == ConversationModel.iPhoneVoice { return try await AppleVoice.pcm(text, language: language.code) }
+            return try await SpeechServices(apiKey: apiKey).speak(text, voice: voice, language: language)
+        })
 }
 
 /// The Hội thoại tab, for a meeting or a conversation with foreign partners.
@@ -125,6 +132,27 @@ final class ConversationModel {
         case accurate, live
         var id: String { rawValue }
         var title: String { self == .accurate ? "Chính xác (sau mỗi câu)" : "Dịch liền (ngay khi nói)" }
+    }
+
+    /// How the others' words are translated (the user's own always use the app's translation model).
+    enum Quality: String, CaseIterable, Identifiable {
+        case economy, best
+        var id: String { rawValue }
+        var title: String { self == .economy ? "Tiết kiệm · GPT-6 Luna" : "Chuẩn nhất · GPT-6.1 Sol" }
+        var model: TranslationModel { self == .economy ? .luna : .sol }
+    }
+
+    /// How large the translations are written, for a phone lying on the table.
+    enum TextSize: Int, CaseIterable, Identifiable {
+        case medium, large, extraLarge
+        var id: Int { rawValue }
+        var title: String {
+            switch self {
+            case .medium: return "Vừa"
+            case .large: return "Lớn"
+            case .extraLarge: return "Rất lớn"
+            }
+        }
     }
 
     struct Entry: Identifiable, Equatable {
@@ -158,6 +186,8 @@ final class ConversationModel {
         static let partner = "conversation.partner"
         static let silence = "conversation.silence"
         static let voice = "conversation.voice"
+        static let quality = "conversation.quality"
+        static let textSize = "conversation.textSize"
     }
 
     // MARK: Settings, kept between launches (this app's own defaults: the keyboard never needs them)
@@ -176,9 +206,15 @@ final class ConversationModel {
         }
     }
     var voice: String { didSet { defaults.set(voice, forKey: Keys.voice) } }
+    var quality: Quality { didSet { defaults.set(quality.rawValue, forKey: Keys.quality) } }
+    var textSize: TextSize { didSet { defaults.set(textSize.rawValue, forKey: Keys.textSize) } }
 
     static let silenceChoices: [Double] = [0.4, 0.6, 0.8, 1.0, 1.2, 1.4]
-    static let voices: [(id: String, name: String)] = [("marin", "Marin (nữ)"), ("cedar", "Cedar (nam)")]
+    /// The iPhone's own voice: free, made on the phone, less natural than OpenAI's.
+    nonisolated static let iPhoneVoice = "iphone"
+    static let voices: [(id: String, name: String)] = [
+        ("marin", "Marin (nữ, OpenAI)"), ("cedar", "Cedar (nam, OpenAI)"), (iPhoneVoice, "Giọng iPhone (miễn phí)"),
+    ]
 
     // MARK: State
 
@@ -222,6 +258,14 @@ final class ConversationModel {
     @ObservationIgnored private var captions: [Bool: (id: UUID, last: Date)] = [:]
     @ObservationIgnored private var partnerTailUntil = Date.distantPast
     @ObservationIgnored private var liveRetries = 0
+    /// Dịch liền: the others' sound is sent while someone speaks, not while the room is quiet.
+    @ObservationIgnored private var othersGate = LiveGate()
+    /// Seconds sent to Dịch liền and not yet in the meeting's cost (added a sentence at a time,
+    /// not ten times a second).
+    @ObservationIgnored private var unbilledLive = 0.0
+    /// Voices already made: Đọc lại plays them at once, without paying again.
+    @ObservationIgnored private var voiceCache = VoiceCache()
+    @ObservationIgnored private var aloneTask: Task<Void, Never>?
 
     /// Sentences recognised and translated at once: a busy meeting does not fall behind.
     private static let parallel = 3
@@ -233,7 +277,10 @@ final class ConversationModel {
         partnerCode = defaults.string(forKey: Keys.partner) ?? Language.autoCode
         let savedSilence = defaults.double(forKey: Keys.silence)
         silence = Self.silenceChoices.contains(savedSilence) ? savedSilence : 0.8
-        voice = defaults.string(forKey: Keys.voice) ?? "marin"
+        let savedVoice = defaults.string(forKey: Keys.voice) ?? ""
+        voice = Self.voices.contains { $0.id == savedVoice } ? savedVoice : "marin"
+        quality = Quality(rawValue: defaults.string(forKey: Keys.quality) ?? "") ?? .economy
+        textSize = TextSize(rawValue: defaults.integer(forKey: Keys.textSize)) ?? .medium
         audio.onInterruption = { [weak self] began in self?.interrupted = began }
         if defaults.bool(forKey: "conversationDemo") { fillDemo() }
     }
@@ -270,7 +317,7 @@ final class ConversationModel {
         listener.onUtterance = { [weak self] utterance in self?.heard(utterance) }
         listener.onMine = { [weak self] samples in self?.said(samples) }
         listener.onLevel = { [weak self] level, speaking in self?.heard(level: level, speaking: speaking) }
-        listener.onChunk = { [weak self] data in self?.stream(data) }
+        listener.onChunk = { [weak self] data, speech in self?.stream(data, speech: speech) }
         self.listener = listener
         audio.onSamples = Listener.sink(listener)
         do {
@@ -304,6 +351,7 @@ final class ConversationModel {
         if let listener { audio.queue.async { listener.flush() } }
         closeLive()
         finishCaptions(all: true)
+        billLive()
         UIApplication.shared.isIdleTimerDisabled = false
         MeetingStore.save(meeting)
     }
@@ -311,6 +359,7 @@ final class ConversationModel {
     /// The meeting so far goes to the saved ones; the next starts empty.
     func newMeeting() {
         guard !running else { return }
+        billLive()
         MeetingStore.save(meeting)
         meeting = Meeting()
         entries = []
@@ -416,6 +465,7 @@ final class ConversationModel {
             return update(id) { $0.state = .failed(error.localizedDescription) }
         }
         unrecognised[id] = nil
+        charge { $0.transcribed(seconds: seconds) }
         guard let entry = entries.first(where: { $0.id == id }) else { return }
         let text = transcript.text
         // Noise the recognizer wrote words for, or the phone's own voice heard again.
@@ -447,14 +497,19 @@ final class ConversationModel {
             $0.target = target.code
             $0.state = .translating
         }
+        // What the partners hear is the user's own words: the app's translation model. The others'
+        // words are only read by the user: the cheaper model by default.
+        let model = entry.mine ? SharedStore.model : quality.model
         do {
-            let translation = try await services.translate(apiKey, entry.text, target, context(before: entry.at))
+            let result = try await services.translate(apiKey, entry.text, target, context(before: entry.at), model)
+            charge { $0.used(result.usage, by: model) }
+            let translation = result.text
             update(id) {
                 $0.translation = translation
                 $0.state = .done
             }
             record(id)
-            if entry.mine || readAloud { say(translation, mine: entry.mine) }
+            if entry.mine || readAloud { say(translation, mine: entry.mine, language: target) }
         } catch is CancellationError {
         } catch {
             update(id) { $0.state = .failed(error.localizedDescription) }
@@ -472,11 +527,20 @@ final class ConversationModel {
         }
     }
 
-    /// Reads a translation aloud again.
+    /// Reads a translation aloud again: at once, in Chỉ chữ too, and after listening has stopped.
     func repeatAloud(_ id: UUID) {
         guard let entry = entries.first(where: { $0.id == id }), !entry.translation.isEmpty else { return }
         if apiKey == nil { apiKey = SharedStore.apiKey }
-        say(entry.translation, mine: entry.mine)
+        let language = Self.language(code: entry.target)
+        if running {
+            say(entry.translation, mine: entry.mine, language: language, requested: true)
+        } else {
+            sayAlone(entry.translation, language: language)
+        }
+    }
+
+    static func language(code: String) -> Language {
+        code == Language.vietnamese.code ? .vietnamese : Language.named(code) ?? .vietnamese
     }
 
     /// The language a sentence was spoken in: what the recognizer heard, checked against the text
@@ -527,7 +591,27 @@ final class ConversationModel {
                                 translation: entry.translation, target: entry.target)
         let index = meeting.lines.lastIndex { $0.at <= line.at }.map { $0 + 1 } ?? 0
         meeting.lines.insert(line, at: index)
+        billLive()
         MeetingStore.save(meeting)
+    }
+
+    /// Into the meeting's cost (kept with it).
+    private func charge(_ change: (inout CostMeter) -> Void) {
+        var cost = meeting.cost ?? CostMeter()
+        change(&cost)
+        meeting.cost = cost
+    }
+
+    private func billLive() {
+        guard unbilledLive > 0 else { return }
+        let seconds = unbilledLive
+        unbilledLive = 0
+        charge { $0.streamed(seconds: seconds) }
+    }
+
+    /// What this meeting has cost so far, estimated.
+    var spent: Double {
+        (meeting.cost?.dollars ?? 0) + unbilledLive / 60 * CostMeter.Rate.livePerMinute
     }
 
     private func update(_ id: UUID, _ change: (inout Entry) -> Void) {
@@ -546,31 +630,78 @@ final class ConversationModel {
 
     /// Each translation is fetched as soon as it is ready and read after the one before.
     /// `mine`: the user's words, in the partners' language; otherwise the others', in Vietnamese.
-    private func say(_ text: String, mine: Bool) {
+    /// `requested`: Đọc lại, read even in Chỉ chữ and without waiting for the room to pause.
+    private func say(_ text: String, mine: Bool, language: Language, requested: Bool = false) {
         guard let apiKey, running else { return }
         let voice = voice
         let generation = speechGeneration
-        let speak = services.speak
-        let fetch = Task { try? await speak(apiKey, text, voice) }
+        let fetch = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
         let previous = speechChain
         speechChain = Task { [weak self] in
             await previous?.value
-            guard let pcm = await fetch.value else {
-                self?.problem = "Không đọc to được (mạng hoặc API key). Bản dịch vẫn hiện trên màn hình."
-                return
-            }
+            let result = await fetch.value
             guard let self, generation == self.speechGeneration else { return }
-            await self.play(pcm, text: text, generation: generation, mine: mine)
+            switch result {
+            case .success(let pcm):
+                await self.play(pcm, text: text, generation: generation, mine: mine, requested: requested)
+            case .failure(let error):
+                if !(error is CancellationError) { self.problem = Self.voiceProblem(error) }
+            }
         }
     }
 
-    private func play(_ pcm: Data, text: String, generation: Int, mine: Bool) async {
+    /// Read again after listening stopped: the speaker only.
+    private func sayAlone(_ text: String, language: Language) {
+        let voice = voice
+        guard voice == Self.iPhoneVoice || apiKey != nil else {
+            problem = TranslateError.noKey.errorDescription
+            return
+        }
+        aloneTask?.cancel()
+        audio.stopAlone()
+        let fetch = voiceTask(text, voice: voice, language: language, apiKey: apiKey ?? "")
+        aloneTask = Task { [weak self] in
+            let result = await fetch.value
+            guard let self, !Task.isCancelled, !self.running else { return }
+            switch result {
+            case .success(let pcm):
+                self.audio.playAlone(pcm) {}
+            case .failure(let error):
+                if !(error is CancellationError) { self.problem = Self.voiceProblem(error) }
+            }
+            MeetingStore.save(self.meeting)
+        }
+    }
+
+    /// The voice for `text`: the one made before, or a new one (paid for, unless the iPhone's).
+    private func voiceTask(_ text: String, voice: String, language: Language, apiKey: String) -> Task<Result<Data, Error>, Never> {
+        let key = VoiceCache.key(text: text, voice: voice, language: language.code)
+        if let cached = voiceCache.get(key) { return Task { .success(cached) } }
+        let speak = services.speak
+        return Task { [weak self] in
+            do {
+                let pcm = try await speak(apiKey, text, voice, language)
+                self?.voiceCache.put(key, pcm)
+                if voice != Self.iPhoneVoice { self?.charge { $0.voiced(seconds: PCM.seconds(pcm)) } }
+                return .success(pcm)
+            } catch {
+                return .failure(error)
+            }
+        }
+    }
+
+    private static func voiceProblem(_ error: Error) -> String {
+        if let apple = error as? AppleVoice.Failure, let text = apple.errorDescription { return text }
+        return "Không đọc to được: \(error.localizedDescription) Bản dịch vẫn hiện trên màn hình."
+    }
+
+    private func play(_ pcm: Data, text: String, generation: Int, mine: Bool, requested: Bool) async {
         // Never over the user: a translation ready while they speak waits until they let go.
         while talking, running { try? await Task.sleep(nanoseconds: 100_000_000) }
         // Like an interpreter, the others' words are read once the room pauses: read over someone
         // still talking, Chính xác would stop listening to them. Someone who talks on for ten
         // seconds without a pause gets the text only.
-        if !mine, engine == .accurate {
+        if !mine, !requested, engine == .accurate {
             var waited = 0
             while hearsSpeech, running, waited < 100, generation == speechGeneration {
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -578,7 +709,7 @@ final class ConversationModel {
             }
             if hearsSpeech { return }
         }
-        guard running, generation == speechGeneration, mine || readAloud else { return }
+        guard running, generation == speechGeneration, mine || requested || readAloud else { return }
         beginAloud(mine: mine)
         echo.spoke(text, at: Self.now)
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
@@ -623,6 +754,7 @@ final class ConversationModel {
 
     private func openLive() {
         liveRetries = 0
+        othersGate.reset()
         liveToVietnamese = makeSession(Language.vietnamese.code)
         openPartnerSession()
     }
@@ -658,19 +790,28 @@ final class ConversationModel {
     }
 
     /// The microphone's sound goes to the session for whoever speaks: the user's while the button is
-    /// down, everyone else's otherwise. The other session gets silence, so it finishes what it was
-    /// saying.
-    private func stream(_ data: Data) {
+    /// down, everyone else's otherwise. The other session gets silence for a moment, so it finishes
+    /// what it was saying. A quiet room is not sent at all (Dịch liền is paid by the minute sent).
+    private func stream(_ data: Data, speech: Bool) {
         guard running, engine == .live else { return }
         let silent = Data(count: data.count)
         if talking {
-            liveToPartner?.send(audio: data)
-            liveToVietnamese?.send(audio: silent)
+            send(data, to: liveToPartner)
+            for chunk in othersGate.feed(silent, speech: false) { send(chunk, to: liveToVietnamese) }
         } else {
             // The phone speaking the partners' language is not someone in the room to translate.
-            liveToVietnamese?.send(audio: playingMine > 0 ? silent : data)
-            if Date() < partnerTailUntil { liveToPartner?.send(audio: silent) }
+            let phoneSpeaksMine = playingMine > 0
+            for chunk in othersGate.feed(phoneSpeaksMine ? silent : data, speech: speech && !phoneSpeaksMine) {
+                send(chunk, to: liveToVietnamese)
+            }
+            if Date() < partnerTailUntil { send(silent, to: liveToPartner) }
         }
+    }
+
+    private func send(_ chunk: Data, to session: LiveSession?) {
+        guard let session else { return }
+        session.send(audio: chunk)
+        unbilledLive += PCM.seconds(chunk)
     }
 
     private func live(_ event: LiveEvent, from session: LiveSession) {
@@ -779,10 +920,14 @@ final class ConversationModel {
 
     // MARK: Summary
 
-    /// Minutes of the meeting in Vietnamese: what was discussed, agreed and left to do.
-    static func summarize(_ meeting: Meeting) async throws -> String {
+    /// Minutes of the meeting in Vietnamese (what was discussed, agreed and left to do), with
+    /// what writing them cost.
+    static func summarize(_ meeting: Meeting) async throws -> (text: String, usage: TokenUsage?, model: TranslationModel) {
         guard let apiKey = SharedStore.apiKey else { throw TranslateError.noKey }
-        return try await Translator(apiKey: apiKey).write(instructions: summaryInstructions, input: meeting.transcript)
+        let model = SharedStore.model
+        let result = try await Translator(apiKey: apiKey, model: model).write(instructions: summaryInstructions,
+                                                                             input: meeting.transcript)
+        return (result.text, result.usage, model)
     }
 
     func summarizeCurrent() async {
@@ -790,7 +935,9 @@ final class ConversationModel {
         summarizing = true
         defer { summarizing = false }
         do {
-            meeting.summary = try await Self.summarize(meeting)
+            let summary = try await Self.summarize(meeting)
+            meeting.summary = summary.text
+            charge { $0.used(summary.usage, by: summary.model) }
             MeetingStore.save(meeting)
         } catch {
             problem = error.localizedDescription

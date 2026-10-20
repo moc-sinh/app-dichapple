@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum TranslateError: LocalizedError {
     case noKey, noFullAccess, empty, network, busy, formatUnsupported, server(String)
@@ -32,6 +35,25 @@ struct Translation {
     /// the translation); kept for translations saved in the history before.
     let note: String?
     let language: Language
+    /// What the request used (Hội thoại counts what it spends).
+    var usage: TokenUsage? = nil
+}
+
+/// The tokens of one request, as OpenAI reports them: what it is paid by.
+struct TokenUsage: Equatable {
+    var input = 0
+    /// Of `input`, read from OpenAI's prompt cache (a tenth of the price or less).
+    var cachedInput = 0
+    /// Written, reasoning included.
+    var output = 0
+
+    static func from(_ json: [String: Any]) -> TokenUsage? {
+        guard let usage = json["usage"] as? [String: Any] else { return nil }
+        let details = usage["input_tokens_details"] as? [String: Any]
+        return TokenUsage(input: (usage["input_tokens"] as? NSNumber)?.intValue ?? 0,
+                          cachedInput: (details?["cached_tokens"] as? NSNumber)?.intValue ?? 0,
+                          output: (usage["output_tokens"] as? NSNumber)?.intValue ?? 0)
+    }
 }
 
 /// One request per translation to the OpenAI Responses API. No SDK.
@@ -89,15 +111,16 @@ struct Translator {
             if Self.refused(json) { throw TranslateError.server("OpenAI từ chối dịch tin này.") }
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
-        guard let translation = Self.parse(output, language: target, structured: body["text"] != nil),
+        guard var translation = Self.parse(output, language: target, structured: body["text"] != nil),
               !translation.text.isEmpty else {
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
+        translation.usage = TokenUsage.from(json)
         return translation
     }
 
     /// A plain written answer (the summary of a meeting): no translation format.
-    func write(instructions: String, input: String) async throws -> String {
+    func write(instructions: String, input: String) async throws -> (text: String, usage: TokenUsage?) {
         let body: [String: Any] = [
             "model": model.rawValue,
             "instructions": instructions,
@@ -113,7 +136,7 @@ struct Translator {
         guard let output = Self.outputText(json), !output.isEmpty else {
             throw TranslateError.server("Không nhận được câu trả lời. Thử lại.")
         }
-        return output
+        return (output, TokenUsage.from(json))
     }
 
     /// Opens the connection to OpenAI before it is needed, so the first Dịch doesn't also wait

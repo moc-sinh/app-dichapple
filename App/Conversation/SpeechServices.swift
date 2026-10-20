@@ -84,13 +84,13 @@ struct SpeechServices {
     }
 
     /// The translation read aloud: 24 kHz mono PCM16. `marin` and `cedar` are OpenAI's most
-    /// natural voices.
-    func speak(_ text: String, voice: String) async throws -> Data {
+    /// natural voices. Told the language, so a Vietnamese sentence is not read with an English accent.
+    func speak(_ text: String, voice: String, language: Language) async throws -> Data {
         let body: [String: Any] = [
             "model": "gpt-4o-mini-tts",
             "voice": voice,
             "input": String(text.prefix(3_000)),
-            "instructions": "Speak like a professional interpreter: clear, natural and warm, at a brisk conversational pace.",
+            "instructions": Self.voiceInstructions(language),
             "response_format": "pcm",
         ]
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/speech")!)
@@ -101,6 +101,11 @@ struct SpeechServices {
         let (data, status) = try await load(request)
         guard status == 200 else { throw failure(status: status, data: data, model: "gpt-4o-mini-tts") }
         return data
+    }
+
+    static func voiceInstructions(_ language: Language) -> String {
+        "The text is in \(language.englishName); speak it with a native \(language.englishName) accent. "
+            + "Speak like a professional interpreter: clear, natural and warm, at a brisk conversational pace."
     }
 
     private func send(_ request: URLRequest, model: String) async throws -> [String: Any] {
@@ -156,4 +161,35 @@ struct MultipartForm {
 
     /// The body with its closing boundary.
     var finished: Data { body + Data("--\(boundary)--\r\n".utf8) }
+}
+
+/// Voices already made, so Đọc lại plays at once and is not paid for again. The newest are kept,
+/// up to `limit` bytes (a minute of voice is 2.9 MB).
+struct VoiceCache {
+    private var items: [(key: String, pcm: Data)] = []
+    private var bytes = 0
+    let limit: Int
+
+    init(limit: Int = 12_000_000) {
+        self.limit = limit
+    }
+
+    static func key(text: String, voice: String, language: String) -> String { "\(voice)|\(language)|\(text)" }
+
+    mutating func get(_ key: String) -> Data? {
+        guard let index = items.firstIndex(where: { $0.key == key }) else { return nil }
+        let item = items.remove(at: index)
+        items.append(item)
+        return item.pcm
+    }
+
+    mutating func put(_ key: String, _ pcm: Data) {
+        guard pcm.count <= limit else { return }
+        if let index = items.firstIndex(where: { $0.key == key }) { bytes -= items.remove(at: index).pcm.count }
+        items.append((key, pcm))
+        bytes += pcm.count
+        while bytes > limit, !items.isEmpty { bytes -= items.removeFirst().pcm.count }
+    }
+
+    var count: Int { items.count }
 }

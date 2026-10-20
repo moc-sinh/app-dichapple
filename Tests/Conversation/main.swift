@@ -2,7 +2,7 @@
 // swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
 //   Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
 //   App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SpeechServices.swift \
-//   Tests/Conversation/main.swift -o conversation-tests && ./conversation-tests
+//   App/Conversation/ConversationCost.swift Tests/Conversation/main.swift -o conversation-tests && ./conversation-tests
 import Foundation
 
 var failed = 0
@@ -168,6 +168,85 @@ do {
     check(body.hasSuffix("\u{1}\u{2}\r\n--\(form.boundary)--\r\n"), "form closes after the file")
 }
 check(Prompt.spoken(into: "English").contains("speech recognition"), "spoken prompt")
+check(SpeechServices.voiceInstructions(.vietnamese).contains("Vietnamese accent"), "the voice is told the language")
+check(PCM.wav(pcm: PCM.data([1, -2, 3])) == PCM.wav([1, -2, 3]), "WAV around PCM bytes")
+check(PCM.seconds(Data(count: 48_000)) == 1, "a second of PCM")
+
+// MARK: Voices kept for Đọc lại
+
+do {
+    var cache = VoiceCache(limit: 10)
+    cache.put("a", Data(count: 4))
+    cache.put("b", Data(count: 4))
+    check(cache.get("a") == Data(count: 4), "a voice made before is played again")
+    cache.put("c", Data(count: 4))
+    check(cache.get("b") == nil && cache.get("a") != nil && cache.get("c") != nil, "the oldest unused goes first")
+    cache.put("huge", Data(count: 11))
+    check(cache.get("huge") == nil && cache.count == 2, "a voice larger than the limit is not kept")
+    cache.put("a", Data(count: 6))
+    check(cache.get("a")?.count == 6 && cache.count == 2, "made again, replaced")
+    cache.put("d", Data(count: 5))
+    check(cache.get("c") == nil && cache.get("a") == nil && cache.get("d") != nil, "over the limit, the oldest go")
+    check(VoiceCache.key(text: "Xin chào", voice: "marin", language: "vi")
+          != VoiceCache.key(text: "Xin chào", voice: "cedar", language: "vi"), "each voice kept apart")
+}
+
+// MARK: Dịch liền does not send a quiet room
+
+do {
+    var gate = LiveGate()
+    func chunk(_ n: UInt8) -> Data { Data([n]) }
+    var sent: [Data] = []
+    for n in 0..<20 { sent += gate.feed(chunk(UInt8(n)), speech: false) }
+    check(sent.isEmpty, "a quiet room is not sent")
+    sent = gate.feed(chunk(100), speech: true)
+    check(sent == [15, 16, 17, 18, 19].map(chunk) + [chunk(100)], "speech goes with the half second before it")
+    var after = 0
+    for _ in 0..<100 { after += gate.feed(chunk(0), speech: false).count }
+    check(after == LiveGate.hold, "three seconds after the last word, then nothing, got \(after)")
+    check(!gate.isOpen, "closed again")
+    _ = gate.feed(chunk(1), speech: true)
+    gate.reset()
+    check(gate.feed(chunk(2), speech: false).isEmpty, "reset closes it")
+}
+
+// MARK: What it costs
+
+do {
+    func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
+    var meter = CostMeter()
+    meter.transcribed(seconds: 60)
+    check(near(meter.dollars, 0.0045), "a minute recognised")
+    meter = CostMeter()
+    meter.used(TokenUsage(input: 1_000, cachedInput: 200, output: 100), by: .sol)
+    let solExpected: Double = (1_600 + 20 + 1_000) / 1_000_000
+    check(near(meter.dollars, solExpected), "Sol tokens, cached ones cheaper")
+    meter = CostMeter()
+    meter.used(TokenUsage(input: 1_000, cachedInput: 0, output: 100), by: .luna)
+    let lunaExpected: Double = 150 / 1_000_000
+    check(near(meter.dollars, lunaExpected), "Luna tokens")
+    meter.used(nil, by: .sol)
+    meter.voiced(seconds: 60)
+    meter.streamed(seconds: 60)
+    check(near(meter.dollars, lunaExpected + 0.015 + 0.034), "voice and live by the minute")
+    check(CostMeter.text(0.004) == "dưới 0,01 USD" && CostMeter.text(0.034) == "khoảng 0,03 USD"
+          && CostMeter.text(2.04) == "khoảng 2,0 USD", "cost in Vietnamese: \(CostMeter.text(0.034)), \(CostMeter.text(2.04))")
+    let economy = CostMeter.perHour(live: false, model: .luna, readAloud: false, openAIVoice: true)
+    let best = CostMeter.perHour(live: false, model: .sol, readAloud: false, openAIVoice: true)
+    let voice = CostMeter.perHour(live: false, model: .luna, readAloud: true, openAIVoice: true)
+    let iPhone = CostMeter.perHour(live: false, model: .luna, readAloud: true, openAIVoice: false)
+    let live = CostMeter.perHour(live: true, model: .luna, readAloud: true, openAIVoice: true)
+    check(economy > 0.3 && economy < 0.4, "Tiết kiệm, text only: about 0.35 USD an hour, got \(economy)")
+    check(best > 2 && best < 3, "Sol for everything: about 2.5 USD an hour, got \(best)")
+    check(near(voice - economy, 0.9) && near(iPhone, economy), "OpenAI's voice adds 0.9 an hour, the iPhone's nothing")
+    check(near(live, 2.04), "Dịch liền: 2.04 USD an hour")
+    let json: [String: Any] = ["usage": ["input_tokens": 812, "input_tokens_details": ["cached_tokens": 0], "output_tokens": 57]]
+    let decoded = (try? JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: json))) as? [String: Any] ?? [:]
+    check(TokenUsage.from(decoded) == TokenUsage(input: 812, cachedInput: 0, output: 57), "usage read from OpenAI's answer")
+    check(TokenUsage.from([:]) == nil, "no usage, no cost")
+    let saved = try? JSONDecoder().decode(CostMeter.self, from: JSONEncoder().encode(meter))
+    check(saved == meter, "the cost is kept with the meeting")
+}
 
 print(failed == 0 ? "Conversation: \(total) checks passed" : "Conversation: \(failed) of \(total) failed")
 exit(failed == 0 ? 0 : 1)

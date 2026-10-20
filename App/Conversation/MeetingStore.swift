@@ -18,6 +18,8 @@ struct Meeting: Codable, Identifiable, Equatable {
     var started = Date()
     var lines: [Line] = []
     var summary: String?
+    /// What it cost with OpenAI, estimated (meetings saved before 1.8.0 have none).
+    var cost: CostMeter?
 
     var ended: Date { lines.last?.at ?? started }
 

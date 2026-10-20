@@ -27,6 +27,9 @@ final class AudioIO: NSObject {
     private(set) var running = false
     /// Sound scheduled and not yet heard: told it is done when playback stops early too.
     private var pending: [UUID: () -> Void] = [:]
+    /// A translation read again while not listening (`playAlone`).
+    private var alone: AVAudioPlayer?
+    private var aloneDone: (() -> Void)?
 
     override init() {
         super.init()
@@ -45,6 +48,7 @@ final class AudioIO: NSObject {
     /// what the microphone hears (live mode speaks while it listens). It also favours a voice
     /// close to the phone, so a meeting is listened to without it.
     func start(echoCancelling: Bool) throws {
+        stopAlone()
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try session.setActive(true)
@@ -125,6 +129,41 @@ final class AudioIO: NSObject {
         waiting.forEach { $0() }
     }
 
+    /// Plays 24 kHz mono PCM16 while not listening (Đọc lại after Dừng): the speaker only, the
+    /// microphone stays off. `done` on the main queue.
+    func playAlone(_ pcm: Data, done: @escaping () -> Void) {
+        stopAlone()
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio)
+            try session.setActive(true)
+            let player = try AVAudioPlayer(data: PCM.wav(pcm: pcm), fileTypeHint: AVFileType.wav.rawValue)
+            player.delegate = self
+            alone = player
+            aloneDone = done
+            guard player.play() else { return stopAlone() }
+        } catch {
+            DispatchQueue.main.async(execute: done)
+        }
+    }
+
+    func stopAlone() {
+        guard let player = alone else { return }
+        player.stop()
+        aloneFinished(ObjectIdentifier(player))
+    }
+
+    var playingAlone: Bool { alone != nil }
+
+    private func aloneFinished(_ player: ObjectIdentifier) {
+        guard let alone, ObjectIdentifier(alone) == player else { return }
+        self.alone = nil
+        let done = aloneDone
+        aloneDone = nil
+        if !running { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        if let done { DispatchQueue.main.async(execute: done) }
+    }
+
     /// Headphones plugged in or taken off: the engine stops and starts again with the new route.
     @objc private func configurationChanged() {
         DispatchQueue.main.async { [weak self] in
@@ -153,5 +192,17 @@ final class AudioIO: NSObject {
                 break
             }
         }
+    }
+}
+
+extension AudioIO: AVAudioPlayerDelegate {
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let id = ObjectIdentifier(player)
+        DispatchQueue.main.async { [weak self] in self?.aloneFinished(id) }
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        let id = ObjectIdentifier(player)
+        DispatchQueue.main.async { [weak self] in self?.aloneFinished(id) }
     }
 }
