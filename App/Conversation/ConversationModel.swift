@@ -4,8 +4,9 @@ import UIKit
 
 /// Runs on the audio queue: cuts what the others say into sentences, keeps what the user says
 /// while the Tôi nói button is down, and in live mode passes the sound on a tenth of a second at a
-/// time. Everything it reports goes to the main queue.
-final class Listener {
+/// time. Everything it reports goes to the main queue. Sendable because it is only ever used on
+/// that one queue (its callbacks are set before listening starts).
+final class Listener: @unchecked Sendable {
     private var segmenter: SpeechSegmenter
     /// The last moments of sound, so the user's first syllable is kept even when the button goes
     /// down as they start speaking.
