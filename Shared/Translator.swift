@@ -49,10 +49,13 @@ struct Translator {
 
     /// Translates `text` into `target`. Into Vietnamese means a message from the partner;
     /// anything else means the user's own message, optionally with a back-translation.
-    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false) async throws -> Translation {
+    /// `spoken`: the text is speech from a meeting or a talk, recognised automatically (Hội thoại).
+    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false,
+                   spoken: Bool = false) async throws -> Translation {
         let outgoing = target.code != Language.vietnamese.code
         let withMeaning = outgoing && checkMeaning
-        let instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.incoming()
+        var instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.incoming()
+        if spoken { instructions += Prompt.spoken(into: outgoing ? target.englishName : "Vietnamese") }
         var body: [String: Any] = [
             "model": model.rawValue,
             "instructions": instructions,
@@ -91,6 +94,26 @@ struct Translator {
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
         return translation
+    }
+
+    /// A plain written answer (the summary of a meeting): no translation format.
+    func write(instructions: String, input: String) async throws -> String {
+        let body: [String: Any] = [
+            "model": model.rawValue,
+            "instructions": instructions,
+            "input": input,
+            "reasoning": ["effort": model.reasoningEffort],
+            "max_output_tokens": 16_000,
+            "store": false,
+        ]
+        let json = try await send(body)
+        if json["status"] as? String == "incomplete" {
+            throw TranslateError.server("Câu trả lời bị cắt giữa chừng. Thử lại.")
+        }
+        guard let output = Self.outputText(json), !output.isEmpty else {
+            throw TranslateError.server("Không nhận được câu trả lời. Thử lại.")
+        }
+        return output
     }
 
     /// Opens the connection to OpenAI before it is needed, so the first Dịch doesn't also wait
@@ -146,7 +169,8 @@ struct Translator {
                 throw TranslateError.formatUnsupported
             }
             if (500...599).contains(status) { throw TranslateError.busy }
-            throw TranslateError.server(explain(status: status, code: error?["code"] as? String ?? "", message: message))
+            throw TranslateError.server(Self.explain(status: status, code: error?["code"] as? String ?? "", message: message,
+                                                     model: body["model"] as? String ?? model.rawValue))
         }
         return json
     }
@@ -188,7 +212,8 @@ struct Translator {
                            meaning: field(Prompt.meaningKey), note: nil, language: language)
     }
 
-    private func explain(status: Int, code: String, message: String) -> String {
+    /// What went wrong, in Vietnamese, from OpenAI's status and error code.
+    static func explain(status: Int, code: String, message: String, model: String) -> String {
         // OpenAI's own code first: a 429 is either no credit left (waiting does not help) or too
         // many requests at once.
         switch code {
@@ -197,7 +222,7 @@ struct Translator {
         case "unsupported_country_region_territory":
             return "OpenAI không phục vụ mạng ở khu vực này. Tắt VPN hoặc đổi mạng rồi thử lại."
         case "model_not_found":
-            return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
+            return "Key này chưa dùng được model \(model). Đổi chế độ dịch trong app MSTrans."
         case "invalid_api_key":
             return "API key không đúng. Kiểm tra lại trong app MSTrans."
         default:
@@ -206,11 +231,11 @@ struct Translator {
         switch status {
         case 401: return "API key không đúng. Kiểm tra lại trong app MSTrans."
         case 403: return "OpenAI từ chối key này (403)" + (message.isEmpty ? "." : ": \(message)")
-        case 404: return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
+        case 404: return "Key này chưa dùng được model \(model). Đổi chế độ dịch trong app MSTrans."
         case 429: return "OpenAI đang giới hạn số lần gọi. Thử lại sau ít phút."
         default:
             if message.localizedCaseInsensitiveContains("model") {
-                return "Key này chưa dùng được model \(model.rawValue). Đổi chế độ dịch trong app MSTrans."
+                return "Key này chưa dùng được model \(model). Đổi chế độ dịch trong app MSTrans."
             }
             return "Lỗi \(status)" + (message.isEmpty ? ". Thử lại." : ": \(message)")
         }
@@ -256,6 +281,19 @@ enum Prompt {
         """
         s += aboutUser
         return s
+    }
+
+    /// Added for speech (Hội thoại): what the recognizer wrote, not what someone typed.
+    static func spoken(into language: String) -> String {
+        """
+
+
+        The message is speech from a live meeting or conversation, written down by automatic speech recognition: \
+        it may lack punctuation and contain recognition mistakes, fillers (ừ, à, thì là, kiểu như, um, 那个, えーと), \
+        repetitions and false starts. Translate what the speaker means into clear spoken \(language) that sounds \
+        natural read aloud: fix obvious recognition mistakes from the context, drop fillers and repeats, keep every \
+        fact, number, name and commitment. Several people may speak; <context> holds the meeting's latest sentences.
+        """
     }
 
     private static let guidance: [String: String] = [

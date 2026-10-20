@@ -12,7 +12,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.6.0"
+    MARKETING_VERSION: "1.7.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
@@ -50,6 +50,9 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
+        # Hội thoại: the microphone hears the meeting, and keeps listening with the screen locked.
+        NSMicrophoneUsageDescription: "MSTrans nghe cuộc họp, cuộc nói chuyện để dịch lời mọi người sang tiếng Việt, và nghe câu bạn nói khi bạn bấm Tôi nói để dịch sang tiếng đối tác."
+        UIBackgroundModes: [audio]
     entitlements:
       path: Support/MSTrans.entitlements
       properties:

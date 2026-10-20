@@ -62,6 +62,21 @@
   keychain-access-groups, dễ hỏng khi AltStore ký lại); timer kiểm tra clipboard dùng target (đã
   invalidate khi ẩn, không rò thực tế); nhật ký gõ vẫn ghi khi tắt "Lưu lịch sử" (cần để chẩn đoán).
 
+- **1.7.0: tab Hội thoại (20/10).** Người dùng muốn: khi chạy, lời mọi người hiện thành chữ tiếng Việt;
+  chế độ **Đọc to + chữ** (đọc bản dịch qua loa) hoặc **Chỉ chữ**; nút **Tôi nói** (giữ hoặc chạm 2 lần)
+  dịch câu của họ sang tiếng đối tác và đọc to bằng giọng OpenAI. Cách dịch trong menu ⋯: **Chính xác**
+  (cắt câu theo khoảng lặng `SpeechSegmenter`, nhận giọng `gpt-transcribe` → dự phòng `gpt-4o-transcribe`,
+  dịch bằng `Translator` với prompt "spoken", 3 câu song song, giữ đúng thứ tự) hoặc **Dịch liền**
+  (`gpt-realtime-translate` qua WebSocket, một phiên → tiếng Việt cho người khác, một phiên → tiếng đối tác
+  khi giữ nút). Đọc to: `gpt-4o-mini-tts` giọng marin/cedar, PCM 24 kHz. Chống tiếng vọng: Chính xác tạm
+  không nghe khi điện thoại đọc (và chờ người nói ngừng mới đọc bản dịch của họ), Dịch liền bật khử vọng của
+  Apple; thêm `EchoGuard` so chữ. Lọc câu "ảo" (`TranscriptFilter`, lấy từ VietNote). Luôn dùng micro + loa
+  của iPhone. Biên bản tự lưu (Documents/Meetings), tóm tắt bằng `Translator.write`. Ý tưởng lấy từ 2 bộ
+  người dùng gửi (Personal Translator V2: giao thức dịch trực tiếp, VAD + ngưỡng lặng; VietNote: lọc câu ảo,
+  chống vọng theo chữ); mã viết lại bằng Swift. Test: `Tests/Conversation` (CI) + 2 mô phỏng cuộc họp trên
+  Linux với dịch vụ giả (không vào repo). **Chưa thử trên máy thật**: độ nhạy micro trong phòng họp, Dịch
+  liền với key của người dùng.
+
 ## Việc tiếp theo (theo thứ tự)
 
 1. Chờ CI của bản 1.5.0, gửi link IPA dạng

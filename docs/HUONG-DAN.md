@@ -72,6 +72,20 @@ Từ đó, cùng một cái chạm làm cả hai chiều:
 
 Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím tắt vừa tạo, thêm thao tác **Lấy bảng tạm** lên trước thao tác MSTrans. Nếu báo “chưa tự chép được”: thêm thao tác **Sao chép vào bảng tạm** sau thao tác MSTrans.
 
+**Họp, nói chuyện trực tiếp: tab Hội thoại** (trong app, không phải bàn phím: Apple không cho bàn phím dùng micro)
+- Bấm nút tròn **Bắt đầu nghe**, đặt iPhone giữa bàn. Mọi người nói gì, bản dịch **tiếng Việt hiện trên màn hình**, từng câu một. Nhiều người nói xen nhau vẫn được; ai nói tiếng Việt thì hiện nguyên văn (viền xám), người nước ngoài viền cam.
+- Hai chế độ ở trên cùng, đổi lúc nào cũng được:
+  - **Đọc to + chữ**: bản dịch tiếng Việt còn được **đọc to qua loa**. Điện thoại chờ người nói ngừng rồi mới đọc, như người phiên dịch; trong lúc nó đọc, app tạm không nghe. Hợp nói chuyện 1–1.
+  - **Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.
+- Muốn nói: **giữ nút Tôi nói** trong lúc nói rồi thả tay (hoặc chạm một lần, nói xong chạm lần nữa). Câu tiếng Việt của bạn được dịch sang tiếng đối tác và **đọc to qua loa iPhone** bằng giọng OpenAI cho mọi người nghe (viền xanh), ở cả hai chế độ. Chạm vào câu đó để **Hiện to** cho đối tác đọc; **Đọc lại** đọc lại bản dịch nào cũng được.
+- Đang đọc mà bạn bấm Tôi nói thì điện thoại dừng ngay; bản dịch nào xong trong lúc bạn đang nói thì chờ bạn thả tay mới đọc. Trong lúc đọc câu của bạn, app tạm không nghe (để không dịch lại chính giọng của nó).
+- **Tiếng của đối tác**: Tự động (theo người nước ngoài vừa nói một câu đủ dài) hoặc chọn hẳn một thứ tiếng.
+- Menu **⋯** › **Cách dịch**:
+  - **Chính xác** (mặc định, nên dùng khi họp): chữ hiện sau mỗi câu, khoảng 2–3 giây; dùng từ điển Thuật ngữ, ngữ cảnh cuộc họp và giọng điệu bạn chọn. Rẻ: nhận giọng khoảng 0,006 USD mỗi phút có người nói, cộng tiền dịch chữ như nút Dịch và tiền đọc to (khoảng 0,015 USD mỗi phút đọc).
+  - **Dịch liền**: chữ (và giọng, nếu chọn Đọc to) chạy ngay khi người khác đang nói, nhờ dịch giọng nói trực tiếp của OpenAI; câu của bạn được đọc ra gần như cùng lúc bạn nói. Khoảng 0,034 USD mỗi phút nghe. Đọc được tiếng Anh, Trung, Nhật, Hàn, Indonesia, Nga, Pháp, Đức, Tây Ban Nha, Hindi (không có tiếng Thái, Mã Lai, Ả Rập: dùng Chính xác).
+- Cũng trong menu **⋯**: **Ngừng bao lâu là hết câu** (0,4–1,4 giây; phòng họp nói chậm thì để 1,0), **Giọng đọc** (Marin nữ, Cedar nam), **Tóm tắt cuộc họp** (nội dung chính, đã thống nhất, việc cần làm, còn bỏ ngỏ), **Chia sẻ biên bản**, **Cuộc họp mới**, **Cuộc họp đã lưu** (mọi cuộc họp tự lưu trên iPhone, vuốt trái để xóa).
+- Khóa màn hình vẫn nghe tiếp (thanh đỏ micro hiện trên cùng). Có cuộc gọi đến thì tạm dừng, gác máy là nghe tiếp. Đeo tai nghe vẫn dùng micro và loa của iPhone, để cả phòng nghe được.
+
 **Trong app MSTrans**
 - **Dịch**: dịch đoạn dài, hai chiều (nút ⇄ đổi chiều), có nút dán, sao chép và chia sẻ; bên dưới là 3 bản dịch gần nhất, chạm để xem và chép lại.
 - **Lịch sử**: mọi tin đã dịch (xanh là bạn gửi, cam là đối tác), tìm kiếm, vuốt phải để đánh dấu câu hay dùng, vuốt trái để xóa. Tắt lưu lịch sử trong Cài đặt › Dữ liệu nếu không muốn giữ.
@@ -142,6 +156,7 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 ## Cần thử trên máy thật
 
 - Bàn phím đọc được bao nhiêu chữ trong ô nhập của Messenger, WeChat (iOS có thể chỉ trả một phần).
+- Tab Hội thoại: micro iPhone nghe rõ người ngồi xa bao nhiêu trong phòng họp; câu của bạn đọc qua loa có bị tính là người khác nói không; Dịch liền có dùng được với API key của bạn không (OpenAI có thể chưa mở `gpt-realtime-translate` cho mọi tài khoản; khi đó app báo và bạn dùng Chính xác).
 
 ## Sau này nếu có tài khoản Apple Developer trả phí
 

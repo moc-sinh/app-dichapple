@@ -274,8 +274,9 @@ limit 180 xcrun simctl boot "$UDID"
 limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
 for appearance in light dark; do
     limit 30 xcrun simctl ui "$UDID" appearance "$appearance"
-    for tab in translate history glossary settings; do
-        limit 60 xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" >/dev/null
+    # Hội thoại shows a sample meeting (-conversationDemo): the simulator has no microphone to listen with.
+    for tab in translate conversation history glossary settings; do
+        limit 60 xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" -conversationDemo YES >/dev/null
         sleep 4
         limit 30 xcrun simctl io "$UDID" screenshot "$OUT/app-$tab-$appearance.png" >/dev/null 2>&1 && echo "app-$tab-$appearance.png"
     done
