@@ -45,6 +45,28 @@ enum PCM {
         return header + body
     }
 
+    /// The PCM16 bytes in a WAV file (its "data" chunk), as Google sends its voices; bytes that are
+    /// not a WAV file are taken as PCM16 already.
+    static func body(ofWAV file: Data) -> Data {
+        let bytes = [UInt8](file)
+        guard bytes.count >= 12, bytes[0..<4].elementsEqual("RIFF".utf8), bytes[8..<12].elementsEqual("WAVE".utf8) else {
+            return Data(bytes.prefix(bytes.count / 2 * 2))
+        }
+        var offset = 12
+        while offset + 8 <= bytes.count {
+            let size = Int(bytes[offset + 4]) | Int(bytes[offset + 5]) << 8 | Int(bytes[offset + 6]) << 16
+                | Int(bytes[offset + 7]) << 24
+            let start = offset + 8
+            if bytes[offset..<offset + 4].elementsEqual("data".utf8) {
+                // A file written as it was made may give no length, or one past its end.
+                let end = size == 0 || start + size > bytes.count ? bytes.count : start + size
+                return Data(bytes[start..<start + (end - start) / 2 * 2])
+            }
+            offset = start + size + size % 2
+        }
+        return Data()
+    }
+
     static func seconds(_ pcm: Data) -> Double { Double(pcm.count / 2) / Double(rate) }
 
     /// Loudness in dB below full scale; -100 for silence.

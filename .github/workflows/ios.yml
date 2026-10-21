@@ -50,7 +50,7 @@ jobs:
           swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
             Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
             App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift \
-            App/Conversation/SpeechServices.swift App/Conversation/ConversationCost.swift \
+            App/Conversation/SpeechServices.swift App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift \
             Tests/Conversation/main.swift -o conversation-tests
           ./conversation-tests
 

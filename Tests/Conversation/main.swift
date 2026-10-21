@@ -2,7 +2,8 @@
 // swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
 //   Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
 //   App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift App/Conversation/SpeechServices.swift \
-//   App/Conversation/ConversationCost.swift Tests/Conversation/main.swift -o conversation-tests && ./conversation-tests
+//   App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift Tests/Conversation/main.swift \
+//   -o conversation-tests && ./conversation-tests
 import Foundation
 
 var failed = 0
@@ -179,6 +180,47 @@ check(Prompt.spoken(into: "English").contains("speech recognition"), "spoken pro
 check(SpeechServices.voiceInstructions(.vietnamese).contains("Vietnamese accent"), "the voice is told the language")
 check(PCM.wav(pcm: PCM.data([1, -2, 3])) == PCM.wav([1, -2, 3]), "WAV around PCM bytes")
 check(PCM.seconds(Data(count: 48_000)) == 1, "a second of PCM")
+
+// MARK: Google's voices
+
+do {
+    let request = GoogleVoice.request("Giá này bao nhiêu?", voice: GoogleVoice.female, locale: "vi-VN", apiKey: "key")
+    check(request.url?.absoluteString == "https://texttospeech.googleapis.com/v1/text:synthesize" && request.httpMethod == "POST"
+          && request.value(forHTTPHeaderField: "X-Goog-Api-Key") == "key", "Google: synthesize with the key in a header")
+    let body = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any] ?? [:]
+    let voice = body["voice"] as? [String: Any] ?? [:]
+    let audio = body["audioConfig"] as? [String: Any] ?? [:]
+    check((body["input"] as? [String: Any])?["text"] as? String == "Giá này bao nhiêu?", "Google: the sentence")
+    check(voice["languageCode"] as? String == "vi-VN" && voice["name"] as? String == "vi-VN-Chirp3-HD-Aoede", "Google: Chirp 3 HD voice")
+    check(audio["audioEncoding"] as? String == "LINEAR16" && audio["sampleRateHertz"] as? Int == 24_000, "Google: 24 kHz PCM16")
+    check(GoogleVoice.locale(for: "zh") == "cmn-CN" && GoogleVoice.locale(for: "zh-Hant") == "cmn-CN"
+          && GoogleVoice.locale(for: "ms") == nil, "Google: Mandarin for both scripts, no Malay voice")
+    check(GoogleVoice.name(of: GoogleVoice.id(GoogleVoice.male)) == "Charon" && GoogleVoice.name(of: "marin") == nil
+          && GoogleVoice.name(of: "iphone") == nil, "Google: voice setting")
+
+    // The answer: a WAV file in base64; the samples are what is played.
+    let samples = PCM.data([1, -2, 3, 300])
+    let answer = Data(#"{"audioContent":"\#(PCM.wav(pcm: samples).base64EncodedString())"}"#.utf8)
+    check(GoogleVoice.pcm(fromAnswer: answer) == samples, "Google: the WAV header is taken off")
+    check(PCM.body(ofWAV: samples + Data([9])) == samples, "bytes that are not WAV are taken as PCM16")
+    var unsized = PCM.wav(pcm: samples)
+    unsized.replaceSubrange(40..<44, with: [0xFF, 0xFF, 0xFF, 0xFF])
+    check(PCM.body(ofWAV: unsized) == samples, "a WAV file without its length")
+    check(GoogleVoice.pcm(fromAnswer: Data("{}".utf8)) == nil, "Google: no voice in the answer")
+
+    func failure(_ status: Int, _ json: String) -> GoogleVoice.Failure { GoogleVoice.failure(status: status, data: Data(json.utf8)) }
+    let badKey = #"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}"#
+    check(failure(400, badKey) == .badKey, "Google: a wrong key")
+    check(failure(403, #"{"error":{"code":403,"message":"Cloud Text-to-Speech API has not been used in project 1 before or it is disabled.","status":"PERMISSION_DENIED","details":[{"reason":"SERVICE_DISABLED"}]}}"#)
+          == .notEnabled, "Google: the API not turned on")
+    check(failure(403, #"{"error":{"code":403,"message":"This API method requires billing to be enabled.","details":[{"reason":"BILLING_DISABLED"}]}}"#)
+          == .billing, "Google: no billing")
+    check(failure(429, "{}") == .quota && failure(503, "") == .busy, "Google: too many, busy")
+    check(failure(400, #"{"error":{"code":400,"message":"Voice 'ms-MY-Chirp3-HD-Aoede' does not exist."}}"#) == .unsupported,
+          "Google: a language without the voice")
+    check(failure(400, #"{"error":{"code":400,"message":"Input is too long."}}"#) == .refused("Input is too long."),
+          "Google: anything else is told as Google said it")
+}
 
 // MARK: Voices kept for Đọc lại
 

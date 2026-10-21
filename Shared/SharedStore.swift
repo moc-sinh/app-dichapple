@@ -15,6 +15,7 @@ enum SharedStore {
     enum Key {
         static let apiKey = "apiKey"
         static let sonioxKey = "sonioxKey"
+        static let googleKey = "googleKey"
         static let model = "model"
         static let targetCode = "targetCode"
         static let lastPartnerCode = "lastPartnerCode"
@@ -58,6 +59,15 @@ enum SharedStore {
             return key.isEmpty ? nil : key
         }
         set { defaults.set(newValue, forKey: Key.sonioxKey) }
+    }
+
+    /// The Google Cloud key (Google's voices in the Hội thoại tab), on this iPhone only.
+    static var googleKey: String? {
+        get {
+            let key = defaults.string(forKey: Key.googleKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return key.isEmpty ? nil : key
+        }
+        set { defaults.set(newValue, forKey: Key.googleKey) }
     }
 
     static var model: TranslationModel {

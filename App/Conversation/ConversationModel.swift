@@ -113,7 +113,7 @@ final class Listener: @unchecked Sendable {
     }
 }
 
-/// The calls to OpenAI (and the iPhone's own voice), replaceable in a test.
+/// The calls to OpenAI (and the iPhone's and Google's voices), replaceable in a test.
 struct ConversationServices {
     var transcribe: (_ apiKey: String, _ wav: Data, _ prompt: String) async throws -> SpeechServices.Transcript
     var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: [ChatLine],
@@ -125,7 +125,15 @@ struct ConversationServices {
         transcribe: { try await SpeechServices(apiKey: $0).transcribe(wav: $1, prompt: $2) },
         translate: { try await Translator(apiKey: $0, model: $4).translate($1, to: $2, context: $3, spoken: true) },
         speak: { apiKey, text, voice, language in
-            if voice == ConversationModel.iPhoneVoice { return try await AppleVoice.pcm(text, language: language.code) }
+            if let google = GoogleVoice.name(of: voice), let googleKey = SharedStore.googleKey {
+                do {
+                    return try await GoogleVoice(apiKey: googleKey).speak(text, voice: google, language: language.code)
+                } catch GoogleVoice.Failure.unsupported {
+                    return try await AppleVoice.pcm(text, language: language.code)
+                }
+            }
+            // A Google voice without its key reads with the iPhone's until the key is there.
+            if !ConversationModel.isOpenAIVoice(voice) { return try await AppleVoice.pcm(text, language: language.code) }
             return try await SpeechServices(apiKey: apiKey).speak(text, voice: voice, language: language)
         })
 }
@@ -135,7 +143,7 @@ struct ConversationServices {
 /// While it runs, everything the others say comes up as Vietnamese text (Vietnamese speakers as
 /// they spoke), and with Đọc to it is also read aloud through the speaker; Chỉ chữ only shows it.
 /// When the user wants to speak, they hold the Tôi nói button (or tap it, and tap again at the
-/// end): what they say is translated into the partners' language and read aloud in OpenAI's voice.
+/// end): what they say is translated into the partners' language and read aloud in the voice chosen.
 ///
 /// How it translates (Cách dịch):
 /// - Chính xác: each sentence is recognised and translated once it ends (2–3 s), with the
@@ -240,8 +248,13 @@ final class ConversationModel {
     /// The iPhone's own voice: free, made on the phone, less natural than OpenAI's.
     nonisolated static let iPhoneVoice = "iphone"
     static let voices: [(id: String, name: String)] = [
-        ("marin", "Marin (nữ, OpenAI)"), ("cedar", "Cedar (nam, OpenAI)"), (iPhoneVoice, "Giọng iPhone (miễn phí)"),
+        ("marin", "Marin (nữ, OpenAI)"), ("cedar", "Cedar (nam, OpenAI)"),
+        (GoogleVoice.id(GoogleVoice.female), "Aoede (nữ, Google)"), (GoogleVoice.id(GoogleVoice.male), "Charon (nam, Google)"),
+        (iPhoneVoice, "Giọng iPhone (miễn phí)"),
     ]
+
+    /// Made by OpenAI with the OpenAI key, and paid by the minute (the iPhone's and Google's are not).
+    nonisolated static func isOpenAIVoice(_ voice: String) -> Bool { voice != iPhoneVoice && GoogleVoice.name(of: voice) == nil }
 
     // MARK: State
 
@@ -343,7 +356,7 @@ final class ConversationModel {
                 return
             }
             key = SharedStore.apiKey ?? ""
-            if key.isEmpty { voice = Self.iPhoneVoice }
+            if key.isEmpty, Self.isOpenAIVoice(voice) { voice = Self.iPhoneVoice }
         } else {
             guard let openAIKey = SharedStore.apiKey else {
                 problem = TranslateError.noKey.errorDescription
@@ -384,6 +397,17 @@ final class ConversationModel {
         if engine == .live { openLive() }
         if engine == .soniox { openSoniox() }
         if wantsToTalk { talk(true) }
+        warmUpGoogle()
+    }
+
+    /// With a Google voice, the connection is opened before the first sentence needs it, and a key
+    /// that does not work is told at once rather than at the first sentence.
+    private func warmUpGoogle() {
+        guard GoogleVoice.name(of: voice) != nil, let googleKey = SharedStore.googleKey else { return }
+        Task { [weak self] in
+            guard let failure = await GoogleVoice(apiKey: googleKey).warmUp() else { return }
+            self?.problem = failure.errorDescription
+        }
     }
 
     func stop() {
@@ -748,7 +772,7 @@ final class ConversationModel {
     /// Read again after listening stopped: the speaker only.
     private func sayAlone(_ text: String, language: Language) {
         let voice = voice
-        guard voice == Self.iPhoneVoice || apiKey != nil else {
+        guard !Self.isOpenAIVoice(voice) || apiKey != nil else {
             problem = TranslateError.noKey.errorDescription
             return
         }
@@ -777,7 +801,7 @@ final class ConversationModel {
             do {
                 let pcm = try await speak(apiKey, text, voice, language)
                 self?.voiceCache.put(key, pcm)
-                if voice != Self.iPhoneVoice { self?.charge { $0.voiced(seconds: PCM.seconds(pcm)) } }
+                if Self.isOpenAIVoice(voice) { self?.charge { $0.voiced(seconds: PCM.seconds(pcm)) } }
                 return .success(pcm)
             } catch {
                 return .failure(error)

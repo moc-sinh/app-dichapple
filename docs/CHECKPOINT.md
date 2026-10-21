@@ -5,9 +5,9 @@
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.9.1 (sửa bàn phím tự tắt, xem mục 1.9.1); 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
-  đã gửi người dùng. Người dùng thấy 1.7.0 "khá ổn"; chưa thử 1.8.x/1.9.x trên máy thật. Các mục bên dưới là lịch
-  sử theo từng bản.
+- **Bản mới nhất:** 1.10.0 (giọng Google, xem mục 1.10.0); 1.9.1 (sửa bàn phím tự tắt, run 65), 1.9.0 (Cách dịch
+  Soniox, run 64) và 1.8.1 (run 62) đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
+  "chưa mượt, phản hồi chưa nhanh". Người dùng thấy 1.7.0 "khá ổn". Các mục bên dưới là lịch sử theo từng bản.
 - **Mã sau 1.3.1 (1.4.0, đã gộp vào 1.5.0 và gửi người dùng):**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
   ⌫ sau chữ lạc lấy lại từ tiếng Việt; gõ nhanh gấp 3; benchmark CI đo lại khi máy CI khựng;
@@ -145,14 +145,31 @@
   biết ô thì giữ ô cũ và lần đổi chữ sau mới so; Dịch đọc được nil rồi sau đó thấy ô thật thì báo "Bấm Dịch lại".
   Không có test Linux cho phần này (UIKit), `keyboard-smoke` trên CI là phép thử.
 
+- **1.10.0: giọng Google Chirp 3 HD (21/10).** Người dùng gửi source app "My Translator" (Tauri, MIT; không vào repo,
+  chỉ đọc) để tìm thêm giọng đọc. Trong đó: Edge TTS (giọng Hoài My/Nam Minh của Microsoft, miễn phí nhưng giả làm
+  trình duyệt Edge và vượt token Sec-MS-GEC, không chính thức; chưa làm, đã hỏi người dùng), Google Chirp 3 HD, ElevenLabs
+  (trả phí), Web Speech (như giọng iPhone). Benchmark của họ: Soniox chỉ trả bản dịch khi câu đã chốt
+  (`is_final`), dịch chỉ thêm ~80 ms sau khi câu gốc chốt; giảm `max_endpoint_delay_ms` không làm nhanh hơn mà chỉ cắt
+  câu vụn hơn (đo trên `stt-rt-v4`). Thêm 2 giọng **Aoede (nữ, Google)** và **Charon (nam, Google)**
+  (`GoogleVoice.swift`): REST `texttospeech.googleapis.com/v1/text:synthesize`, key ở header `X-Goog-Api-Key`, voice
+  `<locale>-Chirp3-HD-<tên>`, LINEAR16 24 kHz (bỏ header WAV bằng `PCM.body(ofWAV:)`). Key ở Cài đặt › Giọng Google
+  (`SharedStore.googleKey`). Tiếng Trung phồn thể đọc bằng giọng `cmn-CN`; tiếng Mã Lai (không có giọng Chirp 3 HD)
+  và ngôn ngữ Google từ chối (400 về voice/language, nhớ trong lần chạy) đọc bằng giọng iPhone; chưa có key Google
+  thì cũng đọc giọng iPhone và màn Hội thoại nhắc dán key. Bắt đầu nghe với giọng Google thì gọi `voices.list` để mở
+  sẵn kết nối và báo ngay nếu key sai/chưa bật API/chưa gắn thanh toán. Giá: miễn phí 1 triệu ký tự/tháng, sau đó
+  30 USD/1 triệu (bảng giá Google, 10/2026); bộ đếm chi phí không tính giọng Google. Lỗi key sai đã thử thật
+  (400 `API_KEY_INVALID`); chưa thử với key thật (người dùng chưa có key Google). Test: `Tests/Conversation` 128
+  kiểm tra; mô phỏng trên Linux thêm phần giọng Google.
+
 ## Việc tiếp theo (theo thứ tự)
 
-1. Người dùng thử 1.9.1 trên iPhone thật với key Soniox: chữ có chạy ngay không, tiếng Việt có chuẩn không, lỗi
-   gì hiện ra (nếu Soniox từ chối tin cấu hình thì thông báo hiện nguyên văn). Rồi thử tiếp phần 1.8.1: micro cách
-   1–2 m, Dịch liền với key OpenAI, giọng iPhone, cuộn theo câu mới, giữ Tôi nói lâu.
-2. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
+1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm). Việc đã hứa dù chọn gì: giọng OpenAI đọc ngay khi
+   có tiếng đầu tiên (stream `audio/speech`), thay vì chờ cả câu.
+2. Người dùng thử giọng Google với key thật, và tiếp tục thử Soniox: chữ có chạy ngay không, lỗi gì hiện ra. Rồi
+   phần 1.8.1: micro cách 1–2 m, Dịch liền với key OpenAI, giọng iPhone, cuộn theo câu mới, giữ Tôi nói lâu.
+3. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
    (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, chụp màn Hội thoại để xem).
-3. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).
+4. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).
 
 ## Quy tắc đã thống nhất với người dùng
 

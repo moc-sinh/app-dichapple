@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage(SharedStore.Key.apiKey, store: SharedStore.defaults) private var apiKey = ""
     @AppStorage(SharedStore.Key.sonioxKey, store: SharedStore.defaults) private var sonioxKey = ""
+    @AppStorage(SharedStore.Key.googleKey, store: SharedStore.defaults) private var googleKey = ""
     @AppStorage(SharedStore.Key.model, store: SharedStore.defaults) private var model = TranslationModel.sol.rawValue
     @AppStorage(SharedStore.Key.targetCode, store: SharedStore.defaults) private var targetCode = Language.autoCode
     @AppStorage(SharedStore.Key.tone, store: SharedStore.defaults) private var tone = Tone.polite.rawValue
@@ -29,6 +30,7 @@ struct SettingsView: View {
                 setupSection
                 openAISection
                 sonioxSection
+                googleSection
                 outgoingSection
                 aboutYouSection
                 incomingSection
@@ -251,6 +253,21 @@ struct SettingsView: View {
             Text("Soniox")
         } footer: {
             Text("Cho tab Hội thoại, Cách dịch “Soniox”: chữ và bản dịch chạy ngay khi mọi người đang nói, khoảng 0,2 USD mỗi giờ (Dịch liền của OpenAI khoảng 2 USD). Không có key OpenAI thì đọc bằng giọng iPhone. Key chỉ lưu trên iPhone này.")
+        }
+    }
+
+    private var googleSection: some View {
+        Section {
+            SecureField("Key Google Cloud", text: $googleKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let console = URL(string: "https://console.cloud.google.com/apis/library/texttospeech.googleapis.com") {
+                Link("Bật Cloud Text-to-Speech API và tạo key", destination: console)
+            }
+        } header: {
+            Text("Giọng Google")
+        } footer: {
+            Text("Cho giọng đọc Aoede (nữ) và Charon (nam) ở tab Hội thoại, menu ⋯ › Giọng đọc: tiếng Việt tự nhiên, khoảng nửa giây một câu. Miễn phí 1 triệu ký tự mỗi tháng (khoảng 20 giờ đọc), quá thì 30 USD cho 1 triệu ký tự. Dự án Google cần gắn thanh toán. Key chỉ lưu trên iPhone này.")
         }
     }
 

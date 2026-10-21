@@ -182,6 +182,9 @@ struct ConversationView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+            if GoogleVoice.name(of: model.voice) != nil, SharedStore.googleKey == nil {
+                NoteBox(text: "Chưa có key Google nên đang đọc bằng giọng iPhone. Dán key trong Cài đặt › Giọng Google.")
+            }
             Text("Chi phí \(model.engine == .soniox ? "Soniox" : "OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -227,7 +230,7 @@ struct ConversationView: View {
 
     private var hourlyCost: Double {
         CostMeter.perHour(live: model.engine == .live, soniox: model.engine == .soniox, model: model.quality.model,
-                          readAloud: model.readAloud, openAIVoice: model.voice != ConversationModel.iPhoneVoice)
+                          readAloud: model.readAloud, openAIVoice: ConversationModel.isOpenAIVoice(model.voice))
     }
 
     private var talkButton: some View {
