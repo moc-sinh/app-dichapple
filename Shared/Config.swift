@@ -106,3 +106,27 @@ struct Language: Equatable {
 
     static func named(_ code: String) -> Language? { all.first { $0.code == code } }
 }
+
+/// How tall the keys are. The default puts every key exactly where the Apple keyboard has it
+/// (`KeyMetrics`): the thumb is used to those places, and keys lower or higher than Apple's were
+/// mistyped (a for q). The others make every key taller and leave the gaps as they are.
+enum KeyboardSize: Int, CaseIterable {
+    case medium, large, extraLarge
+
+    var label: String {
+        switch self {
+        case .medium: return "Như bàn phím iPhone"
+        case .large: return "Cao hơn một chút"
+        case .extraLarge: return "Cao hơn"
+        }
+    }
+
+    /// Points added to every key's height.
+    var extraKeyHeight: Double {
+        switch self {
+        case .medium: return 0
+        case .large: return 3
+        case .extraLarge: return 6
+        }
+    }
+}

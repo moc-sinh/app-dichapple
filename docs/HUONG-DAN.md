@@ -50,11 +50,11 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 **Trả lời đối tác**
 1. Trong Zalo, WhatsApp, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex).
 2. Bấm **Dịch** (nút xanh): cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, bàn phím tự trả lời đúng ngôn ngữ đối tác đang dùng.
-3. Một dòng hiện lên trên thanh Dịch với **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Nếu câu gốc có chỗ dễ hiểu sai, dòng này hiện **Lưu ý** (tam giác vàng). Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc. Gõ tiếp là dòng này ẩn đi: lúc bình thường bàn phím chỉ có thanh Dịch.
+3. Một dòng hiện lên trên thanh Dịch với **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc. Gõ tiếp là dòng này ẩn đi: lúc bình thường bàn phím chỉ có thanh Dịch.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt.
-- Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa, lưu ý) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Dịch ngay**: bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, tin dài thì mở sẵn cả bảng để đọc, bấm **Xong** để gõ trả lời. Chưa bật: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt. Thứ vừa sao chép trông như mật khẩu, mã, link hay email thì **Dịch ngay** không tự gửi đi dịch, chỉ hiện dòng “chạm để dịch”. Dịch lỗi (mất mạng) thì gõ tiếp một phím là dòng “chạm để dịch” hiện lại để thử lần nữa.
+- Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
 
 **Không thấy MSTrans trong một app (ví dụ Zalo)**
 
@@ -72,6 +72,27 @@ Từ đó, cùng một cái chạm làm cả hai chiều:
 
 Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím tắt vừa tạo, thêm thao tác **Lấy bảng tạm** lên trước thao tác MSTrans. Nếu báo “chưa tự chép được”: thêm thao tác **Sao chép vào bảng tạm** sau thao tác MSTrans.
 
+**Họp, nói chuyện trực tiếp: tab Hội thoại** (trong app, không phải bàn phím: Apple không cho bàn phím dùng micro)
+- Bấm **nút tròn bên trái** để bắt đầu nghe, đặt iPhone giữa bàn. Mọi người nói gì, bản dịch **tiếng Việt hiện trên màn hình**, từng câu một. Nhiều người nói xen nhau vẫn được; ai nói tiếng Việt thì hiện nguyên văn (viền xám), người nước ngoài viền cam. Câu chỉ hiện khi đã nhận ra chữ (tiếng ho, tiếng kéo ghế không hiện lên rồi biến mất); trong lúc chờ, dòng "Đang nhận câu vừa nói…" ở cuối.
+- Màn hình tự cuộn theo câu mới. Kéo lên đọc câu cũ thì nó đứng yên; có câu mới thì hiện nút **Câu mới ↓**.
+- Hai chế độ ở trên cùng, đổi lúc nào cũng được:
+  - **Đọc to + chữ**: bản dịch tiếng Việt còn được **đọc to qua loa**, đúng thứ tự mọi người nói. Điện thoại chờ người nói ngừng rồi mới đọc, như người phiên dịch; trong lúc nó đọc, app tạm không nghe. Câu nào chờ 10 giây mà phòng vẫn nói liên tục thì chỉ hiện chữ (bấm Đọc lại để nghe). Hợp nói chuyện 1–1.
+  - **Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.
+- Muốn nói: **giữ nút Tôi nói** trong lúc nói rồi thả tay (hoặc chạm một lần, nói xong chạm lần nữa). Câu tiếng Việt của bạn được dịch sang tiếng đối tác và **đọc to qua loa iPhone** bằng giọng OpenAI cho mọi người nghe (viền xanh), ở cả hai chế độ. Nói dài bao lâu cũng được: cứ khoảng 20 giây, phần đã nói được dịch trước (cắt ở chỗ ngừng lấy hơi), thả tay là đọc lần lượt. Chạm vào câu đó để **Hiện to** cho đối tác đọc; **Đọc lại** đọc lại bản dịch nào cũng được, cả ở Chỉ chữ và sau khi đã dừng nghe. Câu đã đọc rồi thì đọc lại ngay, không tốn thêm tiền.
+- Đang đọc mà bạn bấm Tôi nói thì điện thoại dừng ngay; bản dịch nào xong trong lúc bạn đang nói thì chờ bạn thả tay mới đọc. Trong lúc đọc câu của bạn, app tạm không nghe (để không dịch lại chính giọng của nó).
+- **Tiếng của đối tác**: Tự động (theo người nước ngoài vừa nói một câu đủ dài) hoặc chọn hẳn một thứ tiếng.
+- Menu **⋯** › **Cách dịch**:
+  - **Chính xác** (mặc định, nên dùng khi họp): chữ hiện sau mỗi câu, khoảng 2–3 giây; dùng từ điển Thuật ngữ, ngữ cảnh cuộc họp và giọng điệu bạn chọn.
+  - **Dịch liền**: chữ (và giọng, nếu chọn Đọc to) chạy ngay khi người khác đang nói, nhờ dịch giọng nói trực tiếp của OpenAI; câu của bạn được đọc ra gần như cùng lúc bạn nói. Lúc phòng im lặng app không gửi tiếng đi. Đọc được tiếng Anh, Trung, Nhật, Hàn, Indonesia, Nga, Pháp, Đức, Tây Ban Nha, Hindi (không có tiếng Thái, Mã Lai, Ả Rập: dùng Chính xác).
+- Menu **⋯** › **Dịch lời đối phương** (chỉ cho Chính xác): **Tiết kiệm · GPT-6 Luna** (mặc định, nhanh và rẻ hơn khoảng 20 lần) hoặc **Chuẩn nhất · GPT-6.1 Sol**. Câu của bạn (Tôi nói) luôn dịch bằng model bạn chọn trong Cài đặt, vì đó là câu đối tác nghe.
+- **Chi phí OpenAI ước tính** mỗi giờ có người nói (khoảng lặng không tính):
+  - Chính xác, Tiết kiệm, Chỉ chữ: khoảng 0,35 USD. Đọc to bằng giọng OpenAI thêm khoảng 0,9 USD; giọng iPhone miễn phí.
+  - Chính xác, Chuẩn nhất: khoảng 2,5 USD (cộng tiền đọc to như trên).
+  - Dịch liền: khoảng 2 USD.
+  - Menu **⋯** ghi cuộc họp đang mở đã tốn bao nhiêu; Cuộc họp đã lưu cũng ghi.
+- Cũng trong menu **⋯**: **Ngừng bao lâu là hết câu** (0,4–1,4 giây; phòng họp nói chậm thì để 1,0), **Giọng đọc** (Marin nữ, Cedar nam của OpenAI, hoặc **Giọng iPhone** miễn phí, kém tự nhiên hơn; muốn hay hơn thì tải giọng "Nâng cao" trong Cài đặt › Trợ năng › Nội dung được đọc › Giọng nói), **Cỡ chữ** (Vừa, Lớn, Rất lớn, để đọc khi iPhone nằm trên bàn), **Tóm tắt cuộc họp** (nội dung chính, đã thống nhất, việc cần làm, còn bỏ ngỏ), **Chia sẻ biên bản**, **Cuộc họp mới** (bấm được khi đã dừng nghe và các câu cuối đã dịch xong), **Cuộc họp đã lưu** (mọi cuộc họp tự lưu trên iPhone, vuốt trái để xóa).
+- Khóa màn hình vẫn nghe tiếp (thanh đỏ micro hiện trên cùng). Có cuộc gọi đến thì tạm dừng, gác máy là nghe tiếp. Đeo tai nghe vẫn dùng micro và loa của iPhone, để cả phòng nghe được.
+
 **Trong app MSTrans**
 - **Dịch**: dịch đoạn dài, hai chiều (nút ⇄ đổi chiều), có nút dán, sao chép và chia sẻ; bên dưới là 3 bản dịch gần nhất, chạm để xem và chép lại.
 - **Lịch sử**: mọi tin đã dịch (xanh là bạn gửi, cam là đối tác), tìm kiếm, vuốt phải để đánh dấu câu hay dùng, vuốt trái để xóa. Tắt lưu lịch sử trong Cài đặt › Dữ liệu nếu không muốn giữ.
@@ -80,10 +101,30 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 **Gõ phím**
 - Giữ một nguyên âm để chọn dấu (á à ả ã ạ ă â…).
 - Giữ phím cách rồi kéo để di chuyển con trỏ.
-- Chạm hai lần Shift để khóa chữ hoa; chạm hai lần phím cách để thêm dấu chấm.
+- Chạm hai lần Shift để khóa chữ hoa (cả lúc Shift đang tự bật ở đầu câu); khóa chữ hoa giữ nguyên khi qua trang 123 rồi về. Về trang chữ ở đầu câu thì Shift tự bật. Chạm hai lần phím cách để thêm dấu chấm.
 - Giữ phím xóa: xóa từng chữ, giữ lâu thì xóa cả từ.
-- Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên. Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`.
-- Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm.
+- Bỏ dấu ở đâu trong từ cũng được: `hofang` → hoàng, `tosan` → toán, `dduocwj` → được.
+- Gõ tiếng Anh: từ không thể là tiếng Việt (facebook, order, class…) tự giữ nguyên; từ lỡ bị thêm dấu lúc gõ (gôgle) tự trở lại như đã gõ khi bạn gõ dấu cách hay dấu câu (google). Muốn gõ một chữ trùng phím dấu, gõ phím đó hai lần: `tesst` → `test`, `sorrry` → `sorry`, `ww` → `w`; ba chữ w liền nhau giữ nguyên (`www`).
+- Gõ lạc phím trong từ tiếng Việt (`đưng` + d thay vì f): chữ lạc hiện ngay sau từ (`đưngd`), bấm ⌫ một lần là từ về như cũ và gõ tiếp bình thường (`đừng`). Chỉ khi bạn gõ dấu cách luôn thì cả từ mới trở lại các phím đã gõ.
+- Xóa dấu cách ngay sau một từ là sửa tiếp được từ đó: `thays` cách ⌫ `a` → thấy.
+- Lỡ gõ thừa một chữ làm từ tiếng Việt hiện thành phím gõ (`khoongk`): bấm ⌫ là từ trở lại `không`. Trong từ tiếng Anh, ⌫ chỉ xóa đúng chữ cuối (`are` ⌫ → `ar`).
+- Gõ nhanh bao nhiêu cũng được: bàn phím tự nhớ chữ đang gõ, không phụ thuộc app cập nhật ô nhập nhanh hay chậm. Lúc đang gõ, bàn phím không tin những gì app báo lại (có app như Spotlight báo sai trong chốc lát). Dừng gõ nửa giây, bàn phím mới so lại với ô nhập.
+- Gửi tin rồi gõ tin mới ngay (bằng nút Gửi của app hay phím Gửi): tin mới bắt đầu sạch, không dính chữ của tin vừa gửi, kể cả khi vừa bấm ⌫ trên ô trống.
+- Gõ lấn hai ngón (ngón này chưa nhấc, ngón kia đã chạm): phím chạm trước luôn vào trước, kể cả phím Gửi và phím cách.
+- Ô nhập email, đường link, tên đăng nhập hay mã (OTP, số thẻ, số điện thoại): chữ vào đúng như gõ, không bỏ dấu Telex (`dd` vẫn là `dd`). Ô chỉ nhận số thì bàn phím mở sẵn trang số.
+- Bấm **Dịch** rồi gõ tiếp: chữ gõ trong lúc bàn phím đang đọc ô được giữ lại rồi chèn vào cuối; bản dịch đang chờ bị hủy để không ghi đè chữ mới gõ.
+- Chạm hơi cao trên hàng phím đầu vẫn ra chữ, không bấm nhầm vào thanh dịch hay nút đổi ngôn ngữ. Chạm nhanh mà iOS hủy giữa chừng cũng vẫn ra chữ.
+- Chữ vào ô nhập ngay khi ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Giữ nguyên âm vẫn chọn được dấu, giữ phím cách vẫn di được con trỏ (chữ vừa gõ tự rút lại). Phím xuống dòng/Gửi vẫn chờ nhấc tay để không gửi nhầm. Muốn giống bàn phím Apple (chữ vào khi nhấc tay), tắt **Ra chữ ngay khi chạm phím** trong Cài đặt › Bàn phím.
+- Phím đang bấm chỉ sáng lên, không hiện chữ nổi che các phím bên cạnh (như bàn phím Apple khi tắt Xem trước ký tự). Muốn có chữ nổi, bật **Chữ nổi khi bấm phím** trong Cài đặt › Bàn phím.
+- Mỗi phím nằm đúng chỗ, đúng cỡ như trên bàn phím iPhone (đo trên chính iPhone Pro Max của bạn: phím cao 45 pt, hàng cách nhau 56 pt), nên ngón tay quen bàn phím iPhone bấm trúng ngay. Muốn phím cao hơn: Cài đặt › Bàn phím › **Cỡ bàn phím** › Cao hơn một chút / Cao hơn. Đổi xong, mở lại bàn phím là thấy.
+
+## Khi gõ bị sai hay mất chữ
+
+Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Chữ số luôn được thay bằng `#` (số điện thoại, số tài khoản, mã), và ô email, mật khẩu, mã, số thẻ chỉ ghi dấu `•`. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
+
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), chạm bị iOS giữ lại tới lúc nhấc tay (⌛ … iOS giữ lại), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms · việc bàn phím đang làm lúc đó, ví dụ phím, kiểm tra ô, thanh dịch; “không rõ” là lúc đó không có việc nào của MSTrans được ghi tên: iOS tự làm, hoặc vẽ lại), rung lâu (⏱ rung mất … ms), và lúc app chat báo lại chữ (⌛ app báo lại chữ chậm nhất sau … ms; nhiều app chỉ thỉnh thoảng mới báo, nên đây không hẳn là lúc chữ hiện). Nhờ vậy biết chậm do bàn phím hay do app đang chat. Mỗi lần Dịch có một dòng ⇄ ghi số ký tự và thời gian từng phần: đọc ô, OpenAI, thay ô (tin đối tác: thời gian OpenAI, hoặc “đã dịch trước đó”), nên biết Dịch chậm ở đâu.
+
+Chữ bị mất cũng có dấu vết: ngón tay trượt từ phím vừa gõ sang phím khác mà không nhấc lên (↝ d trượt sang a, không gõ a), hay giữ phím lâu nên hiện bảng dấu (… giữ d: bảng dấu, rồi … bảng dấu đóng). Không có dòng nào cho chữ bị mất thì iOS đã không chuyển cú chạm đó cho bàn phím.
 
 ## 6. Mỗi 7 ngày
 
@@ -104,14 +145,17 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 - **Chuẩn nhất** (mặc định): GPT-6.1 Sol, khoảng 0,003 USD mỗi tin (1.000 tin ≈ 3 USD).
 - **Nhanh**: GPT-6 Luna, rẻ hơn khoảng 20 lần, dùng khi cần tiết kiệm.
 - Mỗi tin của đối tác chỉ dịch một lần; app nhớ bản dịch nên không gọi lại.
-- Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh. OpenAI không lưu nội dung (`store: false`).
+- Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh (tin dài thì giữ phần cuối). OpenAI không lưu tin vào tài khoản của bạn (`store: false`).
+- Bản dịch kèm nghĩa dịch ngược: AI viết bản dịch trước rồi mới dịch ngược chính bản đó, nên dòng **Nghĩa** đúng là câu đối tác sẽ đọc. Tin quá dài bị cắt thì bàn phím báo lỗi, không bao giờ chèn nửa bản dịch vào ô chat.
 
 ## Cách app giữ nhẹ
 
-- Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu kích thước; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
-- Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím.
+- Bàn phím viết bằng UIKit thuần, không thư viện ngoài, build tối ưu tốc độ; dùng khoảng 20 MB bộ nhớ (đo trên trình giả lập iOS 26.2).
+- Toàn bộ phím nằm trong một view; chạm là phản hồi ngay, không có khe chết giữa các phím. Nền bàn phím không hoàn toàn trong suốt (mắt không thấy): iOS chuyển cú chạm vào chỗ trong suốt cho app phía sau, nên trước đây chạm vào khe giữa phím hay dải trống cạnh chữ a có lúc mất chữ.
+- Trang chữ, trang 123 và trang ký hiệu được tạo một lần rồi giữ lại: bấm 123/ABC chỉ đổi trang đang hiện, không dựng lại 33 phím. Chữ hoa và chữ thường trên phím được vẽ sẵn, nên đầu câu không phải vẽ lại cả bàn phím.
+- Bộ gõ Telex là TelexCore của VietTelex (mã nguồn mở, giấy phép MIT): gõ đúng cả 400 từ tiếng Việt và giữ đúng gần như mọi từ tiếng Anh trong bộ 9.091 trường hợp thử của VietTelex, bộ thử này chạy lại mỗi lần build. Mỗi phím mất khoảng 0,004 mili giây.
 - Phím sát mép màn hình (q, a, z, p, l, xóa, phím cách) không bị iOS giữ lại để chờ thao tác vuốt hệ thống; tiếng click và rung chạy sau khi phím đã hiện.
-- Bộ gõ Telex xử lý mỗi phím trong khoảng 0,01 mili giây (đo trên máy chủ build), nhỏ hơn hàng trăm lần một khung hình của màn hình.
+- Tiếng click do bàn phím tự phát ở một luồng riêng (có Truy cập đầy đủ): cách phát cũ của iOS bắt phím phải chờ dịch vụ âm thanh, có lúc tới gần 0,1 giây, và đó là cảm giác khựng khi gõ nhanh. Phím chữ, phím xóa và các phím khác có tiếng riêng như bàn phím iPhone. Tắt trong Cài đặt › Bàn phím › **Âm thanh khi gõ**; gạt nút im lặng của iPhone cũng tắt tiếng.
 - Bàn phím đọc bộ nhớ tạm ở luồng nền (khi bạn chạm để dịch, hoặc ngay lúc mở nếu bật Dịch ngay), nên dù iOS có hỏi quyền dán thì phím vẫn hiện và gõ được.
 - Mở bàn phím là kết nối tới OpenAI được mở sẵn, nên lần bấm Dịch đầu tiên không mất thêm thời gian bắt tay mạng. Mạng rớt hay máy chủ bận thì tự thử lại một lần.
 - Bấm Dịch là dịch cả tin, kể cả khi tin có nhiều dòng (iOS chỉ đưa cho bàn phím đoạn đang gõ, bàn phím tự đọc hết các đoạn còn lại).
@@ -119,6 +163,7 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 ## Cần thử trên máy thật
 
 - Bàn phím đọc được bao nhiêu chữ trong ô nhập của Messenger, WeChat (iOS có thể chỉ trả một phần).
+- Tab Hội thoại: micro iPhone nghe rõ người ngồi xa bao nhiêu trong phòng họp; câu của bạn đọc qua loa có bị tính là người khác nói không; Dịch liền có dùng được với API key của bạn không (OpenAI có thể chưa mở `gpt-realtime-translate` cho mọi tài khoản; khi đó app báo và bạn dùng Chính xác).
 
 ## Sau này nếu có tài khoản Apple Developer trả phí
 

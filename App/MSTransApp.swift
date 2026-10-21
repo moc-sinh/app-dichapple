@@ -16,7 +16,7 @@ struct MSTransApp: App {
 }
 
 enum AppTab: String, Hashable {
-    case translate, history, glossary, settings
+    case translate, conversation, history, glossary, settings
 }
 
 struct RootView: View {
@@ -28,6 +28,9 @@ struct RootView: View {
             TranslateView(showSettings: { tab = .settings }, showHistory: { tab = .history })
                 .tabItem { Label("Dịch", systemImage: "translate") }
                 .tag(AppTab.translate)
+            ConversationView()
+                .tabItem { Label("Hội thoại", systemImage: "person.2.wave.2.fill") }
+                .tag(AppTab.conversation)
             HistoryView()
                 .tabItem { Label("Lịch sử", systemImage: "clock.arrow.circlepath") }
                 .tag(AppTab.history)

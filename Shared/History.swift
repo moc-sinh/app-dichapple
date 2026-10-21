@@ -27,6 +27,23 @@ struct HistoryItem: Codable, Identifiable, Equatable {
     var foreign: String { side == .me ? translation : source }
 }
 
+extension HistoryItem {
+    /// Reads items saved by any version, with a field added or gone: one item that failed to read
+    /// made the whole history unreadable, and every translation after it went unsaved.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        side = try c.decode(ChatLine.Side.self, forKey: .side)
+        source = try c.decode(String.self, forKey: .source)
+        translation = try c.decode(String.self, forKey: .translation)
+        languageCode = try c.decodeIfPresent(String.self, forKey: .languageCode) ?? ""
+        meaning = try c.decodeIfPresent(String.self, forKey: .meaning)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        date = try c.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        starred = try c.decodeIfPresent(Bool.self, forKey: .starred) ?? false
+    }
+}
+
 /// History lives in the App Group so the keyboard and the app share it. Newest first.
 extension SharedStore {
     private static let historyKey = "history"
@@ -50,10 +67,16 @@ extension SharedStore {
     }
 
     /// Throws when saved history cannot be read, so the writers below leave it untouched
-    /// instead of replacing it with an empty list.
+    /// instead of replacing it with an empty list. One item that cannot be read is left out
+    /// rather than costing the whole list (and every translation saved after it).
     private static func storedHistory() throws -> [HistoryItem] {
         guard let data = defaults.data(forKey: historyKey) else { return [] }
-        return try JSONDecoder().decode([HistoryItem].self, from: data)
+        return try JSONDecoder().decode([LossyItem].self, from: data).compactMap(\.item)
+    }
+
+    private struct LossyItem: Decodable {
+        let item: HistoryItem?
+        init(from decoder: Decoder) throws { item = try? HistoryItem(from: decoder) }
     }
 
     static func addHistory(_ item: HistoryItem) {

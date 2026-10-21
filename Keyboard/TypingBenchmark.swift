@@ -1,0 +1,136 @@
+import UIKit
+
+/// CI only (ci/keyboard-smoke.sh switches it on through the App Group): types through the real
+/// key handling at a quick typist's pace, then holds delete, and records for each part how long
+/// the main thread stays busy after every press, release and delete repeat (the handler, then
+/// the layout and the Core Animation commit it causes). Also counts key layouts and late frames.
+@MainActor
+final class TypingBenchmark: NSObject {
+    static let flagKey = "typingBenchmark"
+    static let resultKey = "typingBenchmarkResult"
+
+    /// Telex keys, part by part: a sentence, one key pressed again and again, one Vietnamese
+    /// word typed again and again, a long chat laugh, and the horn rules (chuaw, ngwoif, ww).
+    static let parts: [(name: String, keys: String)] = [
+        ("câu", "chaof anh been em ddax guwir baos gias roofi nhes  anh xem giusp em vowis aj"),
+        ("aaaa", " aaaaaaaaaaaaaaaaaaaa"),
+        ("người×6", " nguwowif nguwowif nguwowif nguwowif nguwowif nguwowif"),
+        ("hahaha", " hahahahahahahahahahahahahahahahahahahaha"),
+        ("chưa người", " chuaw ngwoif muaw ww"),
+        // \u{2} is 123 / ABC: digits and punctuation live on the 123 page, so chat switches pages often.
+        ("123 ABC", " gias \u{2}500\u{2}k\u{2}, ok\u{2}?"),
+    ]
+    // ci/typing-benchmark.py checks the field held the expected text before delete was held.
+    private static let deleteKey: Character = "\u{8}"
+    private static let deleteHold: TimeInterval = 2
+
+    private let keyboard: KeyboardLayoutView
+    private let finished: (String) -> Void
+    private var queue: [(part: String, key: Character)] = []
+    private var busy: [String: [(ms: Double, cpu: Double, what: String)]] = [:]
+    private var pressed = 0
+    private var order: [String] = []
+    private var frames: [CFTimeInterval] = []
+    private var link: CADisplayLink?
+    private var layoutsAtStart = 0
+
+    init(keyboard: KeyboardLayoutView, finished: @escaping (String) -> Void) {
+        self.keyboard = keyboard
+        self.finished = finished
+        for part in Self.parts {
+            queue += part.keys.map { (part.name, $0) }
+            order.append(part.name)
+        }
+        order.append("xóa giữ")
+    }
+
+    func start() {
+        layoutsAtStart = KeyboardLayoutView.layoutPasses
+        link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link?.add(to: .main, forMode: .common)
+        step()
+    }
+
+    /// 35 ms down, 35 ms up: about 14 keys a second.
+    private func step() {
+        guard !queue.isEmpty else { return holdDelete() }
+        let (part, character) = queue.removeFirst()
+        pressed += 1
+        let name = "#\(pressed) '\(character == " " ? "␣" : character == "\u{2}" ? "123" : String(character))'"
+        mark(part, "\(name) down")
+        let token = keyboard.benchmarkPress(character)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [self] in
+            if let token {
+                mark(part, "\(name) up")
+                keyboard.benchmarkRelease(token)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [self] in step() }
+        }
+    }
+
+    /// Holding delete: letters first, then whole words, each repeat measured.
+    private func holdDelete() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+            var repeats = 0
+            keyboard.onRepeat = { [weak self] in
+                repeats += 1
+                self?.mark("xóa giữ", "repeat \(repeats)")
+            }
+            mark("xóa giữ", "down")
+            let token = keyboard.benchmarkPress(Self.deleteKey)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.deleteHold) { [self] in
+                if let token { keyboard.benchmarkRelease(token) }
+                keyboard.onRepeat = nil
+                finish()
+            }
+        }
+    }
+
+    /// Starts timing an event: main-thread time from now until the run loop is about to sleep,
+    /// which is after Core Animation has laid out and committed whatever the event changed. Also
+    /// the CPU time the main thread used meanwhile: a slow event with little CPU time waited (on
+    /// another process, or a busy machine), one with a lot was the keyboard's own work.
+    private func mark(_ part: String, _ what: String) {
+        let start = CACurrentMediaTime()
+        let cpuStart = Self.threadCPU()
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, 3_000_000) { [weak self] observer, _ in
+            self?.busy[part, default: []].append(((CACurrentMediaTime() - start) * 1000, (Self.threadCPU() - cpuStart) * 1000, what))
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    private static func threadCPU() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        frames.append(link.timestamp)
+    }
+
+    private func finish() {
+        link?.invalidate()
+        link = nil
+        let parts = order.map { name -> String in
+            let events = busy[name] ?? []
+            let sorted = events.map(\.ms).sorted()
+            guard let slowest = events.max(by: { $0.ms < $1.ms }) else { return "\(name): none" }
+            let average = sorted.reduce(0, +) / Double(sorted.count)
+            let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+            let cpu = events.map(\.cpu).sorted()
+            let cpuP95 = cpu[min(cpu.count - 1, Int(Double(cpu.count) * 0.95))]
+            return String(format: "%@: %d events avg=%.2fms p95=%.2fms max=%.2fms (%@, cpu %.2fms) cpu_p95=%.2fms cpu_max=%.2fms",
+                          name, sorted.count, average, p95, slowest.ms, slowest.what, slowest.cpu, cpuP95, cpu.last ?? 0)
+        }
+        let intervals = zip(frames.dropFirst(), frames).map { ($0 - $1) * 1000 }
+        let typical = intervals.isEmpty ? 0 : intervals.sorted()[intervals.count / 2]
+        let late = intervals.filter { $0 > typical * 1.5 }.count
+        let keys = Self.parts.reduce(0) { $0 + $1.keys.count }
+        let layouts = KeyboardLayoutView.layoutPasses - layoutsAtStart
+        let totals = String(format: "keys=%d layouts=%d (%.2f/key) late_frames=%d/%d frame=%.1fms",
+                            keys, layouts, Double(layouts) / Double(keys), late, intervals.count, typical)
+        finished((parts + [totals]).joined(separator: "\n"))
+    }
+}

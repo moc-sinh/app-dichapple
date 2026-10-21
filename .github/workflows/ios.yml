@@ -28,20 +28,49 @@ jobs:
 
       - name: Typing tests
         run: |
-          swiftc -O Keyboard/Telex.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests
+          swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/main.swift -o telex-tests
           ./telex-tests
+          # VietTelex's 9,091 typing cases through the same composer.
+          swiftc -O Keyboard/TelexCore/*.swift Keyboard/Composer.swift Tests/Suite/main.swift -o telex-suite
+          ./telex-suite Tests/Suite/telex_suite.tsv
+          # Key positions against Apple's keyboard.
+          swiftc Keyboard/KeyMetrics.swift Tests/Keys/main.swift -o key-tests
+          ./key-tests
+
+      - name: Language detection tests
+        run: |
+          swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
+            Tests/Language/main.swift -o language-tests
+          ./language-tests
+
+      # The Hội thoại tab's parts that need no microphone: sentence cutting, phantom text, echo,
+      # live translation events, the speech services' forms.
+      - name: Conversation tests
+        run: |
+          swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
+            Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
+            App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift \
+            App/Conversation/SpeechServices.swift App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift \
+            Tests/Conversation/main.swift -o conversation-tests
+          ./conversation-tests
 
       - name: Generate project
         run: |
           brew install xcodegen
           xcodegen generate
 
+      # The build number is the run number, shown in the app as "1.1.0 (26)": the run's page has the IPA.
       - name: Build for iPhone (unsigned)
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild -project MSTrans.xcodeproj -scheme MSTrans -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
-            CODE_SIGNING_ALLOWED=NO build | tail -40
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee build/xcodebuild.log | tail -40
+          # The compiler's warnings for the app's own code, so none goes into a release unseen.
+          echo "Warnings:"
+          grep -E ": warning: " build/xcodebuild.log | grep -E "/(App|Keyboard|Shared)/" | sed "s|$PWD/||" | sort -u | head -80 || true
 
       # A free Apple ID can install this IPA with AltStore or SideStore, which re-sign it. Not Sideloadly or
       # Feather: on iOS 26 their re-signed keyboard lacks the main-binary flag and is killed at launch.
@@ -65,7 +94,7 @@ jobs:
   # Opens the keyboard in the iOS Simulator; fails if it crashes or never starts.
   keyboard-smoke:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 34
     steps:
       - uses: actions/checkout@v4
 
@@ -84,8 +113,11 @@ jobs:
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim \
             ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= build | tail -20
 
+      # The runners' simulators are sometimes slow to boot and launch apps (4-5 minutes for a
+      # phase that usually takes 30 s): every check passed and the step still ran out of time.
       - name: Open the keyboard in the simulator
-        timeout-minutes: 15
+        # About 20 minutes, a few more when the typing benchmark is measured twice.
+        timeout-minutes: 28
         run: bash ci/keyboard-smoke.sh
 
       - uses: actions/upload-artifact@v4
