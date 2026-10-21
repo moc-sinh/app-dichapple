@@ -5,8 +5,9 @@
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.9.0 (Cách dịch Soniox, xem mục 1.9.0); 1.8.1 (run 62) đã gửi người dùng. Người dùng
-  thấy 1.7.0 "khá ổn"; chưa thử 1.8.x/1.9.0 trên máy thật. Các mục bên dưới là lịch sử theo từng bản.
+- **Bản mới nhất:** 1.9.1 (sửa bàn phím tự tắt, xem mục 1.9.1); 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
+  đã gửi người dùng. Người dùng thấy 1.7.0 "khá ổn"; chưa thử 1.8.x/1.9.x trên máy thật. Các mục bên dưới là lịch
+  sử theo từng bản.
 - **Mã sau 1.3.1 (1.4.0, đã gộp vào 1.5.0 và gửi người dùng):**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
   ⌫ sau chữ lạc lấy lại từ tiếng Việt; gõ nhanh gấp 3; benchmark CI đo lại khi máy CI khựng;
@@ -136,9 +137,17 @@
   dở. **Chưa thử với Soniox thật** (máy chủ cloud không vào được soniox.com): định dạng tin nhắn lấy theo SDK chính
   thức `@soniox/client` 2.4.0 và plugin LiveKit trên npm.
 
+- **1.9.1: bàn phím không còn tự tắt lúc ô nhập đang được đặt lại (21/10).** Run 64 (1.9.0): bước "typing" của
+  `keyboard-smoke` trượt vì bàn phím crash (EXC_BREAKPOINT, `textDidChange` → `UUID._unconditionallyBridgeFromObjectiveC`;
+  luồng XPC đang ở `_didResetDocumentState`). UIKit khai báo `documentIdentifier` không bao giờ nil nhưng nó là nil
+  trong lúc ô được đặt lại, và Swift đọc thẳng thì dừng chương trình. Lỗi có từ 1.6.0 (commit 2e3e655), không do
+  Soniox; máy thật cũng có thể gặp. Giờ mọi chỗ đọc qua `currentField` (hỏi như một object nên nil chỉ là nil): chưa
+  biết ô thì giữ ô cũ và lần đổi chữ sau mới so; Dịch đọc được nil rồi sau đó thấy ô thật thì báo "Bấm Dịch lại".
+  Không có test Linux cho phần này (UIKit), `keyboard-smoke` trên CI là phép thử.
+
 ## Việc tiếp theo (theo thứ tự)
 
-1. Người dùng thử 1.9.0 trên iPhone thật với key Soniox: chữ có chạy ngay không, tiếng Việt có chuẩn không, lỗi
+1. Người dùng thử 1.9.1 trên iPhone thật với key Soniox: chữ có chạy ngay không, tiếng Việt có chuẩn không, lỗi
    gì hiện ra (nếu Soniox từ chối tin cấu hình thì thông báo hiện nguyên văn). Rồi thử tiếp phần 1.8.1: micro cách
    1–2 m, Dịch liền với key OpenAI, giọng iPhone, cuộn theo câu mới, giữ Tôi nói lâu.
 2. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`

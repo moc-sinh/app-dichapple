@@ -60,6 +60,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// The field the keyboard is typing in (`documentIdentifier`): another one means another text
     /// field, where a translation of the text read from the first must not go.
     private var fieldID: UUID?
+    /// `documentIdentifier` now, or nil while the field is being reset. UIKit declares it never nil, and
+    /// read as declared that nil stops the keyboard (a `textDidChange` came then in the CI test); asked
+    /// for as an object, it is just nil.
+    private var currentField: UUID? {
+        textDocumentProxy.perform(#selector(getter: UITextDocumentProxy.documentIdentifier))?.takeUnretainedValue() as? UUID
+    }
     /// The field takes text as typed: an e-mail address, a link, a user name, a code or a number
     /// (`readFieldTraits`). Letters go in without Telex ("dd" in an address stayed "dd", not "đ").
     private var plainTyping = false
@@ -321,7 +327,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         // Another text field took the keyboard without it going away: what it is for is read again.
-        if textDocumentProxy.documentIdentifier != fieldID { readFieldTraits(appearing: false) }
+        // While a field is being reset it has no identifier: a later change tells which it is.
+        if let field = currentField, field != fieldID { readFieldTraits(appearing: false) }
         matchAppearance()
         fieldReported()
         configureReturn()
@@ -331,8 +338,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     /// digits open on the number page, and the typing log keeps nothing typed in such a field.
     private func readFieldTraits(appearing: Bool) {
         let proxy = textDocumentProxy
-        let switched = fieldID != nil && proxy.documentIdentifier != fieldID
-        fieldID = proxy.documentIdentifier
+        // Not known while the field is being reset: the last field known stays until it is.
+        let field = currentField
+        let switched = fieldID != nil && field != nil && field != fieldID
+        fieldID = field ?? fieldID
         let type = proxy.keyboardType ?? .default
         let content: UITextContentType? = proxy.textContentType ?? nil
         // Not the name-or-phone pad: a Vietnamese name needs its marks.
@@ -1152,7 +1161,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 return
             }
             let read = CACurrentMediaTime()
-            let field = self.textDocumentProxy.documentIdentifier
+            let field = self.currentField
             self.task = Task { [weak self] in
                 do {
                     let result = try await Translator(apiKey: apiKey)
@@ -1160,7 +1169,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     let answered = CACurrentMediaTime()
                     guard let self, !Task.isCancelled else { return }
                     // Another text field has the keyboard now: its text is not the one translated.
-                    guard self.textDocumentProxy.documentIdentifier == field else {
+                    guard self.currentField == field else {
                         self.mode = .failed(Self.fieldSwitched)
                         return
                     }
