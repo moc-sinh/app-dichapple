@@ -163,7 +163,14 @@ struct ConversationView: View {
                 Text("**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.")
             }
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
-            if model.engine == .live {
+            if model.engine == .soniox {
+                Text("Cách dịch: Soniox, chữ và bản dịch chạy ngay khi mọi người đang nói, hết câu là đọc. Đổi trong menu ⋯.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if SharedStore.sonioxKey == nil {
+                    NoteBox(text: "Chưa có key Soniox. Dán key trong Cài đặt › Soniox.")
+                }
+            } else if model.engine == .live {
                 Text("Cách dịch: Dịch liền, chữ chạy ngay khi người khác đang nói. Đổi trong menu ⋯.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -175,7 +182,7 @@ struct ConversationView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Text("Chi phí OpenAI với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
+            Text("Chi phí \(model.engine == .soniox ? "Soniox" : "OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -219,8 +226,8 @@ struct ConversationView: View {
     private var talkDisabled: Bool { model.engine == .live && !model.liveSpeaksPartner }
 
     private var hourlyCost: Double {
-        CostMeter.perHour(live: model.engine == .live, model: model.quality.model, readAloud: model.readAloud,
-                          openAIVoice: model.voice != ConversationModel.iPhoneVoice)
+        CostMeter.perHour(live: model.engine == .live, soniox: model.engine == .soniox, model: model.quality.model,
+                          readAloud: model.readAloud, openAIVoice: model.voice != ConversationModel.iPhoneVoice)
     }
 
     private var talkButton: some View {
@@ -293,7 +300,7 @@ struct ConversationView: View {
                 Label("Dịch lời đối phương", systemImage: "dollarsign.circle")
             }
             .pickerStyle(.menu)
-            .disabled(model.engine == .live)
+            .disabled(model.engine != .accurate)
             Picker(selection: $model.silence) {
                 ForEach(ConversationModel.silenceChoices, id: \.self) { seconds in
                     Text(String(format: "%.1f giây", seconds).replacingOccurrences(of: ".", with: ",")).tag(seconds)

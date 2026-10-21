@@ -142,12 +142,23 @@ struct ConversationServices {
 ///   glossary and the meeting's context; several at once, shown in the order they were said.
 /// - Dịch liền: OpenAI's live speech translation, text (and voice) as the others speak; the user's
 ///   words come out in the partners' language while they speak.
+/// - Soniox: Soniox's live recognition and translation, text word by word as people speak (a
+///   fraction of Dịch liền's price); each sentence is read aloud the moment it ends.
 @MainActor @Observable
 final class ConversationModel {
     enum Engine: String, CaseIterable, Identifiable {
-        case accurate, live
+        case accurate, live, soniox
         var id: String { rawValue }
-        var title: String { self == .accurate ? "Chính xác (sau mỗi câu)" : "Dịch liền (ngay khi nói)" }
+        var title: String {
+            switch self {
+            case .accurate: return "Chính xác (sau mỗi câu)"
+            case .live: return "Dịch liền (ngay khi nói)"
+            case .soniox: return "Soniox: dịch liền, rẻ nhất"
+            }
+        }
+
+        /// The sound goes to a live session as it is heard (not sentence by sentence).
+        var streams: Bool { self != .accurate }
     }
 
     /// How the others' words are translated (the user's own always use the app's translation model).
@@ -276,8 +287,14 @@ final class ConversationModel {
     @ObservationIgnored private var captions: [Bool: (id: UUID, last: Date)] = [:]
     @ObservationIgnored private var partnerTailUntil = Date.distantPast
     @ObservationIgnored private var liveRetries = 0
-    /// Dịch liền: the others' sound is sent while someone speaks, not while the room is quiet.
+    @ObservationIgnored private var sonioxToVietnamese: SonioxSession?
+    @ObservationIgnored private var sonioxToPartner: SonioxSession?
+    /// What each Soniox session has heard (true: the others'), cut into sentences.
+    @ObservationIgnored private var transcripts: [Bool: SonioxTranscript] = [:]
+    /// Dịch liền and Soniox: the others' sound is sent while someone speaks, not while the room is quiet.
     @ObservationIgnored private var othersGate = LiveGate()
+    /// The others' sound was going out a moment ago.
+    @ObservationIgnored private var othersSending = false
     /// Seconds sent to Dịch liền and not yet in the meeting's cost (added a sentence at a time,
     /// not ten times a second).
     @ObservationIgnored private var unbilledLive = 0.0
@@ -318,9 +335,21 @@ final class ConversationModel {
     func start() async {
         guard !running, !starting else { return }
         problem = nil
-        guard let key = SharedStore.apiKey else {
-            problem = TranslateError.noKey.errorDescription
-            return
+        // Soniox hears and translates by itself: the OpenAI key is only for its voices and summaries.
+        let key: String
+        if engine == .soniox {
+            guard SharedStore.sonioxKey != nil else {
+                problem = "Chưa có key Soniox. Dán key trong Cài đặt › Soniox, hoặc đổi Cách dịch (menu ⋯)."
+                return
+            }
+            key = SharedStore.apiKey ?? ""
+            if key.isEmpty { voice = Self.iPhoneVoice }
+        } else {
+            guard let openAIKey = SharedStore.apiKey else {
+                problem = TranslateError.noKey.errorDescription
+                return
+            }
+            key = openAIKey
         }
         starting = true
         defer { starting = false }
@@ -331,7 +360,7 @@ final class ConversationModel {
         }
         micDenied = false
         apiKey = key
-        let listener = Listener(silence: silence, streams: engine == .live)
+        let listener = Listener(silence: silence, streams: engine.streams)
         listener.onUtterance = { [weak self] utterance in self?.heard(utterance) }
         listener.onMine = { [weak self] samples, first, last in self?.said(samples, first: first, last: last) }
         listener.onLevel = { [weak self] level, speaking in self?.heard(level: level, speaking: speaking) }
@@ -339,9 +368,9 @@ final class ConversationModel {
         self.listener = listener
         audio.onSamples = Listener.sink(listener)
         do {
-            // Dịch liền speaks while it listens: Apple's echo cancelling keeps its own voice out.
-            // Chính xác does not listen while the phone speaks, and hears far voices better without it.
-            try audio.start(echoCancelling: engine == .live)
+            // Dịch liền and Soniox speak while they listen: Apple's echo cancelling keeps the phone's
+            // voice out. Chính xác does not listen while the phone speaks, and hears far voices better without it.
+            try audio.start(echoCancelling: engine.streams)
         } catch {
             problem = error.localizedDescription
             self.listener = nil
@@ -353,6 +382,7 @@ final class ConversationModel {
         if meeting.lines.isEmpty { meeting.started = Date() }
         UIApplication.shared.isIdleTimerDisabled = true
         if engine == .live { openLive() }
+        if engine == .soniox { openSoniox() }
         if wantsToTalk { talk(true) }
     }
 
@@ -399,6 +429,7 @@ final class ConversationModel {
         self.level = max(0, min(1, (level + 60) / 45))
         hearsSpeech = speaking
         if engine == .live { finishCaptions(all: false) }
+        if engine == .soniox { expireSentences() }
     }
 
     // MARK: The Tôi nói button
@@ -422,9 +453,13 @@ final class ConversationModel {
                     return
                 }
             }
+            if engine == .soniox { openSonioxPartner() }
         } else if engine == .live {
             // A moment of silence lets the last words through.
             partnerTailUntil = Date().addingTimeInterval(1.5)
+        } else if engine == .soniox {
+            // The user's last words are settled and translated now, not after a pause.
+            sonioxToPartner?.finalize()
         }
         talking = down
         if engine == .accurate, let listener {
@@ -633,13 +668,15 @@ final class ConversationModel {
     private func billLive() {
         guard unbilledLive > 0 else { return }
         let seconds = unbilledLive
+        let soniox = engine == .soniox
         unbilledLive = 0
-        charge { $0.streamed(seconds: seconds) }
+        charge { $0.streamed(seconds: seconds, soniox: soniox) }
     }
 
     /// What this meeting has cost so far, estimated.
     var spent: Double {
-        (meeting.cost?.dollars ?? 0) + unbilledLive / 60 * CostMeter.Rate.livePerMinute
+        let rate = engine == .soniox ? CostMeter.Rate.sonioxPerMinute : CostMeter.Rate.livePerMinute
+        return (meeting.cost?.dollars ?? 0) + unbilledLive / 60 * rate
     }
 
     private func update(_ id: UUID, _ change: (inout Entry) -> Void) {
@@ -845,30 +882,53 @@ final class ConversationModel {
         liveToPartner?.close()
         liveToVietnamese = nil
         liveToPartner = nil
+        sonioxToVietnamese?.close()
+        sonioxToPartner?.close()
+        sonioxToVietnamese = nil
+        sonioxToPartner = nil
+        transcripts = [:]
     }
 
     /// The microphone's sound goes to the session for whoever speaks: the user's while the button is
     /// down, everyone else's otherwise. The other session gets silence for a moment, so it finishes
-    /// what it was saying. A quiet room is not sent at all (Dịch liền is paid by the minute sent).
+    /// what it was saying. A quiet room is not sent at all (live sessions are paid by the minute sent).
     private func stream(_ data: Data, speech: Bool) {
-        guard running, engine == .live else { return }
+        guard running, engine.streams else { return }
         let silent = Data(count: data.count)
         if talking {
-            send(data, to: liveToPartner)
-            for chunk in othersGate.feed(silent, speech: false) { send(chunk, to: liveToVietnamese) }
+            sendMine(data)
+            for chunk in othersGate.feed(silent, speech: false) { sendOthers(chunk) }
         } else {
             // The phone speaking the partners' language is not someone in the room to translate.
             let phoneSpeaksMine = playingMine > 0
-            for chunk in othersGate.feed(phoneSpeaksMine ? silent : data, speech: speech && !phoneSpeaksMine) {
-                send(chunk, to: liveToVietnamese)
-            }
-            if Date() < partnerTailUntil { send(silent, to: liveToPartner) }
+            let chunks = othersGate.feed(phoneSpeaksMine ? silent : data, speech: speech && !phoneSpeaksMine)
+            for chunk in chunks { sendOthers(chunk) }
+            // The room went quiet: Soniox settles what it still guesses now, not when someone next speaks.
+            if engine == .soniox, othersSending, chunks.isEmpty { sonioxToVietnamese?.finalize() }
+            othersSending = !chunks.isEmpty
+            if Date() < partnerTailUntil { sendMine(silent) }
         }
     }
 
-    private func send(_ chunk: Data, to session: LiveSession?) {
-        guard let session else { return }
-        session.send(audio: chunk)
+    private func sendOthers(_ chunk: Data) {
+        if engine == .soniox {
+            guard let session = sonioxToVietnamese else { return }
+            session.send(audio: chunk)
+        } else {
+            guard let session = liveToVietnamese else { return }
+            session.send(audio: chunk)
+        }
+        unbilledLive += PCM.seconds(chunk)
+    }
+
+    private func sendMine(_ chunk: Data) {
+        if engine == .soniox {
+            guard let session = sonioxToPartner else { return }
+            session.send(audio: chunk)
+        } else {
+            guard let session = liveToPartner else { return }
+            session.send(audio: chunk)
+        }
         unbilledLive += PCM.seconds(chunk)
     }
 
@@ -976,6 +1036,143 @@ final class ConversationModel {
         }
         if !entry.mine { noteSpoken(language, text: text) }
         record(id)
+    }
+
+    // MARK: Soniox
+
+    private func openSoniox() {
+        liveRetries = 0
+        othersGate.reset()
+        othersSending = false
+        transcripts = [:]
+        sonioxToVietnamese = makeSoniox(target: Language.vietnamese.code)
+        openSonioxPartner()
+    }
+
+    /// Everything the others say is translated into Vietnamese; the user's words into the partners'
+    /// language. Soniox hears any language, so it is told which to expect only as a hint.
+    private func makeSoniox(target: String) -> SonioxSession? {
+        guard let key = SharedStore.sonioxKey else { return nil }
+        let partner = SonioxEvent.code(for: partnerLanguage)
+        let hints = target == Language.vietnamese.code ? [partner, Language.vietnamese.code] : [Language.vietnamese.code]
+        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary)
+        session.onEvent = { [weak self, weak session] event in
+            guard let self, let session else { return }
+            self.soniox(event, from: session)
+        }
+        session.open()
+        return session
+    }
+
+    /// The session for the user's words, opened again when the partners' language changes.
+    private func openSonioxPartner() {
+        let code = SonioxEvent.code(for: partnerLanguage)
+        if let current = sonioxToPartner, current.target == code, current.isOpen { return }
+        sonioxToPartner?.close()
+        transcripts[false] = nil
+        sonioxToPartner = makeSoniox(target: code)
+    }
+
+    private func soniox(_ event: SonioxEvent, from session: SonioxSession) {
+        guard session === sonioxToVietnamese || session === sonioxToPartner else { return }
+        let fromOthers = session === sonioxToVietnamese
+        switch event {
+        case .tokens(let tokens):
+            liveRetries = 0
+            if problem?.hasPrefix("Mất kết nối") == true { problem = nil }
+            var transcript = transcripts[fromOthers] ?? SonioxTranscript(target: session.target)
+            let finished = transcript.take(tokens)
+            transcripts[fromOthers] = transcript
+            for sentence in finished { finishSentence(sentence, fromOthers: fromOthers) }
+            let current = transcript.current
+            if !current.isEmpty { showSentence(current, fromOthers: fromOthers) }
+        case .finished:
+            break
+        case .failed(let code, let message):
+            switch code {
+            case 401:
+                problem = "Key Soniox không dùng được. Kiểm tra lại trong Cài đặt › Soniox."
+                stop()
+            case 402, 429:
+                problem = "Tài khoản Soniox hết tiền hoặc đang bị giới hạn. Nạp thêm ở console.soniox.com."
+                stop()
+            case -1:
+                problem = "Mất kết nối. Đang nối lại…"
+            default:
+                problem = message.isEmpty ? "Soniox gặp lỗi (\(code))." : "Soniox: \(message)"
+            }
+        case .closed:
+            guard running, engine == .soniox else { return }
+            // Dropped (network, a time limit): what was heard stays, and it is opened again, a few
+            // times. Let go of at once, so a second word of it closing opens nothing more.
+            session.close()
+            if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
+            transcripts[fromOthers] = nil
+            if fromOthers { sonioxToVietnamese = nil } else { sonioxToPartner = nil }
+            liveRetries += 1
+            guard liveRetries <= 5 else {
+                problem = "Không nối lại được Soniox. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
+                return stop()
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard self.running, self.engine == .soniox else { return }
+                if fromOthers {
+                    if self.sonioxToVietnamese == nil { self.sonioxToVietnamese = self.makeSoniox(target: Language.vietnamese.code) }
+                } else {
+                    self.openSonioxPartner()
+                }
+            }
+        }
+    }
+
+    /// The sentence being said, word by word as Soniox hears and translates it.
+    @discardableResult
+    private func showSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) -> UUID {
+        let now = Date()
+        if let current = captions[fromOthers], entries.contains(where: { $0.id == current.id }) {
+            update(current.id) {
+                $0.text = sentence.text
+                $0.translation = sentence.translation
+                if !sentence.language.isEmpty { $0.language = sentence.language }
+            }
+            captions[fromOthers] = (current.id, now)
+            return current.id
+        }
+        let entry = Entry(id: UUID(), at: now, mine: !fromOthers,
+                          language: sentence.language.isEmpty && !fromOthers ? Language.vietnamese.code : sentence.language,
+                          text: sentence.text, translation: sentence.translation,
+                          target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing)
+        entries.append(entry)
+        captions[fromOthers] = (entry.id, now)
+        return entry.id
+    }
+
+    /// A sentence ended: into the minutes, and read aloud at once (the user's always, the others'
+    /// with Đọc to), after what is already being read.
+    private func finishSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) {
+        let id = showSentence(sentence, fromOthers: fromOthers)
+        captions[fromOthers] = nil
+        // The phone's Vietnamese voice heard again through the microphone.
+        if fromOthers, echo.isEcho(sentence.text, at: Self.now) { return remove(id) }
+        finishCaption(id)
+        guard let entry = entries.first(where: { $0.id == id }), entry.state == .done, !entry.translation.isEmpty else { return }
+        if entry.mine || readAloud { say(entry.translation, mine: entry.mine, language: Self.language(code: entry.target)) }
+    }
+
+    /// A sentence Soniox ended but whose translation never came, or one it stopped sending words
+    /// for (the connection hung): finished with what is known, after a moment.
+    private func expireSentences() {
+        for (fromOthers, current) in captions {
+            let quiet = Date().timeIntervalSince(current.last)
+            guard quiet >= 2, transcripts[fromOthers]?.ended == true || quiet >= 8 else { continue }
+            if let sentence = transcripts[fromOthers]?.finish() {
+                finishSentence(sentence, fromOthers: fromOthers)
+            } else {
+                finishCaption(current.id)
+                captions[fromOthers] = nil
+            }
+        }
     }
 
     // MARK: Summary

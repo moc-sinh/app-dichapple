@@ -14,6 +14,7 @@ enum SharedStore {
 
     enum Key {
         static let apiKey = "apiKey"
+        static let sonioxKey = "sonioxKey"
         static let model = "model"
         static let targetCode = "targetCode"
         static let lastPartnerCode = "lastPartnerCode"
@@ -48,6 +49,15 @@ enum SharedStore {
             return key.isEmpty ? nil : key
         }
         set { defaults.set(newValue, forKey: Key.apiKey) }
+    }
+
+    /// The Soniox key (the Hội thoại tab's cheapest live translation), on this iPhone only.
+    static var sonioxKey: String? {
+        get {
+            let key = defaults.string(forKey: Key.sonioxKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return key.isEmpty ? nil : key
+        }
+        set { defaults.set(newValue, forKey: Key.sonioxKey) }
     }
 
     static var model: TranslationModel {

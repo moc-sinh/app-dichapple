@@ -1,12 +1,12 @@
-# Checkpoint — 20/10/2026
+# Checkpoint — 21/10/2026
 
 Điểm dừng để phiên mới làm tiếp. Mọi mã đã được push lên nhánh `claude/funny-gates-s6pl2c`
 (PR #1 nháp vào `claude/stoic-hopper-f60iid`). Không có thay đổi nào chưa commit.
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.8.1 (run 62 của CI, artifact `MSTrans-ipa`); 1.8.0 (run 61) đã gửi người dùng. Người dùng
-  thấy 1.7.0 "khá ổn"; chưa thử 1.8.x trên máy thật. Các mục bên dưới là lịch sử theo từng bản.
+- **Bản mới nhất:** 1.9.0 (Cách dịch Soniox, xem mục 1.9.0); 1.8.1 (run 62) đã gửi người dùng. Người dùng
+  thấy 1.7.0 "khá ổn"; chưa thử 1.8.x/1.9.0 trên máy thật. Các mục bên dưới là lịch sử theo từng bản.
 - **Mã sau 1.3.1 (1.4.0, đã gộp vào 1.5.0 và gửi người dùng):**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
   ⌫ sau chữ lạc lấy lại từ tiếng Việt; gõ nhanh gấp 3; benchmark CI đo lại khi máy CI khựng;
@@ -116,10 +116,31 @@
   **Biết mà chưa làm:** Dừng ngay khi người khác vừa nói xong ở Dịch liền thì mất 1–2 giây bản dịch cuối (phiên bị
   đóng trước khi chữ về); Chính xác đọc liền các câu đang chờ trong lúc tạm không nghe (đúng như hướng dẫn ghi).
 
+- **1.9.0: Cách dịch Soniox (21/10).** Người dùng thấy Dịch liền (OpenAI, ~2 USD/giờ) quá đắt, muốn rẻ mà vẫn
+  nhanh như app VietNote. So sánh (tài liệu "Dịch giọng nói rẻ hơn cho Hội thoại" trên claude.ai): Soniox nhận giọng +
+  dịch trực tiếp ~0,12–0,18 USD/giờ, chữ ra theo từng từ khi đang nói. Thêm Cách dịch thứ ba **Soniox: dịch liền,
+  rẻ nhất** (`Engine.soniox`), key riêng ở Cài đặt › Soniox (`SharedStore.sonioxKey`); không có key OpenAI thì
+  tự dùng giọng iPhone (tóm tắt vẫn cần key OpenAI). `SonioxTranslation.swift`: `SonioxSession` (WebSocket
+  `wss://stt-rt.soniox.com/transcribe-websocket`, key ở header Bearer và trong tin cấu hình, model `stt-rt-v5`, lỗi
+  400 về model thì tự thử `stt-rt-v4`; PCM16 24 kHz, `one_way` dịch sang một ngôn ngữ, hết câu sau 500 ms im,
+  từ điển thuật ngữ → `context.terms` + `translation_terms`, keepalive khi không gửi tiếng 4 s), `SonioxTranscript`
+  (gom token: chữ đã chắc + chữ đoán, hết câu ở `<end>`/`<fin>`, chờ bản dịch về; câu mới bắt đầu thì câu cũ xong).
+  Giống Dịch liền: 2 phiên (người khác → tiếng Việt, Tôi nói → tiếng đối tác), `LiveGate` không gửi lúc phòng im,
+  khử vọng của Apple. Để nhanh nhất: chữ và bản dịch hiện ngay từng từ; phòng vừa im (gate đóng) thì gửi
+  `finalize`; thả nút Tôi nói thì `finalize` luôn (không chờ khoảng lặng); hết câu là đọc ngay (giọng được làm sẵn
+  trong lúc người dùng còn nói, đọc khi thả nút). Giọng điện thoại đọc tiếng Việt nghe lại bị bỏ bằng `EchoGuard`.
+  Chi phí ước tính 0,003 USD/phút gửi (`CostMeter.Rate.sonioxPerMinute`, chưa đối chiếu hóa đơn thật).
+  Test: `Tests/Conversation` 112 kiểm tra (thêm phần Soniox). Mô phỏng trên Linux (không vào repo: bản sao
+  ConversationModel bỏ UIKit, AudioIO/AppleVoice giả, `SonioxSession.open` không mở mạng): câu đối tác hiện từng từ
+  rồi đọc, tiếng vọng bị bỏ, người Việt trong phòng chỉ hiện, Tôi nói đọc đúng thứ tự sau khi thả nút, Dừng giữ câu
+  dở. **Chưa thử với Soniox thật** (máy chủ cloud không vào được soniox.com): định dạng tin nhắn lấy theo SDK chính
+  thức `@soniox/client` 2.4.0 và plugin LiveKit trên npm.
+
 ## Việc tiếp theo (theo thứ tự)
 
-1. Người dùng thử 1.8.1 trên iPhone thật: micro cách 1–2 m trong phòng họp, Dịch liền với key của họ, giọng iPhone,
-   cuộn theo câu mới, giữ Tôi nói lâu. Nghe phản hồi rồi sửa theo đó.
+1. Người dùng thử 1.9.0 trên iPhone thật với key Soniox: chữ có chạy ngay không, tiếng Việt có chuẩn không, lỗi
+   gì hiện ra (nếu Soniox từ chối tin cấu hình thì thông báo hiện nguyên văn). Rồi thử tiếp phần 1.8.1: micro cách
+   1–2 m, Dịch liền với key OpenAI, giọng iPhone, cuộn theo câu mới, giữ Tôi nói lâu.
 2. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
    (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, chụp màn Hội thoại để xem).
 3. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).

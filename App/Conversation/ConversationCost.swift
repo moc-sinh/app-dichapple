@@ -1,7 +1,7 @@
 import Foundation
 
-/// What the Hội thoại tab spends with OpenAI, estimated from what was sent and what OpenAI reports
-/// (its prices of October 2026, in US dollars). The iPhone's own voice costs nothing.
+/// What the Hội thoại tab spends with OpenAI and Soniox, estimated from what was sent and what OpenAI
+/// reports (their prices of October 2026, in US dollars). The iPhone's own voice costs nothing.
 struct CostMeter: Codable, Equatable {
     enum Rate {
         /// gpt-transcribe, per minute of sound sent (only speech is sent, not the pauses).
@@ -10,6 +10,8 @@ struct CostMeter: Codable, Equatable {
         static let voicePerMinute = 0.015
         /// gpt-realtime-translate, per minute of sound sent to one session.
         static let livePerMinute = 0.034
+        /// Soniox's live recognition with translation, per minute of sound sent (about 0.18 USD an hour).
+        static let sonioxPerMinute = 0.003
     }
 
     private(set) var dollars = 0.0
@@ -18,7 +20,10 @@ struct CostMeter: Codable, Equatable {
 
     mutating func voiced(seconds: Double) { dollars += max(0, seconds) / 60 * Rate.voicePerMinute }
 
-    mutating func streamed(seconds: Double) { dollars += max(0, seconds) / 60 * Rate.livePerMinute }
+    /// Sound sent to a live session: OpenAI's, or Soniox's.
+    mutating func streamed(seconds: Double, soniox: Bool = false) {
+        dollars += max(0, seconds) / 60 * (soniox ? Rate.sonioxPerMinute : Rate.livePerMinute)
+    }
 
     /// A translation or a summary, by the tokens OpenAI counted.
     mutating func used(_ usage: TokenUsage?, by model: TranslationModel) {
@@ -32,7 +37,9 @@ struct CostMeter: Codable, Equatable {
     /// Per hour of people speaking, for the choices made: about 12 sentences a minute, each about
     /// 750 tokens in (instructions, glossary, the meeting's last sentences) and 60 out (160 with
     /// GPT-6.1 Sol's reasoning); read aloud, about as long in Vietnamese as it was said.
-    static func perHour(live: Bool, model: TranslationModel, readAloud: Bool, openAIVoice: Bool) -> Double {
+    /// Soniox's words are read aloud like Chính xác's.
+    static func perHour(live: Bool, soniox: Bool = false, model: TranslationModel, readAloud: Bool, openAIVoice: Bool) -> Double {
+        if soniox { return 60 * Rate.sonioxPerMinute + (readAloud && openAIVoice ? 60 * Rate.voicePerMinute : 0) }
         if live { return 60 * Rate.livePerMinute }
         let price = model.price
         let sentence = (750 * price.input + (model == .luna ? 60 : 160) * price.output) / 1_000_000

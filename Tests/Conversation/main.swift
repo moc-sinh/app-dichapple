@@ -1,7 +1,7 @@
 // Checks of the Hội thoại tab's pure parts, run in CI with:
 // swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
 //   Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
-//   App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SpeechServices.swift \
+//   App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift App/Conversation/SpeechServices.swift \
 //   App/Conversation/ConversationCost.swift Tests/Conversation/main.swift -o conversation-tests && ./conversation-tests
 import Foundation
 
@@ -254,6 +254,77 @@ do {
     check(TokenUsage.from([:]) == nil, "no usage, no cost")
     let saved = try? JSONDecoder().decode(CostMeter.self, from: JSONEncoder().encode(meter))
     check(saved == meter, "the cost is kept with the meeting")
+}
+
+// MARK: Soniox
+
+do {
+    func token(_ text: String, final: Bool = true, translation: Bool = false, language: String = "zh") -> SonioxToken {
+        SonioxToken(text: text, isFinal: final, isTranslation: translation, language: translation ? "vi" : language)
+    }
+    let message = #"{"tokens":[{"text":"你好","is_final":true,"language":"zh","translation_status":"original"},"#
+        + #"{"text":"Xin chào","is_final":false,"language":"vi","translation_status":"translation"},{"text":"<end>","is_final":true}],"#
+        + #""final_audio_proc_ms":760,"total_audio_proc_ms":880}"#
+    check(SonioxEvent.parse(message) == [.tokens([token("你好"), token("Xin chào", final: false, translation: true), token("<end>", language: "")])],
+          "tokens read: said, translated, the end of a sentence")
+    check(SonioxEvent.parse(#"{"tokens":[],"finished":true}"#) == [.finished], "finished")
+    check(SonioxEvent.parse(#"{"error_code":401,"error_message":"Invalid API key."}"#) == [.failed(code: 401, message: "Invalid API key.")],
+          "a wrong key")
+    check(SonioxEvent.parse(#"{"tokens":[],"total_audio_proc_ms":100}"#).isEmpty && SonioxEvent.parse("not json").isEmpty,
+          "nothing new, nothing told")
+
+    let config = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["zh", "vi"],
+                                           terms: ["报价"], pairs: [("报价", "báo giá")])
+    let object = (try? JSONSerialization.jsonObject(with: Data(config.utf8))) as? [String: Any] ?? [:]
+    check(object["audio_format"] as? String == "pcm_s16le" && object["sample_rate"] as? Int == 24_000
+          && object["num_channels"] as? Int == 1, "the sound as the microphone gives it")
+    check((object["translation"] as? [String: String]) == ["type": "one_way", "target_language": "vi"], "translated into Vietnamese")
+    check(object["enable_endpoint_detection"] as? Bool == true && object["max_endpoint_delay_ms"] as? Int == 500,
+          "a sentence ends half a second after the speaker stops")
+    let context = object["context"] as? [String: Any] ?? [:]
+    check((context["translation_terms"] as? [[String: String]]) == [["source": "报价", "target": "báo giá"]], "the glossary goes along")
+    check(SonioxEvent.code(for: Language.named("zh-Hant")!) == "zh" && SonioxEvent.code(for: .vietnamese) == "vi", "language codes")
+
+    let glossary = "báo giá = 报价\nMộc Sinh = Mộc Sinh\nFOB = giá FOB\n\n"
+    let into = SonioxEvent.glossary(glossary, intoVietnamese: true)
+    let from = SonioxEvent.glossary(glossary, intoVietnamese: false)
+    check(into.terms.contains("报价") && into.terms.contains("FOB"), "every term is a word to hear right")
+    check(into.pairs.map { "\($0.source)>\($0.target)" } == ["报价>báo giá", "FOB>giá FOB"], "into Vietnamese: \(into.pairs)")
+    check(from.pairs.map { "\($0.source)>\($0.target)" } == ["báo giá>报价", "giá FOB>FOB"], "from Vietnamese: \(from.pairs)")
+
+    // A sentence shown word by word as it is said, then finished at its end, translation and all.
+    var transcript = SonioxTranscript(target: "vi")
+    check(transcript.take([token("这个", final: false)]).isEmpty && transcript.current.text == "这个", "the guess shows at once")
+    check(transcript.take([token("这个"), token("价格", final: false)]).isEmpty && transcript.current.text == "这个价格",
+          "settled words, then the guess")
+    check(transcript.take([token("价格"), token("Giá", translation: true), token(" này", final: false, translation: true)]).isEmpty
+          && transcript.current.translation == "Giá này", "its translation comes as it goes")
+    let finished = transcript.take([token(" này", translation: true), token("<end>", language: "")])
+    check(finished == [SonioxTranscript.Sentence(text: "这个价格", translation: "Giá này", language: "zh")],
+          "finished at its end: \(finished)")
+    check(transcript.current.isEmpty && !transcript.ended, "the next starts empty")
+
+    // Ended before its translation came: it waits for it, unless the next sentence begins.
+    check(transcript.take([token("好"), token("<end>", language: "")]).isEmpty && transcript.ended, "waits for the translation")
+    check(transcript.take([token("Được", translation: true)]) == [SonioxTranscript.Sentence(text: "好", translation: "Được", language: "zh")],
+          "the late translation finishes it")
+    _ = transcript.take([token("谢谢"), token("<end>", language: "")])
+    let next = transcript.take([token("再见", final: false)])
+    check(next == [SonioxTranscript.Sentence(text: "谢谢", translation: "", language: "zh")] && transcript.current.text == "再见",
+          "the next sentence begins: the last ends as it is")
+
+    // Vietnamese said to a session translating into Vietnamese: nothing to wait for.
+    var vietnamese = SonioxTranscript(target: "vi")
+    let said = vietnamese.take([token("Chào anh", language: "vi"), token("<fin>", language: "")])
+    check(said == [SonioxTranscript.Sentence(text: "Chào anh", translation: "", language: "vi")], "Vietnamese needs no translation")
+    check(vietnamese.take([token("<end>", language: "")]).isEmpty && vietnamese.finish() == nil, "an end with nothing said is nothing")
+
+    var meter = CostMeter()
+    meter.streamed(seconds: 3_600, soniox: true)
+    check(abs(meter.dollars - 0.18) < 1e-9, "Soniox: about 0.18 USD an hour sent")
+    let soniox = CostMeter.perHour(live: true, soniox: true, model: .luna, readAloud: true, openAIVoice: false)
+    check(abs(soniox - 0.18) < 1e-9 && soniox < CostMeter.perHour(live: true, model: .luna, readAloud: true, openAIVoice: false) / 10,
+          "over ten times cheaper than Dịch liền")
 }
 
 print(failed == 0 ? "Conversation: \(total) checks passed" : "Conversation: \(failed) of \(total) failed")

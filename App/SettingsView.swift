@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(SharedStore.Key.apiKey, store: SharedStore.defaults) private var apiKey = ""
+    @AppStorage(SharedStore.Key.sonioxKey, store: SharedStore.defaults) private var sonioxKey = ""
     @AppStorage(SharedStore.Key.model, store: SharedStore.defaults) private var model = TranslationModel.sol.rawValue
     @AppStorage(SharedStore.Key.targetCode, store: SharedStore.defaults) private var targetCode = Language.autoCode
     @AppStorage(SharedStore.Key.tone, store: SharedStore.defaults) private var tone = Tone.polite.rawValue
@@ -27,6 +28,7 @@ struct SettingsView: View {
             Form {
                 setupSection
                 openAISection
+                sonioxSection
                 outgoingSection
                 aboutYouSection
                 incomingSection
@@ -236,6 +238,21 @@ struct SettingsView: View {
     }
 
     // MARK: Actions
+
+    private var sonioxSection: some View {
+        Section {
+            SecureField("Key Soniox", text: $sonioxKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let console = URL(string: "https://console.soniox.com") {
+                Link("Lấy key ở console.soniox.com", destination: console)
+            }
+        } header: {
+            Text("Soniox")
+        } footer: {
+            Text("Cho tab Hội thoại, Cách dịch “Soniox”: chữ và bản dịch chạy ngay khi mọi người đang nói, khoảng 0,2 USD mỗi giờ (Dịch liền của OpenAI khoảng 2 USD). Không có key OpenAI thì đọc bằng giọng iPhone. Key chỉ lưu trên iPhone này.")
+        }
+    }
 
     private func refresh() {
         setup = .current
