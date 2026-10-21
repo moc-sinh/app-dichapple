@@ -5,8 +5,9 @@
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.10.0 (giọng Google, xem mục 1.10.0); 1.9.1 (sửa bàn phím tự tắt, run 65), 1.9.0 (Cách dịch
-  Soniox, run 64) và 1.8.1 (run 62) đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
+- **Bản mới nhất:** 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
+  xanh), 1.9.1 (sửa bàn phím tự tắt, run 65, cả keyboard-smoke xanh), 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
+  đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
   "chưa mượt, phản hồi chưa nhanh". Người dùng thấy 1.7.0 "khá ổn". Các mục bên dưới là lịch sử theo từng bản.
 - **Mã sau 1.3.1 (1.4.0, đã gộp vào 1.5.0 và gửi người dùng):**
   6 commit từ phiên kia (7df07ad → b0a9b24): phím mất/lẫn quanh lúc gửi, rollover 2 ngón, Dịch;
@@ -161,10 +162,19 @@
   (400 `API_KEY_INVALID`); chưa thử với key thật (người dùng chưa có key Google). Test: `Tests/Conversation` 128
   kiểm tra; mô phỏng trên Linux thêm phần giọng Google.
 
+- **1.10.1: giọng đọc bắt đầu khi có tiếng đầu tiên (21/10).** Trước đây mỗi câu chờ làm xong cả giọng rồi mới đọc
+  (giọng OpenAI ước tính 1–2 giây một câu). Giờ `SpeechServices.speak` đọc `audio/speech` dạng stream
+  (`URLSession.bytes`, mỗi phần 0,1 s) và giọng iPhone đưa từng đoạn `write` ra ngay; `VoiceStream` (trong
+  SpeechServices.swift) giữ tiếng đang về, `play` bắt đầu khi có 0,4 s (hoặc câu đã xong) rồi phát tiếp từng phần,
+  chỉ phát mẫu trọn (byte lẻ để sang phần sau), dừng ngay khi bấm Tôi nói/Dừng. Giọng Google vẫn về một lần (REST
+  không stream). Đọc lại sau Dừng chờ đủ cả câu (`whole()`). Test: `Tests/Conversation` 134 kiểm tra (thêm
+  VoiceStream); mô phỏng: tiếng bắt đầu trước khi giọng làm xong (dưới 0,7 s), mọi phần phát đúng thứ tự, bấm Tôi
+  nói giữa chừng thì không phát tiếp. Chưa đo trên máy thật.
+
 ## Việc tiếp theo (theo thứ tự)
 
-1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm). Việc đã hứa dù chọn gì: giọng OpenAI đọc ngay khi
-   có tiếng đầu tiên (stream `audio/speech`), thay vì chờ cả câu.
+1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm); giọng Google đã có sẵn trong 1.10.x. Nếu chọn Edge:
+   chưa làm, cần nói rõ rủi ro (không chính thức) trước.
 2. Người dùng thử giọng Google với key thật, và tiếp tục thử Soniox: chữ có chạy ngay không, lỗi gì hiện ra. Rồi
    phần 1.8.1: micro cách 1–2 m, Dịch liền với key OpenAI, giọng iPhone, cuộn theo câu mới, giữ Tôi nói lâu.
 3. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`

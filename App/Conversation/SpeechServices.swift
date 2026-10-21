@@ -85,7 +85,10 @@ struct SpeechServices {
 
     /// The translation read aloud: 24 kHz mono PCM16. `marin` and `cedar` are OpenAI's most
     /// natural voices. Told the language, so a Vietnamese sentence is not read with an English accent.
-    func speak(_ text: String, voice: String, language: Language) async throws -> Data {
+    /// OpenAI sends the voice as it makes it: `heard` gets it a tenth of a second at a time, so reading
+    /// begins long before the end is made. Returns all of it.
+    func speak(_ text: String, voice: String, language: Language,
+               heard: @escaping @Sendable (Data) -> Void = { _ in }) async throws -> Data {
         let body: [String: Any] = [
             "model": "gpt-4o-mini-tts",
             "voice": voice,
@@ -98,9 +101,39 @@ struct SpeechServices {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        #if canImport(FoundationNetworking)
         let (data, status) = try await load(request)
         guard status == 200 else { throw failure(status: status, data: data, model: "gpt-4o-mini-tts") }
+        heard(data)
         return data
+        #else
+        do {
+            let (bytes, response) = try await Self.session.bytes(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            var all = Data()
+            var piece = Data()
+            for try await byte in bytes {
+                piece.append(byte)
+                // A tenth of a second; the error's text when it is not a voice.
+                guard status == 200, piece.count >= 4_800 else { continue }
+                heard(piece)
+                all.append(piece)
+                piece = Data()
+            }
+            guard status == 200 else { throw failure(status: status, data: piece, model: "gpt-4o-mini-tts") }
+            if !piece.isEmpty {
+                heard(piece)
+                all.append(piece)
+            }
+            return all
+        } catch let error as TranslateError {
+            throw error
+        } catch {
+            let code = (error as? URLError)?.code
+            if code == .cancelled || error is CancellationError { throw CancellationError() }
+            throw TranslateError.network
+        }
+        #endif
     }
 
     static func voiceInstructions(_ language: Language) -> String {
@@ -161,6 +194,57 @@ struct MultipartForm {
 
     /// The body with its closing boundary.
     var finished: Data { body + Data("--\(boundary)--\r\n".utf8) }
+}
+
+/// A voice being made: its sound is kept as it comes, so reading can begin before the end is made.
+/// Filled from any thread.
+final class VoiceStream: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sound = Data()
+    private var done = false
+    private var error: Error?
+
+    init() {}
+
+    /// Made before: all there already.
+    init(made pcm: Data) {
+        sound = pcm
+        done = true
+    }
+
+    /// The next part as it is made.
+    func append(_ pcm: Data) {
+        lock.lock()
+        if !done { sound.append(pcm) }
+        lock.unlock()
+    }
+
+    /// All of it (which begins with what came before), or why it could not be made.
+    func finish(_ pcm: Data?, failure: Error? = nil) {
+        lock.lock()
+        if let pcm, pcm.count >= sound.count { sound = pcm }
+        error = failure
+        done = true
+        lock.unlock()
+    }
+
+    /// The sound after its first `offset` bytes, whether it is all there, and why it stopped short.
+    func sound(after offset: Int) -> (pcm: Data, finished: Bool, failure: Error?) {
+        lock.lock()
+        defer { lock.unlock() }
+        let start = sound.startIndex + min(max(0, offset), sound.count)
+        return (sound.subdata(in: start..<sound.endIndex), done, error)
+    }
+
+    /// All of it, once made.
+    func whole() async -> Result<Data, Error> {
+        while true {
+            let now = sound(after: 0)
+            if now.finished { return now.failure.map { .failure($0) } ?? .success(now.pcm) }
+            if Task.isCancelled { return .failure(CancellationError()) }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
 }
 
 /// Voices already made, so Đọc lại plays at once and is not paid for again. The newest are kept,

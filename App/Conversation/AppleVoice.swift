@@ -40,13 +40,13 @@ enum AppleVoice {
         }
     }
 
-    /// `text` read in the language `code`.
+    /// `text` read in the language `code`; `heard` gets the sound as it is made, from another thread.
     @MainActor
-    static func pcm(_ text: String, language code: String) async throws -> Data {
+    static func pcm(_ text: String, language code: String, heard: @escaping @Sendable (Data) -> Void = { _ in }) async throws -> Data {
         guard let voice = voice(for: code) else { throw Failure.noVoice(Meeting.languageName(code)) }
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
-        let job = Job()
+        let job = Job(heard: heard)
         return try await withCheckedThrowingContinuation { continuation in
             job.start(utterance, seconds: max(10, Double(text.count) * 0.25), continuation: continuation)
         }
@@ -58,9 +58,14 @@ enum AppleVoice {
         private var converter: AVAudioConverter?
         private var continuation: CheckedContinuation<Data, Error>?
         private var output = Data()
+        private let heard: @Sendable (Data) -> Void
         private let lock = NSLock()
         private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(PCM.rate), channels: 1,
                                            interleaved: false)!
+
+        init(heard: @escaping @Sendable (Data) -> Void) {
+            self.heard = heard
+        }
 
         func start(_ utterance: AVSpeechUtterance, seconds: Double, continuation: CheckedContinuation<Data, Error>) {
             self.continuation = continuation
@@ -97,7 +102,9 @@ enum AppleVoice {
                 return buffer
             }
             guard status != .error, converted.frameLength > 0, let channel = converted.floatChannelData?[0] else { return }
-            output.append(PCM.data(PCM.int16(UnsafeBufferPointer(start: channel, count: Int(converted.frameLength)))))
+            let pcm = PCM.data(PCM.int16(UnsafeBufferPointer(start: channel, count: Int(converted.frameLength))))
+            output.append(pcm)
+            heard(pcm)
         }
 
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {

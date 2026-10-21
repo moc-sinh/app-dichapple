@@ -118,23 +118,25 @@ struct ConversationServices {
     var transcribe: (_ apiKey: String, _ wav: Data, _ prompt: String) async throws -> SpeechServices.Transcript
     var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: [ChatLine],
                     _ model: TranslationModel) async throws -> Translation
-    /// 24 kHz mono PCM16 of `text`, in `language`.
-    var speak: (_ apiKey: String, _ text: String, _ voice: String, _ language: Language) async throws -> Data
+    /// 24 kHz mono PCM16 of `text`, in `language`. `heard` gets it as it is made (OpenAI's and the
+    /// iPhone's voices; Google's comes whole), so reading begins before the end is made.
+    var speak: (_ apiKey: String, _ text: String, _ voice: String, _ language: Language,
+                _ heard: @escaping @Sendable (Data) -> Void) async throws -> Data
 
     static let openAI = ConversationServices(
         transcribe: { try await SpeechServices(apiKey: $0).transcribe(wav: $1, prompt: $2) },
         translate: { try await Translator(apiKey: $0, model: $4).translate($1, to: $2, context: $3, spoken: true) },
-        speak: { apiKey, text, voice, language in
+        speak: { apiKey, text, voice, language, heard in
             if let google = GoogleVoice.name(of: voice), let googleKey = SharedStore.googleKey {
                 do {
                     return try await GoogleVoice(apiKey: googleKey).speak(text, voice: google, language: language.code)
                 } catch GoogleVoice.Failure.unsupported {
-                    return try await AppleVoice.pcm(text, language: language.code)
+                    return try await AppleVoice.pcm(text, language: language.code, heard: heard)
                 }
             }
             // A Google voice without its key reads with the iPhone's until the key is there.
-            if !ConversationModel.isOpenAIVoice(voice) { return try await AppleVoice.pcm(text, language: language.code) }
-            return try await SpeechServices(apiKey: apiKey).speak(text, voice: voice, language: language)
+            if !ConversationModel.isOpenAIVoice(voice) { return try await AppleVoice.pcm(text, language: language.code, heard: heard) }
+            return try await SpeechServices(apiKey: apiKey).speak(text, voice: voice, language: language, heard: heard)
         })
 }
 
@@ -726,31 +728,24 @@ final class ConversationModel {
         guard let apiKey, running else { return }
         let generation = speechGeneration
         let ready = Date()
-        let fetch = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
+        let sound = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
         guard let id else {
-            return queueSpeech(fetch, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+            return queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
         }
         Task {
             await waitForEarlier(than: id)
-            queueSpeech(fetch, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+            queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
         }
     }
 
     /// Read after what is already queued (unless the queue was dropped meanwhile).
-    private func queueSpeech(_ fetch: Task<Result<Data, Error>, Never>, text: String, mine: Bool, requested: Bool,
-                             generation: Int, ready: Date) {
+    private func queueSpeech(_ sound: VoiceStream, text: String, mine: Bool, requested: Bool, generation: Int, ready: Date) {
         guard generation == speechGeneration else { return }
         let previous = speechChain
         speechChain = Task { [weak self] in
             await previous?.value
-            let result = await fetch.value
             guard let self, generation == self.speechGeneration else { return }
-            switch result {
-            case .success(let pcm):
-                await self.play(pcm, text: text, generation: generation, mine: mine, requested: requested, ready: ready)
-            case .failure(let error):
-                if !(error is CancellationError) { self.problem = Self.voiceProblem(error) }
-            }
+            await self.play(sound, text: text, generation: generation, mine: mine, requested: requested, ready: ready)
         }
     }
 
@@ -778,9 +773,9 @@ final class ConversationModel {
         }
         aloneTask?.cancel()
         audio.stopAlone()
-        let fetch = voiceTask(text, voice: voice, language: language, apiKey: apiKey ?? "")
+        let sound = voiceTask(text, voice: voice, language: language, apiKey: apiKey ?? "")
         aloneTask = Task { [weak self] in
-            let result = await fetch.value
+            let result = await sound.whole()
             guard let self, !Task.isCancelled, !self.running else { return }
             switch result {
             case .success(let pcm):
@@ -792,21 +787,24 @@ final class ConversationModel {
         }
     }
 
-    /// The voice for `text`: the one made before, or a new one (paid for, unless the iPhone's).
-    private func voiceTask(_ text: String, voice: String, language: Language, apiKey: String) -> Task<Result<Data, Error>, Never> {
+    /// The voice for `text`: the one made before, or a new one (paid for, if OpenAI's), its sound
+    /// coming in as it is made.
+    private func voiceTask(_ text: String, voice: String, language: Language, apiKey: String) -> VoiceStream {
         let key = VoiceCache.key(text: text, voice: voice, language: language.code)
-        if let cached = voiceCache.get(key) { return Task { .success(cached) } }
+        if let cached = voiceCache.get(key) { return VoiceStream(made: cached) }
+        let sound = VoiceStream()
         let speak = services.speak
-        return Task { [weak self] in
+        Task { [weak self] in
             do {
-                let pcm = try await speak(apiKey, text, voice, language)
+                let pcm = try await speak(apiKey, text, voice, language) { sound.append($0) }
+                sound.finish(pcm)
                 self?.voiceCache.put(key, pcm)
                 if Self.isOpenAIVoice(voice) { self?.charge { $0.voiced(seconds: PCM.seconds(pcm)) } }
-                return .success(pcm)
             } catch {
-                return .failure(error)
+                sound.finish(nil, failure: error)
             }
         }
+        return sound
     }
 
     private static func voiceProblem(_ error: Error) -> String {
@@ -814,7 +812,10 @@ final class ConversationModel {
         return "Không đọc to được: \(error.localizedDescription) Bản dịch vẫn hiện trên màn hình."
     }
 
-    private func play(_ pcm: Data, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date) async {
+    /// Sound enough to begin reading without running dry while the rest is made: 0.4 s.
+    private static let startingSound = Int(Double(PCM.rate * 2) * 0.4)
+
+    private func play(_ sound: VoiceStream, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date) async {
         // Never over the user: a translation ready while they speak waits until they let go.
         while talking, running { try? await Task.sleep(nanoseconds: 100_000_000) }
         // Like an interpreter, the others' words are read once the room pauses: read over someone
@@ -829,12 +830,41 @@ final class ConversationModel {
             if hearsSpeech { return }
         }
         guard running, generation == speechGeneration, mine || requested || readAloud else { return }
+        // Read as soon as there is enough to go on with (OpenAI's and the iPhone's voices come as they
+        // are made), not once all of it is made: the rest is played on as it comes.
+        var next = sound.sound(after: 0)
+        while !next.finished, next.pcm.count < Self.startingSound, running, generation == speechGeneration {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            next = sound.sound(after: 0)
+        }
+        guard running, generation == speechGeneration else { return }
+        guard next.pcm.count > 1 else {
+            if let error = next.failure, !(error is CancellationError) { problem = Self.voiceProblem(error) }
+            return
+        }
         beginAloud(mine: mine)
         echo.spoke(text, at: Self.now)
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            audio.play(pcm) { done.resume() }
+        var played = 0
+        var playing = 0
+        while running, generation == speechGeneration {
+            // Whole samples only: the odd byte goes with the next part.
+            let whole = next.pcm.count / 2 * 2
+            if whole > 0 {
+                played += whole
+                playing += 1
+                audio.play(next.pcm.prefix(whole)) { playing -= 1 }
+            }
+            if next.finished { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            next = sound.sound(after: played)
         }
+        // Until the last part has been heard (or playback was stopped).
+        let heardBy = Date().addingTimeInterval(PCM.seconds(Data(count: played)) + 2)
+        while playing > 0, Date() < heardBy { try? await Task.sleep(nanoseconds: 20_000_000) }
         endAloud(mine: mine)
+        if let error = next.failure, !(error is CancellationError), generation == speechGeneration {
+            problem = Self.voiceProblem(error)
+        }
     }
 
     /// The button went down, or listening stopped: what is being read, or waiting to be, stops.

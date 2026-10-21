@@ -241,6 +241,40 @@ do {
           != VoiceCache.key(text: "Xin chào", voice: "cedar", language: "vi"), "each voice kept apart")
 }
 
+// MARK: A voice read as it is made
+
+do {
+    let stream = VoiceStream()
+    stream.append(Data([1, 2, 3]))
+    check(stream.sound(after: 0).pcm == Data([1, 2, 3]) && !stream.sound(after: 0).finished, "the first part, still coming")
+    stream.append(Data([4, 5]))
+    check(stream.sound(after: 2).pcm == Data([3, 4, 5]) && stream.sound(after: 9).pcm.isEmpty, "what came after what was played")
+    // All of it begins with the parts already come; a part told after the end is not added again.
+    stream.finish(Data([1, 2, 3, 4, 5, 6]))
+    stream.append(Data([6]))
+    let end = stream.sound(after: 4)
+    check(end.pcm == Data([5, 6]) && end.finished && end.failure == nil, "finished, with the rest")
+    let failed = VoiceStream()
+    failed.append(Data([7, 8]))
+    failed.finish(nil, failure: TranslateError.network)
+    check(failed.sound(after: 0).pcm == Data([7, 8]) && failed.sound(after: 0).failure != nil, "cut short: what came, and why")
+    check(VoiceStream(made: Data([9])).sound(after: 0).finished, "a voice made before is all there")
+
+    final class Box: @unchecked Sendable { var result: Result<Data, Error>? }
+    let box = Box()
+    let waiting = VoiceStream()
+    let done = DispatchSemaphore(value: 0)
+    Task {
+        box.result = await waiting.whole()
+        done.signal()
+    }
+    waiting.append(Data([1, 1]))
+    Thread.sleep(forTimeInterval: 0.05)
+    waiting.finish(Data([1, 1, 2, 2]))
+    check(done.wait(timeout: .now() + 2) == .success && (try? box.result?.get()) == Data([1, 1, 2, 2]),
+          "all of it, once made (Đọc lại after Dừng)")
+}
+
 // MARK: Dịch liền does not send a quiet room
 
 do {
