@@ -220,10 +220,17 @@ final class SonioxSession {
         receive(task)
         // Soniox ends a session that hears nothing for a while: a session not spoken to is kept open.
         keepalive?.invalidate()
-        keepalive = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        // In the common modes, so it also runs while the user scrolls the transcript.
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             guard let self, Date().timeIntervalSince(self.lastSent) >= 4 else { return }
             self.send(.string(SonioxEvent.keepaliveMessage))
         }
+        RunLoop.main.add(timer, forMode: .common)
+        keepalive = timer
+    }
+
+    deinit {
+        keepalive?.invalidate()
     }
 
     /// 24 kHz mono PCM16, about 100 ms at a time.
