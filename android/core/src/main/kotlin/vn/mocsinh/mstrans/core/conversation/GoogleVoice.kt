@@ -8,7 +8,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import vn.mocsinh.mstrans.core.Http
 import vn.mocsinh.mstrans.core.arr
-import vn.mocsinh.mstrans.core.await
+import vn.mocsinh.mstrans.core.text
 import vn.mocsinh.mstrans.core.obj
 import vn.mocsinh.mstrans.core.parseObject
 import vn.mocsinh.mstrans.core.str
@@ -137,7 +137,7 @@ class GoogleVoice(private val apiKey: String, private val base: String = "https:
     }
 
     private suspend fun load(request: Request): Pair<Int, String> = try {
-        Http.client.newCall(request).await().use { it.code to it.body?.string().orEmpty() }
+        Http.client.newCall(request).text()
     } catch (e: IOException) {
         throw Failure(Failure.Kind.NETWORK)
     }

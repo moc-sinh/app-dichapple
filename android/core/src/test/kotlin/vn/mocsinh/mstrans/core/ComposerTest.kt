@@ -384,4 +384,20 @@ class ComposerTest {
         c.check(back == listOf(Composer.Edit.Delete(1)) && composer.before == "ok ", "the keyboard's copy loses the emoji: ${composer.before}")
         c.done()
     }
+
+    @Test
+    fun finishWordWithoutSpace() {
+        val c = Checks()
+        // Android's Send or Search key ends the word as a space would, without typing one.
+        for ((keys, want) in listOf("google" to "google", "guwir" to "gửi", "hofang" to "hoàng")) {
+            val composer = Composer()
+            composer.start("", "", 0.0)
+            val text = StringBuilder()
+            for (key in keys) text.apply(composer.letter(key, 0.0))
+            text.apply(composer.finishWord(0.0))
+            c.check(text.toString() == want, "$keys then Send: $text, want $want")
+            c.check(composer.before == want, "$keys then Send, the keyboard's copy: ${composer.before}")
+        }
+        c.done()
+    }
 }

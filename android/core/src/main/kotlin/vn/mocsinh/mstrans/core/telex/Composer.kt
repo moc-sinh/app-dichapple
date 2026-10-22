@@ -167,6 +167,12 @@ class Composer {
         return endWord(now) + record(listOf(Edit.Insert("\n")), now)
     }
 
+    /** The word ends without a key that types: the app's Send, Go or Search key (Android). */
+    fun finishWord(now: Double): List<Edit> {
+        lastSpaceAt = -10.0
+        return endWord(now)
+    }
+
     /**
      * Inside the word being composed, the last letter shown goes ("khô" → "kh") and the rest keeps
      * composing. Elsewhere one character goes, and the word now before the cursor is taken up

@@ -158,7 +158,7 @@ class Translator(
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         val (status, text) = try {
-            Http.client.newCall(request).await().use { it.code to it.body?.string().orEmpty() }
+            Http.client.newCall(request).text()
         } catch (e: IOException) {
             // Not tried again: it was probably still writing, and a second request is paid for too.
             if (e.isTimeout()) throw TranslateError.server("OpenAI trả lời quá lâu. Thử lại, hoặc chia tin ngắn hơn.")
@@ -348,12 +348,14 @@ How to translate:
 
 /** The glossary's lines, "a = b" each. */
 object Glossary {
-    data class Entry(val left: String, val right: String)
+    /** A term with no translation is kept as it is, as a brand name. */
+    data class Entry(val left: String, val right: String = "")
 
     fun parse(text: String): List<Entry> = text.lines().mapNotNull { line ->
         val sides = line.split("=", limit = 2).map { it.trim() }
-        if (sides.size == 2 && sides[0].isNotEmpty() && sides[1].isNotEmpty()) Entry(sides[0], sides[1]) else null
+        if (sides[0].isEmpty()) null else Entry(sides[0], sides.getOrElse(1) { "" })
     }
 
-    fun format(entries: List<Entry>): String = entries.joinToString("\n") { "${it.left} = ${it.right}" }
+    fun format(entries: List<Entry>): String =
+        entries.joinToString("\n") { if (it.right.isEmpty()) it.left else "${it.left} = ${it.right}" }
 }

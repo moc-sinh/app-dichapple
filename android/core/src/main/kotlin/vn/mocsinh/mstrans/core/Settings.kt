@@ -52,6 +52,7 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
         const val CONTEXT_CLEARED_AT = "contextClearedAt"
         const val KEY_SOUNDS = "keySounds"
         const val KEY_POPUPS = "keyPopups"
+        const val TYPES_ON_TOUCH_DOWN = "typesOnTouchDown"
         const val KEYBOARD_SIZE = "keyboardSize"
         const val HISTORY = "history"
         const val KEEP_HISTORY = "keepHistory"
@@ -131,10 +132,15 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
         get() = bool(Key.KEY_SOUNDS, true)
         set(value) = store.set(Key.KEY_SOUNDS, value.toString())
 
-    /** The enlarged letter above a pressed key. */
+    /** The enlarged letter above a pressed key; off, the key only lights up (as on the iPhone app). */
     var keyPopups: Boolean
-        get() = bool(Key.KEY_POPUPS, true)
+        get() = bool(Key.KEY_POPUPS, false)
         set(value) = store.set(Key.KEY_POPUPS, value.toString())
+
+    /** Keys type as the finger lands, not as it lifts: the letter is in the app a whole press sooner. */
+    var typesOnTouchDown: Boolean
+        get() = bool(Key.TYPES_ON_TOUCH_DOWN, true)
+        set(value) = store.set(Key.TYPES_ON_TOUCH_DOWN, value.toString())
 
     /** 0 standard, 1 a little taller, 2 taller. */
     var keyboardSize: Int

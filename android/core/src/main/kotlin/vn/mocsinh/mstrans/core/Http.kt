@@ -53,6 +53,30 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation 
     continuation.invokeOnCancellation { runCatching { cancel() } }
 }
 
+/**
+ * Runs the call and reads the whole answer on OkHttp's thread: read on Android's main thread, the
+ * body's bytes would be network on the main thread, which Android stops.
+ */
+suspend fun Call.text(): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
+    enqueue(object : Callback {
+        override fun onResponse(call: Call, response: Response) {
+            val result = try {
+                response.use { it.code to it.body?.string().orEmpty() }
+            } catch (e: IOException) {
+                if (!continuation.isCancelled) continuation.resumeWithException(e)
+                return
+            }
+            continuation.resume(result)
+        }
+
+        override fun onFailure(call: Call, e: IOException) {
+            if (continuation.isCancelled) return
+            continuation.resumeWithException(e)
+        }
+    })
+    continuation.invokeOnCancellation { runCatching { cancel() } }
+}
+
 /** A read that timed out, not a dropped connection. */
 fun IOException.isTimeout(): Boolean = this is InterruptedIOException && message?.contains("timeout", true) == true
 

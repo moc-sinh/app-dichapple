@@ -150,4 +150,11 @@ class TranslatorTest {
         assertEquals("ko", target.code)
         assertEquals("ko", settings.lastPartnerCode)
     }
+
+    @Test
+    fun glossaryKeepsTermsAsTheyAre() {
+        val entries = Glossary.parse("CNC\nspindle = trục chính\n = bỏ qua\n\nMộc Sinh =")
+        assertEquals(listOf(Glossary.Entry("CNC"), Glossary.Entry("spindle", "trục chính"), Glossary.Entry("Mộc Sinh")), entries)
+        assertEquals("CNC\nspindle = trục chính\nMộc Sinh", Glossary.format(entries))
+    }
 }

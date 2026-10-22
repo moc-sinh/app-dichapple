@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app draws its own bars; the system bars take the page's colours. -->
+    <style name="Base.MSTrans" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#0B6542</item>
+        <item name="android:colorPrimaryDark">#F2F2F7</item>
+        <item name="android:colorAccent">#0B6542</item>
+        <item name="android:colorControlActivated">#0B6542</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:statusBarColor">@color/page</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:alertDialogTheme">@style/Theme.MSTrans.Alert</item>
+    </style>
+
+    <style name="Theme.MSTrans.Alert" parent="android:Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#0B6542</item>
+        <item name="android:colorPrimary">#0B6542</item>
+    </style>
+
+    <style name="Theme.MSTrans.Dialog" parent="android:Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:colorAccent">#0B6542</item>
+        <item name="android:colorPrimary">#0B6542</item>
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+
+    <style name="Theme.MSTrans" parent="Base.MSTrans" />
+</resources>
