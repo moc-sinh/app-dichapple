@@ -3,7 +3,7 @@
     android:settingsActivity="vn.mocsinh.mstrans.MainActivity"
     android:supportsSwitchingToNextInputMethod="true">
     <subtype
-        android:imeSubtypeLanguage="vi_VN"
+        android:imeSubtypeLocale="vi_VN"
         android:imeSubtypeMode="keyboard"
         android:label="Tiếng Việt (Telex) · MSTrans"
         android:languageTag="vi-VN" />
