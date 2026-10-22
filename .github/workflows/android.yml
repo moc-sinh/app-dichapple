@@ -1,0 +1,70 @@
+name: Android
+
+# Every push that touches the Android app: the core's tests (typing, translation, Hội thoại), then
+# the APK, published as a GitHub release so the newest one always downloads from
+# https://github.com/moc-sinh/app-dichapple/releases/latest/download/MSTrans.apk
+on:
+  push:
+    paths:
+      - "android/**"
+      - "Tests/Suite/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Core tests
+        run: ./gradlew :core:test --console=plain
+
+      - name: Build APK
+        env:
+          # Each build gets a higher version code, so it installs over the one before.
+          MSTRANS_BUILD: ${{ github.run_number }}
+        run: ./gradlew :app:assembleRelease --console=plain
+
+      - name: Name the APK
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp app/build/outputs/apk/release/app-release.apk MSTrans.apk
+          ls -l MSTrans.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSTrans-apk
+          path: android/MSTrans.apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="android-$VERSION-${{ github.run_number }}"
+          gh release create "$TAG" MSTrans.apk \
+            --target "$GITHUB_SHA" \
+            --title "MSTrans Android $VERSION (bản ${{ github.run_number }})" \
+            --notes "Bản Android build từ ${GITHUB_SHA::7} (nhánh ${GITHUB_REF_NAME}). Tải MSTrans.apk về điện thoại rồi mở để cài; lần đầu Android hỏi cho phép cài app từ trình duyệt hoặc trình quản lý tệp." \
+            --latest
