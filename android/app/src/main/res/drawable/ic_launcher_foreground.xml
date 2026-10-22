@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Mộc Sinh mark (Shared/Brand.xcassets/Logo.imageset). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:pivotX="512"
+        android:pivotY="512"
+        android:scaleX="0.56"
+        android:scaleY="0.56">
+        <group
+            android:translateX="107.49447852760733"
+            android:translateY="106"
+            android:scaleX="0.996319018404908"
+            android:scaleY="0.996319018404908">
+          <group
+              android:translateX="-225"
+              android:translateY="-223">
+            <path
+                android:fillColor="#0B6542"
+                android:pathData="M225 223 L621 456 L514 523 L225 349 Z" />
+            <path
+                android:fillColor="#0B6542"
+                android:pathData="M1037 223 L1037 349 L578 630 L537 606 C509 589 503 575 514 552 C518 543 529 535 543 526 Z" />
+            <path
+                android:fillColor="#0B6542"
+                android:pathData="M225 446 L344 519 L344 765 C344 791 349 802 369 814 L453 865 L352 931 L264 877 C237 860 225 840 225 807 Z" />
+            <path
+                android:fillColor="#E85D27"
+                android:pathData="M453 865 L539 918 L435 982 L352 931 Z" />
+            <path
+                android:fillColor="#DA9B2A"
+                android:pathData="M643 610 L746 546 L805 583 L704 647 Z" />
+            <path
+                android:fillColor="#0B6542"
+                android:pathData="M805 583 L912 647 L916 520 L1035 446 L1035 889 L915 963 L915 794 C915 773 906 760 886 747 L704 647 Z" />
+            <path
+                android:fillColor="#0B6542"
+                android:pathData="M496 552 C460 576 437 609 437 645 C437 684 458 714 501 740 L648 830 C669 843 670 858 648 874 L449 992 L507 1025 C539 1043 577 1043 610 1022 L778 914 C839 873 839 817 789 776 L536 615 C507 596 491 577 496 552 Z" />
+          </group>
+        </group>
+    </group>
+</vector>

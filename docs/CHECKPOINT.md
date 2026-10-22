@@ -171,6 +171,31 @@
   VoiceStream); mô phỏng: tiếng bắt đầu trước khi giọng làm xong (dưới 0,7 s), mọi phần phát đúng thứ tự, bấm Tôi
   nói giữa chừng thì không phát tiếp. Chưa đo trên máy thật.
 
+- **1.10.1 đã build xanh ở run 67** (cả keyboard-smoke), link IPA đã gửi người dùng.
+
+- **Bản Android 1.0.0 (22/10, nhánh `claude/android-apk`, tách từ d8cc27f).** Người dùng nhờ làm bản tương tự trên
+  Android và gửi link APK. Mã ở `android/`:
+  - `core` (Kotlin thuần, chạy test ở bất kỳ đâu): Telex/`Composer`/`TypedText` chuyển từ Swift (qua đủ bộ 9.091 case
+    `Tests/Suite`), dịch OpenAI, ngữ cảnh, lịch sử, thuật ngữ, Hội thoại (`ConversationModel`, Soniox, Dịch liền, giọng
+    OpenAI/Google/điện thoại, biên bản). Test: `cd android && gradle :core:test` (trong phiên cloud cần thêm init
+    script trỏ Maven Central qua mirror `maven-central.storage-download.googleapis.com`, vì repo.maven.apache.org
+    trả 429). Thân trả lời HTTP đọc trên luồng OkHttp (`Call.text()`), không trên luồng chính.
+  - `app` (chỉ có trong build khi có Android SDK): 5 tab như iPhone (View dựng bằng code, không androidx), bàn phím
+    `keyboard/MSTransKeyboard.kt` (InputMethodService: thanh Dịch, dòng báo, bảng ngữ cảnh, đọc tin đã sao chép qua
+    clipboard) + `keyboard/KeyView.kt` (vẽ phím, rollover 2 ngón, giữ để chọn dấu, phím cách kéo con trỏ, Shift
+    2 lần khóa hoa, xóa lặp theo từ). Bàn phím theo dõi ô bằng vị trí con trỏ chờ đợi (`expected`) trong
+    `onUpdateSelection`; báo khác thì đọc lại ô như `fieldChanged` của iPhone. "Dịch bằng MSTrans" trong menu chọn
+    chữ/Chia sẻ (`ProcessTextActivity`) thay cho Chạm lưng iPhone.
+  - Kiểm tra biên dịch không cần SDK: dự án nhỏ trong scratchpad biên dịch mã `app` với `org.robolectric:android-all`
+    (15-robolectric-13954326, compileOnly) và một `R` giả sinh từ tên tệp trong `res/` (không có trong repo).
+  - CI: `.github/workflows/android.yml` (test core → `assembleRelease` → release `android-<version>-<run>` với tệp
+    `MSTrans.apk`). Link cố định cho người dùng: `https://github.com/moc-sinh/app-dichapple/releases/latest/download/MSTrans.apk`.
+    `ios.yml` bỏ qua các lần push chỉ đổi `android/`.
+  - Ký APK bằng khóa cố định `android/app/mstrans-sideload.p12` (mật khẩu `mstrans-sideload`, alias `mstrans`) để bản
+    sau cài đè bản trước; có thể thay bằng secret (`MSTRANS_KEYSTORE`…). Khóa nằm trong repo công khai: chỉ cài APK
+    từ link release của repo này.
+  - Chưa thử trên máy Android thật.
+
 ## Việc tiếp theo (theo thứ tự)
 
 1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm); giọng Google đã có sẵn trong 1.10.x. Nếu chọn Edge:
@@ -180,6 +205,7 @@
 3. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
    (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, chụp màn Hội thoại để xem).
 4. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).
+5. Android: người dùng cài APK và thử bàn phím (bật trong Cài đặt › Bàn phím ảo), Dịch, tin đã sao chép, Hội thoại.
 
 ## Quy tắc đã thống nhất với người dùng
 

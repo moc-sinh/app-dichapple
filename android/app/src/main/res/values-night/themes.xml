@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Base.MSTrans" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#34A86F</item>
+        <item name="android:colorPrimaryDark">#000000</item>
+        <item name="android:colorAccent">#34A86F</item>
+        <item name="android:colorControlActivated">#34A86F</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:statusBarColor">@color/page</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:alertDialogTheme">@style/Theme.MSTrans.Alert</item>
+    </style>
+
+    <style name="Theme.MSTrans.Alert" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#34A86F</item>
+        <item name="android:colorPrimary">#34A86F</item>
+    </style>
+
+    <style name="Theme.MSTrans.Dialog" parent="android:Theme.Material.Dialog.NoActionBar">
+        <item name="android:colorAccent">#34A86F</item>
+        <item name="android:colorPrimary">#34A86F</item>
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+
+    <style name="Theme.MSTrans" parent="Base.MSTrans" />
+</resources>
