@@ -182,12 +182,18 @@ struct Simulation {
               "a partner confirming what the phone read is kept, not taken for its echo")
         await sleep(0.6)
 
-        // GPT fails: Soniox's translation stays, and is read.
+        // GPT fails: asked again a moment later, Soniox's translation still coming in meanwhile (it was
+        // kept as it was when GPT failed, cut short); failing again, Soniox's stays, and is read.
         others.say([w("FAIL 这个。", "1"), w("<end>", "")])
-        others.say([t("Cái này.")])
+        others.say([t("Cái")])
         await sleep(0.6)
+        others.say([t(" này.")])
+        check(model.entries.last?.state == .translating && model.entries.last?.translation == "Cái này.",
+              "GPT failed once: Soniox's translation still comes in")
+        await sleep(1.8)
         let failedEntry = model.entries.last
-        check(failedEntry?.state == .done && failedEntry?.translation == "Cái này.", "GPT failed: Soniox's translation kept")
+        check(failedEntry?.state == .done && failedEntry?.translation == "Cái này.", "GPT failed again: Soniox's whole translation kept")
+        check(calls.translated.filter { $0.text == "FAIL 这个。" }.count == 2, "GPT asked twice")
         await sleep(1)
         check(calls.spoken.last == "Cái này.", "and read")
 
@@ -255,7 +261,40 @@ struct Simulation {
         check(AudioIO.current?.echo.last == false, "Chỉ chữ: echo cancelling off, the microphone hears far voices better")
         model.readAloud = true
         check(AudioIO.current?.echo.last == true, "Đọc to again: on")
+
+        // The room's session drops in the middle of a sentence: what it settled stays, and the next
+        // one is sent again what it had not, and what is said meanwhile.
+        await feed(speech(1))
+        let dropAt = others.sent
+        others.say([w("我们的价格", "2", start: Int((dropAt - 0.9) * 1000), end: Int((dropAt - 0.5) * 1000)),
+                    w("很好", "2", final: false)])
+        others.onEvent?(.closed)
+        check(model.entries.last?.text == "我们的价格" && model.entries.last?.state == .translating,
+              "dropped: its settled words are a sentence, translated: \(String(describing: model.entries.last))")
+        await sleep(0.1)
+        guard let again = SonioxSession.all.last(where: { $0.target == "vi" }), again !== others, again.isOpen else {
+            print("FAIL: not opened again")
+            exit(1)
+        }
+        check(again.sent > 0.45 && again.sent < 0.7, "opened again at once, and sent again what was not settled: \(again.sent) s")
+        await feed(speech(0.5))
+        check(again.sent > 0.9, "the sound goes on to it")
+        check(model.speedLogText.contains("gửi lại"), "noted in the speed log")
+        again.say([w("很好。", "2"), w("<end>", "")])
+        check(model.entries.last?.text == "很好。", "the words not settled are heard again")
+        await sleep(0.5)
+
+        // Stop while Soniox has not settled the last words: they still come in.
+        let partnerFinalized = partner.finalized
+        again.say([w("我们下周", "1"), w("一确认", "1", final: false)])
         model.stop()
+        await sleep(0.2)
+        check(again.finalized == 1 && partner.finalized == partnerFinalized + 1, "stopped: Soniox is asked to settle what it heard")
+        check(again.isOpen, "and kept open for its answer")
+        again.say([w("一确认订单，价格不变。", "1"), w("<fin>", "")])
+        partner.say([w("<fin>", "")])
+        check(model.entries.last?.text == "我们下周一确认订单，价格不变。", "the last words said before Stop are kept: \(model.entries.last?.text ?? "")")
+        check(!again.isOpen && !partner.isOpen, "then the sessions close")
         await sleep(0.5)
         let lines = model.meeting.lines
         check(lines.contains { $0.speaker == "3" } && model.meeting.transcript.contains("Người 1 · "),

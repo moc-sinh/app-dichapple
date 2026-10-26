@@ -101,6 +101,11 @@ final class Listener: @unchecked Sendable {
     func flush() {
         endMine()
         if let utterance = segmenter.flush() { deliver(utterance) }
+        // The last moment of sound goes too: it may end the last word.
+        if streams, !chunk.isEmpty {
+            let data = PCM.data(chunk[...])
+            DispatchQueue.main.async { [weak self] in self?.onChunk?(data, false) }
+        }
         chunk = []
     }
 
@@ -339,6 +344,19 @@ final class ConversationModel {
     @ObservationIgnored private var liveRetries = 0
     @ObservationIgnored private var sonioxToVietnamese: SonioxSession?
     @ObservationIgnored private var sonioxToPartner: SonioxSession?
+    /// The sound lately sent to each side's Soniox session (true: the others'), and where in it each
+    /// session's sound begins: a session that drops is followed by one sent again what the first had
+    /// not settled, and what was said meanwhile (it was lost).
+    @ObservationIgnored private var trails: [Bool: SoundTrail] = [:]
+    @ObservationIgnored private var origins: [Bool: Double] = [:]
+    @ObservationIgnored private var replayFrom: [Bool: Double] = [:]
+    /// Listening stopped with Soniox: its sessions settle what they heard, and their last words and
+    /// translations still come in, two seconds at most (they were lost when the sessions closed at
+    /// once). The sides whose sessions have answered.
+    @ObservationIgnored private var draining = false
+    @ObservationIgnored private var settledAll: Set<Bool> = []
+    @ObservationIgnored private var drained: Set<Bool> = []
+    @ObservationIgnored private var drainTask: Task<Void, Never>?
     /// What each Soniox session has heard (true: the others'), cut into sentences.
     @ObservationIgnored private var transcripts: [Bool: SonioxTranscript] = [:]
     /// Dịch liền: the others' sound is sent while someone speaks, not while the room is quiet.
@@ -362,6 +380,27 @@ final class ConversationModel {
     /// Soniox sentences being said or translated: when they were said, and how soon their words and
     /// their first translation showed, for the speed log.
     @ObservationIgnored private var heardTimes: [UUID: HeardTime] = [:]
+
+    /// The sound sent to one side's Soniox sessions lately, a tenth of a second at a time, each with
+    /// where it begins in all the sound that side was sent.
+    private struct SoundTrail {
+        private(set) var chunks: [(at: Double, data: Data)] = []
+        /// Seconds of sound that side was sent, all its sessions together.
+        private(set) var end = 0.0
+        /// Long enough for a session to be opened again a few times.
+        static let kept = 15.0
+
+        mutating func add(_ data: Data) {
+            chunks.append((end, data))
+            end += PCM.seconds(data)
+            while let first = chunks.first, end - first.at > Self.kept { chunks.removeFirst() }
+        }
+
+        /// The sound from `position` on, from the tenth of a second it falls in.
+        func since(_ position: Double) -> [(at: Double, data: Data)] {
+            chunks.filter { $0.at + PCM.seconds($0.data) > position }
+        }
+    }
 
     /// Seconds into a Soniox session's sound: where a sentence's words begin and end, and how much
     /// had been sent when its words, then its first translation, showed.
@@ -387,6 +426,8 @@ final class ConversationModel {
     /// this long: a thought said in two breaths ("if you order five hundred, … we give five percent")
     /// is translated as one.
     private static let pauseEnds = 1.2
+    /// Seconds before each try to open a dropped Soniox session again.
+    private static let reconnectDelays: [Double] = [0, 0.5, 1, 2, 3, 5, 5, 5]
 
     init() {
         let defaults = UserDefaults.standard
@@ -419,6 +460,7 @@ final class ConversationModel {
 
     func start() async {
         guard !running, !starting else { return }
+        endDrain()
         problem = nil
         // Soniox hears and translates by itself: the OpenAI key is only for its voices and summaries.
         let key: String
@@ -492,16 +534,24 @@ final class ConversationModel {
         hearsSpeech = false
         stopSpeaking()
         audio.stop()
+        // Soniox is sent the last of the sound, then asked to settle all it heard.
+        draining = engine == .soniox && (sonioxToVietnamese != nil || sonioxToPartner != nil)
         // After the sound already queued: the sentence being said still goes in.
-        if let listener { audio.queue.async { listener.flush() } }
-        // The sentences being said are translated as they are.
-        for fromOthers in [true, false] {
-            if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
+        if let listener {
+            let soniox = draining
+            audio.queue.async {
+                listener.flush()
+                if soniox { DispatchQueue.main.async { [weak self] in self?.drainSoniox() } }
+            }
+        } else if draining {
+            drainSoniox()
         }
         closeLive()
         endLiveCaptions(all: true)
-        for current in captions.values { finishCaption(current.id) }
-        captions = [:]
+        if !draining {
+            for current in captions.values { finishCaption(current.id) }
+            captions = [:]
+        }
         billLive()
         UIApplication.shared.isIdleTimerDisabled = false
         MeetingStore.save(meeting)
@@ -513,11 +563,11 @@ final class ConversationModel {
 
     /// A new meeting can start once listening has stopped and the last sentences (and a summary
     /// being written) are in this one.
-    var canStartNewMeeting: Bool { !running && !summarizing && !settling && !entries.isEmpty }
+    var canStartNewMeeting: Bool { !running && !draining && !summarizing && !settling && !entries.isEmpty }
 
     /// The meeting so far goes to the saved ones; the next starts empty.
     func newMeeting() {
-        guard !running, !summarizing, !settling else { return }
+        guard !running, !draining, !summarizing, !settling else { return }
         billLive()
         MeetingStore.save(meeting)
         meeting = Meeting()
@@ -1115,11 +1165,52 @@ final class ConversationModel {
         liveToPartner?.close()
         liveToVietnamese = nil
         liveToPartner = nil
+        if !draining { closeSoniox() }
+    }
+
+    private func closeSoniox() {
         sonioxToVietnamese?.close()
         sonioxToPartner?.close()
         sonioxToVietnamese = nil
         sonioxToPartner = nil
         transcripts = [:]
+        trails = [:]
+        origins = [:]
+        replayFrom = [:]
+    }
+
+    /// Listening stopped: Soniox settles now what it heard (its last words and their translation
+    /// come in), and the sessions are closed once both have answered, or after two seconds.
+    private func drainSoniox() {
+        guard draining else { return }
+        drained = []
+        settledAll = []
+        for (fromOthers, session) in [(true, sonioxToVietnamese), (false, sonioxToPartner)] {
+            if let session, session.isOpen { session.finalize() } else { drained.insert(fromOthers) }
+        }
+        drainTask?.cancel()
+        drainTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.endDrain()
+        }
+        if drained.count == 2 { endDrain() }
+    }
+
+    /// What is left is finished as it is known, and the sessions closed.
+    private func endDrain() {
+        guard draining else { return }
+        draining = false
+        drainTask?.cancel()
+        drainTask = nil
+        for fromOthers in [true, false] {
+            if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
+        }
+        for current in captions.values { finishCaption(current.id) }
+        captions = [:]
+        closeSoniox()
+        billLive()
+        MeetingStore.save(meeting)
     }
 
     /// Apple's echo cancelling, which keeps the phone's voice out of what the microphone hears, but
@@ -1147,7 +1238,7 @@ final class ConversationModel {
     /// for the room, or the first syllable after a pause, is never lost, and Soniox hears for itself
     /// where a sentence ends.
     private func stream(_ data: Data, speech: Bool) {
-        guard running, engine.streams else { return }
+        guard running || draining, engine.streams else { return }
         let silent = Data(count: data.count)
         if talking {
             sendMine(data)
@@ -1172,6 +1263,8 @@ final class ConversationModel {
 
     private func sendOthers(_ chunk: Data) {
         if engine == .soniox {
+            trails[true, default: SoundTrail()].add(chunk)
+            // While it is opened again, the sound waits in the trail.
             guard let session = sonioxToVietnamese else { return }
             session.send(audio: chunk)
             sonioxSent[true, default: 0] += PCM.seconds(chunk)
@@ -1184,6 +1277,7 @@ final class ConversationModel {
 
     private func sendMine(_ chunk: Data) {
         if engine == .soniox {
+            trails[false, default: SoundTrail()].add(chunk)
             guard let session = sonioxToPartner else { return }
             session.send(audio: chunk)
             sonioxSent[false, default: 0] += PCM.seconds(chunk)
@@ -1391,6 +1485,9 @@ final class ConversationModel {
         othersGate.reset()
         transcripts = [:]
         sonioxEntries = [:]
+        trails = [:]
+        origins = [:]
+        replayFrom = [:]
         sonioxToVietnamese = makeSoniox(target: Language.vietnamese.code)
         openSonioxPartner()
     }
@@ -1411,6 +1508,21 @@ final class ConversationModel {
         }
         sonioxSent[room] = 0
         session.open()
+        // Opened again after a drop: sent at once what the one before had not settled, and what was
+        // said meanwhile.
+        let trail = trails[room] ?? SoundTrail()
+        if let from = replayFrom.removeValue(forKey: room) {
+            let missed = trail.since(from)
+            origins[room] = missed.first?.at ?? trail.end
+            for chunk in missed {
+                session.send(audio: chunk.data)
+                sonioxSent[room, default: 0] += PCM.seconds(chunk.data)
+                unbilledLive += PCM.seconds(chunk.data)
+            }
+            if !missed.isEmpty { log(nil, "Soniox nối lại: gửi lại \(SpeedLog.seconds(trail.end - (origins[room] ?? 0))) tiếng chưa chốt") }
+        } else {
+            origins[room] = trail.end
+        }
         return session
     }
 
@@ -1454,6 +1566,16 @@ final class ConversationModel {
             var transcript = transcripts[fromOthers] ?? newTranscript(target: session.target)
             let finished = transcript.take(tokens)
             transcripts[fromOthers] = transcript
+            // Stopped: this side has answered once all it heard is settled and nothing of it is left.
+            defer {
+                if draining {
+                    if tokens.contains(where: \.isFin) { settledAll.insert(fromOthers) }
+                    if settledAll.contains(fromOthers), transcript.current.text.isEmpty {
+                        drained.insert(fromOthers)
+                        if drained.count == 2 { endDrain() }
+                    }
+                }
+            }
             // How far the words Soniox settled are behind the sound sent to it.
             let lag = transcript.settledEnd.map { (sonioxSent[fromOthers] ?? 0) - $0 }
             for sentence in finished { finishSentence(sentence, fromOthers: fromOthers, lag: lag) }
@@ -1477,22 +1599,30 @@ final class ConversationModel {
                 problem = message.isEmpty ? "Soniox gặp lỗi (\(code))." : "Soniox: \(message)"
             }
         case .closed:
+            if draining {
+                drained.insert(fromOthers)
+                if drained.count == 2 { endDrain() }
+                return
+            }
             guard running, engine == .soniox else { return }
-            // Dropped (network, a time limit): what was heard stays, and it is opened again, a few
-            // times. Let go of at once, so a second word of it closing opens nothing more.
+            // Dropped (network, a time limit): what it settled stays, and it is opened again at once
+            // (then a few more times, waiting longer), sent again what it had not settled. Let go of
+            // at once, so a second word of it closing opens nothing more.
             session.close()
-            if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
+            replayFrom[fromOthers] = (origins[fromOthers] ?? 0) + (transcripts[fromOthers]?.settledEnd ?? 0)
+            if let sentence = transcripts[fromOthers]?.finishSettled() { finishSentence(sentence, fromOthers: fromOthers) }
             transcripts[fromOthers] = nil
             sonioxEntries[fromOthers] = nil
             if fromOthers { sonioxToVietnamese = nil } else { sonioxToPartner = nil }
             log(nil, "Soniox mất kết nối, nối lại")
             liveRetries += 1
-            guard liveRetries <= 5 else {
+            guard liveRetries <= Self.reconnectDelays.count else {
                 problem = "Không nối lại được Soniox. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
                 return stop()
             }
+            let delay = Self.reconnectDelays[liveRetries - 1]
             Task {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
                 guard self.running, self.engine == .soniox else { return }
                 if fromOthers {
                     if self.sonioxToVietnamese == nil { self.sonioxToVietnamese = self.makeSoniox(target: Language.vietnamese.code) }
@@ -1620,19 +1750,29 @@ final class ConversationModel {
         // What the partners hear is the user's own words: the app's translation model.
         let model = entry.mine ? SharedStore.model : quality.model
         let began = Date()
-        do {
-            let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
-            charge { $0.used(result.usage, by: model) }
-            let translation = result.text
-            update(id) {
-                $0.translation = translation
-                $0.state = .done
+        for attempt in 1...2 {
+            do {
+                let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
+                charge { $0.used(result.usage, by: model) }
+                let translation = result.text
+                update(id) {
+                    $0.translation = translation
+                    $0.state = .done
+                }
+                log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))" + heardNote(id, mine: entry.mine))
+                break
+            } catch {
+                // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the
+                // live translation goes on coming in: it was kept as it was when GPT failed, cut short.
+                if attempt == 1, !(error is CancellationError) {
+                    log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): hỏi lại sau 1,5 s")
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    continue
+                }
+                update(id) { $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done }
+                log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
+                heardTimes[id] = nil
             }
-            log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))" + heardNote(id, mine: entry.mine))
-        } catch {
-            update(id) { $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done }
-            log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
-            heardTimes[id] = nil
         }
         guard let done = entries.first(where: { $0.id == id }), done.state == .done else { return }
         record(id)
