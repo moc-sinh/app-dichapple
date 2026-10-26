@@ -10,15 +10,16 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (183 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (214 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng nhìn
-  thấy; xem mục 1.12.1). 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
+- **Bản mới nhất:** iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, sửa trên cả hai bản;
+  xem mục 1.13.0). Trước đó 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng
+  nhìn thấy; xem mục 1.12.1). 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
   lại khi chậm, chủ đề cuộc họp; run 72, đã gửi link). Link IPA 1.11.0 đã gửi người dùng (run 71, lần chạy thứ 2: lần đầu
   GitHub không có máy macOS trong 15 phút nên huỷ, không phải lỗi mã). Trước đó 1.11.0 (họp nhiều người: tách câu theo
   người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ, chữ là chính; xem mục 1.11.0). Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
@@ -315,9 +316,48 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   build được cả `:app:assembleRelease` tại chỗ (không có KVM nên không chạy máy ảo). CI Android run 4 xanh, phát hành
   `android-1.1.0-4`.
 
+- **1.13.0 + Android 1.2.0: rà soát độc lập phần nghe dịch (26/10, đêm).** Người dùng: "kiểm tra thật kĩ, chỉ phần nghe
+  dịch, tối ưu tốc độ ra chữ và bản dịch đúng nghĩa, rồi xuất IPA lẫn Android". Một trợ lý rà soát đọc toàn bộ đường đi của
+  chữ (Soniox, Dịch liền, GPT) và viết 13 tình huống chạy trên model thật với stub; 12 phát hiện, mỗi cái kiểm chứng lại trước
+  khi sửa. Đã sửa (iPhone và Android giống nhau):
+  1. **Tiếng vọng xoá nhầm câu đối tác**: `EchoGuard` ghi lại *lúc* máy đọc (`spoke`/`stopped`), coi là tiếng vọng chỉ khi câu
+     được nói trong lúc máy đọc hoặc 1,5 s sau (`isEcho(from:to:)`); chỉ ghi tiếng mà phiên nghe phòng thật sự nghe (Soniox:
+     câu của đối phương khi Đọc to; câu của người dùng thì phòng nhận im lặng). Giờ của câu Soniox đổi sang giờ máy bằng
+     `saidTime` (số giây đã gửi). Trước đây "好的，下周一确认订单" ngay sau khi máy đọc "我们下周一确认订单" bị xoá.
+  2. **Phòng bị điếc khi giữ Tôi nói**: phiên Soniox của phòng giờ nghe cả lượt của người dùng; `MyVoiceFilter` bỏ giọng người
+     dùng (trong lượt, chỉ giữ giọng đã biết là đối tác: từng nói tiếng khác tiếng Việt ngoài lượt). Khi máy đọc câu của người
+     dùng, phòng vẫn nhận im lặng (để giọng máy không hiện lên rồi biến mất).
+  3. **Thứ tiếng của câu là của chữ đầu**: giờ là thứ tiếng có nhiều âm tiết nhất (`syllables`, `majority`), cả cho Tự động.
+  4. **Mất mạng mất tiếng**: mỗi bên giữ 15 s âm thanh đã gửi (`SoundTrail`), phiên mới gửi lại từ chữ cuối đã chốt
+     (`settledEnd`, `finishSettled`), mở lại ngay rồi 0,5/1/2/3/5/5/5 s; âm thanh lúc chưa có phiên nằm chờ trong trail.
+  5. **Bấm dừng mất mấy chữ cuối**: gửi nốt đoạn âm thanh cuối, `finalize` cả hai phiên, chờ `<fin>` (tối đa 2 s,
+     `draining`), rồi mới đóng; Cuộc họp mới chờ xong việc này.
+  6. **Bản dịch tạm bị lặp** ("ĐượcĐược rồi."): câu kết thúc ngay ở `<end>`/`<fin>`, bản chờ dịch chỉ giữ phần đã chốt.
+  7. **GPT lỗi nhanh làm đóng băng bản dịch Soniox còn thiếu**: hỏi lại một lần sau 1,5 s, trong lúc đó vẫn nhận tiếp bản dịch
+     Soniox; lỗi lần hai thì giữ bản Soniox đầy đủ.
+  8. **Câu bị cắt ở mỗi chỗ ngừng 0,5 s và ở một chữ gán nhầm người**: `<end>` không có dấu kết câu (. ? ! 。 ？ ！) là chỗ
+     ngừng (`ended`), người đó nói tiếp thì cùng câu, không thì model kết thúc sau 1,2 s không có chữ mới (`pauseEnds`, đo từ
+     lúc chữ đổi lần cuối), người khác nói thì kết thúc ngay; vài chữ của người khác giữa câu được giữ (`switching`) tới khi họ
+     nói đủ 3 âm tiết, người cũ nói tiếp thì chữ đó ở lại câu cùng bản dịch của nó.
+  9. **Prompt**: lời người khác dùng prompt cuộc họp riêng (`Prompt.meeting`, không còn "tin đối tác viết cho người dùng"); bỏ
+     câu "never repeat what an earlier translation already says", thay bằng dịch lại đầy đủ số, giá, ngày, cam kết được nhắc lại.
+  10. **Thả Tôi nói mất tiếng cuối**: 0,35 s sau khi thả vẫn gửi cho phiên của người dùng (`mineTail`), rồi mới `finalize`
+      (Dịch liền: 0,35 s tiếng thật rồi im lặng tới 1,5 s).
+  11. **Dịch liền**: cổng gửi tiếng mở cả với giọng nhỏ ở xa (`audible`: trên nền 6 dB, tối thiểu −58 dBFS, 3 khung liền, giữ
+      0,3 s); câu kết thúc bằng dấu chấm được GPT dịch sau 0,8 s im lặng thay vì 2,5 s.
+  12. **Trễ không cần thiết**: iPhone chỉ dựng chữ biên bản khi bấm chia sẻ (`MinutesText`), cuộn có hiệu ứng chỉ khi có câu
+      mới; yêu cầu GPT thứ hai (sau 2,5 s) đi qua kết nối riêng (`Translator.spare`, Android `Http.spare`).
+  Chưa làm, có lý do: để bộ nhận dạng chữ ghi đè thứ tiếng Soniox nghe (dễ nhầm tiếng Nhật toàn chữ Hán); theo dõi cuộn tay trên
+  iOS 17 (`FollowsBottom` chỉ chạy iOS 18+, không thử được nếu không có máy); đuôi 0,35 s cho Chính xác (lượt nói giữ trên hàng
+  đợi âm thanh, chỉ phần trong bộ đệm micro có thể thiếu). Test: `Tests/Conversation` 214 kiểm tra (bản cũ hỏng 17 kiểm tra mới,
+  gồm "ĐượcĐược rồi."); mô phỏng thêm tiếng vọng đúng lúc máy đọc, đối tác xác nhận được giữ, câu ngừng sau dấu phẩy được nối,
+  câu kết thúc sau 1,2 s, GPT lỗi rồi hỏi lại, lượt Tôi nói (phòng vẫn nghe, lọc giọng, đuôi 0,35 s), mất kết nối giữa câu,
+  dừng khi Soniox chưa trả xong; thử đột biến từng sửa chính đều bị bắt. Android: cùng kiểm tra trong `ConversationPartsTest`,
+  `ConversationSonioxTest` (máy chủ Soniox giả), 26 test Kotlin qua, APK build tại chỗ.
+
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.12.1. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+0. Gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`
    (Soniox chậm), `GPT Luna X s · bản dịch đầu tiên sau X s · bản GPT sau X s từ lúc ngừng nói` (đây là độ trễ người
