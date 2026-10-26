@@ -21,12 +21,15 @@ final class AudioIO: NSObject {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// Reads faster while the voice is behind a room that talks on, at the same pitch.
+    private let pitch = AVAudioUnitTimePitch()
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(PCM.rate), channels: 1,
                                        interleaved: false)!
     private var converter: AVAudioConverter?
     private(set) var running = false
-    /// Sound scheduled and not yet heard: told it is done when playback stops early too.
-    private var pending: [UUID: () -> Void] = [:]
+    /// Sound scheduled and not yet heard (and how long it is): told it is done when playback stops
+    /// early too.
+    private var pending: [UUID: (done: () -> Void, seconds: Double)] = [:]
     /// A translation read again while not listening (`playAlone`).
     private var alone: AVAudioPlayer?
     private var aloneDone: (() -> Void)?
@@ -34,7 +37,10 @@ final class AudioIO: NSObject {
     override init() {
         super.init()
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.attach(pitch)
+        pitch.bypass = true
+        engine.connect(player, to: pitch, format: format)
+        engine.connect(pitch, to: engine.mainMixerNode, format: format)
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(configurationChanged), name: .AVAudioEngineConfigurationChange, object: engine)
         center.addObserver(self, selector: #selector(interrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
@@ -115,18 +121,28 @@ final class AudioIO: NSObject {
         buffer.frameLength = AVAudioFrameCount(samples.count)
         for (index, sample) in samples.enumerated() { channel[index] = Float(sample) / 32768 }
         let id = UUID()
-        pending[id] = done
+        pending[id] = (done, Double(samples.count) / format.sampleRate)
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            DispatchQueue.main.async { self?.pending.removeValue(forKey: id)?() }
+            DispatchQueue.main.async { self?.pending.removeValue(forKey: id)?.done() }
         }
         if !player.isPlaying { player.play() }
+    }
+
+    /// Seconds of sound scheduled and not yet heard (as made, before `setRate`).
+    var backlog: Double { pending.values.reduce(0) { $0 + $1.seconds } }
+
+    /// How fast what is played is read: 1 as made, up to 1.35 while catching up. The pitch stays.
+    func setRate(_ rate: Float) {
+        guard pitch.rate != rate || pitch.bypass != (rate == 1) else { return }
+        pitch.rate = rate
+        pitch.bypass = rate == 1
     }
 
     func stopPlayback() {
         player.stop()
         let waiting = pending.values
         pending = [:]
-        waiting.forEach { $0() }
+        waiting.forEach { $0.done() }
     }
 
     /// Plays 24 kHz mono PCM16 while not listening (Đọc lại after Dừng): the speaker only, the

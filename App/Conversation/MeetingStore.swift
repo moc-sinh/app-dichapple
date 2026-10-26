@@ -12,6 +12,16 @@ struct Meeting: Codable, Identifiable, Equatable {
         var translation: String
         /// What it was translated into.
         var target: String
+        /// Who said it, as Soniox tells the room's speakers apart ("1", "2"…); nil when not told.
+        var speaker: String? = nil
+
+        /// "Tôi", or who spoke which language ("Người 2 · Tiếng Trung").
+        var who: String {
+            if mine { return "Tôi" }
+            let language = Meeting.languageName(self.language)
+            guard let speaker, !speaker.isEmpty else { return language }
+            return "Người \(speaker) · \(language)"
+        }
     }
 
     var id = UUID()
@@ -37,8 +47,7 @@ struct Meeting: Codable, Identifiable, Equatable {
     var transcript: String {
         var text = "Cuộc họp \(title) (\(length))\n"
         for line in lines {
-            let who = line.mine ? "Tôi" : Self.languageName(line.language)
-            text += "\n[\(Self.timeFormatter.string(from: line.at))] \(who): \(line.text)\n"
+            text += "\n[\(Self.timeFormatter.string(from: line.at))] \(line.who): \(line.text)\n"
             if !line.translation.isEmpty { text += "  → \(line.translation)\n" }
         }
         if let summary, !summary.isEmpty { text += "\nTÓM TẮT\n\(summary)\n" }

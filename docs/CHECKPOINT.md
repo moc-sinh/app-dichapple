@@ -5,7 +5,8 @@
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
+- **Bản mới nhất:** 1.11.0 (họp nhiều người: tách câu theo người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ;
+  xem mục 1.11.0). Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
   xanh), 1.9.1 (sửa bàn phím tự tắt, run 65, cả keyboard-smoke xanh), 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
   đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
   "chưa mượt, phản hồi chưa nhanh". Người dùng thấy 1.7.0 "khá ổn". Các mục bên dưới là lịch sử theo từng bản.
@@ -171,7 +172,45 @@
   VoiceStream); mô phỏng: tiếng bắt đầu trước khi giọng làm xong (dưới 0,7 s), mọi phần phát đúng thứ tự, bấm Tôi
   nói giữa chừng thì không phát tiếp. Chưa đo trên máy thật.
 
+- **1.11.0: họp từ 3 người trở lên (26/10).** Người dùng (dùng Soniox và Dịch liền, mức Tiết kiệm) báo bản dịch
+  kém và chậm nhiều khi có từ 3 người. Nguyên nhân tìm được và cách sửa:
+  1. Soniox gộp lời nhiều người, nhiều thứ tiếng vào một câu, và bản dịch Soniox đến từng mảnh không gắn với câu nào
+     nên mảnh dịch câu trước rơi sang câu sau. `SonioxTranscript.splits` (bật khi có key OpenAI): bật
+     `enable_speaker_diarization` cho phiên nghe phòng (phiên Tôi nói thì không), câu kết thúc khi đổi người nói, khi
+     đổi thứ tiếng sau dấu câu (từ nước ngoài giữa câu như "好OK的", "cái quotation nhé" vẫn ở trong câu), và sau dấu
+     chấm của câu dài từ 12 âm tiết, không chờ bản dịch của Soniox. Mảnh dịch đến muộn đi vào câu đã xong đang chờ
+     (`awaiting`, tối đa 2; nhả khi bản dịch có dấu chấm hoặc 1,5 s không có mảnh mới), hiện tạm trên câu đó.
+     Mỗi câu xong được GPT dịch lại (`translateAgain`: model Dịch lời đối phương cho người khác, model Cài đặt cho
+     câu của mình) với 8 câu gần nhất kèm "(Người N)" (`context(before:)` lấy từ `entries`, gồm cả câu đang dịch),
+     rồi mới ghi biên bản và đọc. GPT lỗi thì giữ bản Soniox; chậm quá 5 s thì đọc bản Soniox trước (`sayOnce`
+     không đọc lại). Câu hiện "Người 1 · Tiếng Trung"; biên bản, tóm tắt cũng ghi (`Meeting.Line.speaker`).
+  2. Dịch liền gộp mọi thứ trong 2,5 s vào một câu, phòng nói liên tục thì một câu kéo dài mấy phút.
+     `LiveCaptions` (LiveTranslation.swift): cắt sau dấu chấm khi câu đã dài 3 s (sau dấu phẩy khi 10 s, bất kỳ đâu
+     khi 20 s), mảnh dịch đi vào câu đã xong cho đến khi số dấu kết câu bằng câu gốc hoặc 3 s không có mảnh mới.
+     Câu người khác xong thì GPT dịch lại phần chữ (giọng trực tiếp đã đọc thì thôi); câu của mình giữ như đối tác
+     đã nghe.
+  3. Giọng đọc tụt lại vô hạn: câu nào cũng đọc hết theo thứ tự. Giờ `AudioIO` có `AVAudioUnitTimePitch` (giữ cao độ)
+     và `backlog`; câu người khác đọc nhanh 1,2× khi chậm 2,5 s hoặc có câu chờ, 1,35× khi chậm 5 s hoặc 2 câu chờ;
+     chậm quá 6 s mà có câu mới hơn thì bỏ đọc (chữ vẫn hiện). Dịch liền: tiếng tồn quá 2/4 s thì 1,2/1,35×, quá 6 s
+     thì bỏ bớt.
+  4. `EchoGuard` so từng từ đơn: trong cuộc họp điện thoại đọc nhiều, câu của đồng nghiệp gồm từ thông dụng ("của
+     chúng tôi") bị coi là tiếng vọng và mất. Giờ so cặp từ (cặp chữ Hán), câu ngắn phải trùng hết.
+  5. Chính xác: lời nhắc nhận giọng chỉ còn Thuật ngữ (2 câu trước bằng tiếng Trung từng làm câu tiếng Việt bị viết
+     thành chữ Hán); câu dài nhất 10 s (trước 15 s); khoảng ngừng hết câu ngắn dần sau 3 s nói, còn 0,35 s ở 8 s
+     (`SpeechSegmenter.pause(after:)`); dịch song song 4 câu; lọc nói nhanh nâng lên 11 âm tiết/giây.
+  6. **Nhật ký tốc độ** (`SpeedLog`, menu ⋯ › Sao chép nhật ký tốc độ): mỗi câu ghi Soniox nhận chậm bao lâu (giây
+     tiếng đã gửi trừ `end_ms` của chữ đã chốt), GPT mất bao lâu, đọc sau bao lâu/nhanh bao nhiêu/bỏ câu nào; không
+     ghi lời nói. 400 dòng gần nhất, mất khi tắt app.
+  Menu "Dịch lời đối phương" bật cho mọi Cách dịch; ước tính chi phí cộng tiền GPT dịch lại. Test: `Tests/Conversation`
+  171 kiểm tra. Mô phỏng trên Linux (model thật, Soniox/Dịch liền/AudioIO giả, `scratchpad/sim2`): 3 người nói xen
+  kẽ, câu Việt, tiếng vọng, Tôi nói, GPT lỗi, GPT chậm, 8 câu dồn dập (đọc nhanh rồi bỏ câu cũ), Dịch liền cắt câu và
+  gán mảnh dịch, tiếng tồn quá 6 s, câu của mình không qua GPT. **Chưa thử trên máy thật**: chờ người dùng gửi nhật
+  ký tốc độ sau một cuộc họp thật.
+
 ## Việc tiếp theo (theo thứ tự)
+
+0. Người dùng thử 1.11.0 trong cuộc họp thật (Soniox và Dịch liền) rồi gửi nhật ký tốc độ: đọc nó trước khi sửa
+   tiếp (Soniox chậm hay GPT chậm hay giọng chậm), đừng đoán.
 
 1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm); giọng Google đã có sẵn trong 1.10.x. Nếu chọn Edge:
    chưa làm, cần nói rõ rủi ro (không chính thức) trước.

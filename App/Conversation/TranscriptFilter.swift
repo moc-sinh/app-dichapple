@@ -32,10 +32,11 @@ enum TranscriptFilter {
         return Double(longest) / Double(letters.count) > 0.6
     }
 
-    /// More syllables than the sound could hold: nobody says eight a second for long.
+    /// More syllables than the sound could hold: nobody says eleven a second for long (a fast
+    /// Chinese speaker says eight, which eight as the limit took for noise and dropped).
     static func isImplausiblyFast(_ text: String, seconds: Double) -> Bool {
         let syllables = syllableCount(text)
-        return syllables >= 8 && Double(syllables) > 8 * max(0.5, seconds - 0.35) + 1
+        return syllables >= 8 && Double(syllables) > 11 * max(0.5, seconds - 0.35) + 1
     }
 
     /// Words, except in Chinese and Japanese, where each character is a syllable.
@@ -100,30 +101,44 @@ enum TranscriptFilter {
 }
 
 /// The phone's own voice heard again. When a translation is read aloud through the speaker, the
-/// microphone hears it: a sentence made of the words the phone said a moment ago is that echo, not
+/// microphone hears it: a sentence made of what the phone said a moment ago is that echo, not
 /// someone speaking (from the VietNote worker's transcript echo check).
+///
+/// Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: the phone
+/// reads a lot in a busy meeting, and a colleague's sentence made of common words ("của chúng tôi",
+/// "我们的") was taken for its echo and lost.
 struct EchoGuard {
     private static let window = 15.0
     private static let shortWindow = 5.0
-    private var recent: [(at: Double, words: Set<String>)] = []
+    private var recent: [(at: Double, words: Set<String>, pairs: Set<String>)] = []
 
     /// The phone said `text` at `at` (seconds, any clock).
     mutating func spoke(_ text: String, at: Double) {
-        let found = Set(Self.words(text))
-        guard !found.isEmpty else { return }
-        recent.append((at, found))
+        let words = Self.words(text)
+        guard !words.isEmpty else { return }
+        recent.append((at, Set(words), Set(Self.pairs(words))))
         recent.removeAll { at - $0.at > Self.window }
     }
 
     func isEcho(_ text: String, at: Double) -> Bool {
         let heard = Self.words(text)
         guard !heard.isEmpty else { return false }
-        let short = heard.count < 3
-        let window = short ? Self.shortWindow : Self.window
-        let said = recent.filter { at - $0.at <= window }.reduce(into: Set<String>()) { $0.formUnion($1.words) }
+        // A word or two: all of them said by the phone just before.
+        if heard.count < 3 {
+            let said = recent.filter { at - $0.at <= Self.shortWindow }.reduce(into: Set<String>()) { $0.formUnion($1.words) }
+            return heard.allSatisfy(said.contains)
+        }
+        let said = recent.filter { at - $0.at <= Self.window }.reduce(into: Set<String>()) { $0.formUnion($1.pairs) }
         guard !said.isEmpty else { return false }
-        let matched = heard.filter(said.contains).count
-        return short ? matched == heard.count : Double(matched) / Double(heard.count) >= 0.6
+        let pairs = Self.pairs(heard)
+        let matched = pairs.filter(said.contains).count
+        // Half of a long sentence (what the recognizer heard of the phone's voice has a mistake here
+        // and there), all of a short one: "这个呢" after the phone said "这个价格" is someone asking.
+        return matched * 2 >= pairs.count && matched >= min(pairs.count, 3)
+    }
+
+    static func pairs(_ words: [String]) -> [String] {
+        zip(words, words.dropFirst()).map { $0 + " " + $1 }
     }
 
     /// Lower-case words; in Chinese and Japanese, each character.

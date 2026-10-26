@@ -74,6 +74,19 @@ check(segments(quiet(1) + speech(1) + quiet(0.4) + speech(1) + quiet(1)).count =
 check(segments(quiet(1) + speech(1) + quiet(0.5) + speech(1) + quiet(1), silence: 0.4).count == 2,
       "with 0.4 s set, a 0.5 s pause ends it")
 
+// The pause that ends a sentence gets shorter as someone talks on: a room that never pauses long
+// is cut at its breaths, not every ten seconds.
+do {
+    let segmenter = SpeechSegmenter(silence: 0.8)
+    check(segmenter.pause(after: 2) == 0.8 && abs(segmenter.pause(after: 5.5) - 0.575) < 1e-9
+          && abs(segmenter.pause(after: 12) - 0.35) < 1e-9, "the pause: as set, then down to 0.35 s at eight seconds")
+    check(SpeechSegmenter(silence: 0.3).pause(after: 12) == 0.3, "never longer than the one set")
+    check(segments(quiet(1) + speech(9) + quiet(0.5) + speech(2) + quiet(1), silence: 0.8).count == 2,
+          "after nine seconds, a breath of half a second ends the sentence")
+    check(segments(quiet(1) + speech(2) + quiet(0.5) + speech(2) + quiet(1), silence: 0.8).count == 1,
+          "after two seconds, it does not")
+}
+
 // Noise alone, loud or not, is never speech; a click is too short.
 check(segments(quiet(5)).isEmpty, "a quiet room gives nothing")
 check(segments(quiet(6, db: -38)).isEmpty, "a noisy room (projector, air conditioning) gives nothing")
@@ -145,6 +158,15 @@ do {
     guardEcho.spoke("我们周五之前发报价", at: 40)
     check(guardEcho.isEcho("我们周五前发报价。", at: 42), "Chinese echo by characters")
     check(!guardEcho.isEcho("价格太高了", at: 42), "Chinese reply is not echo")
+    guardEcho.spoke("Chúng tôi sẽ gửi báo giá cho anh trước thứ Sáu và giao hàng trong hai tuần.", at: 50)
+    guardEcho.spoke("Giá này là giá tốt nhất của chúng tôi rồi.", at: 54)
+    check(guardEcho.isEcho("giá này là giá tốt nhất của chúng tôi", at: 57), "the phone's Vietnamese heard back")
+    check(guardEcho.isEcho("chúng tôi sẽ gửi báo giá cho anh trước thứ bảy và giao hàng trong hai tuần", at: 57),
+          "heard back with a word misheard")
+    check(!guardEcho.isEcho("Anh ơi giá của chúng tôi là tốt rồi", at: 57), "a colleague's sentence of common words is not echo")
+    check(guardEcho.isEcho("Cảm ơn", at: 58) == false && guardEcho.isEcho("giá tốt", at: 58), "a word or two: all said just before")
+    guardEcho.spoke("这个价格可以吗？", at: 60)
+    check(!guardEcho.isEcho("这个呢", at: 61) && guardEcho.isEcho("这个价格", at: 61), "a short sentence: all of it said by the phone")
 }
 
 // MARK: Live translation events
@@ -158,6 +180,39 @@ check(LiveEvent.parse(#"{"type":"error","error":{"code":"invalid_api_key","messa
 check(LiveEvent.parse(#"{"type":"session.closed"}"#) == .closed, "closed")
 check(LiveEvent.parse("not json") == nil, "garbage ignored")
 check(LiveEvent.parse(#"{"type":"something.new"}"#) == nil, "unknown events ignored")
+
+// Dịch liền's captions: cut into sentences in a room that talks on, each with its own translation.
+do {
+    var captions = LiveCaptions()
+    check(captions.heard("这个价格", now: 0) == nil && captions.heard("可以便宜一点吗？", now: 3.2) == nil
+          && captions.current?.text == "这个价格可以便宜一点吗？", "a caption grows as it is said")
+    check(captions.translated("Giá này", now: 3.5) == 1 && captions.current?.translation == "Giá này", "its translation too")
+    let ended = captions.heard("我们", now: 4)
+    check(ended?.text == "这个价格可以便宜一点吗？" && captions.current?.text == "我们", "the next words after a full stop: a new caption")
+    check(captions.translated(" có bớt được không?", now: 4.3) == 1 && captions.takeReleased().isEmpty,
+          "the rest of its translation goes to the caption it belongs to")
+    check(captions.translated("Chúng tôi", now: 4.6) == 2 && captions.current?.translation == "Chúng tôi",
+          "once it has as many sentence ends as was said, pieces go to the next")
+    check(captions.takeReleased().map(\.translation) == ["Giá này có bớt được không?"], "and the first is done")
+    check(captions.tick(now: 6) == nil && captions.tick(now: 7.2)?.text == "我们", "a quiet moment ends the caption")
+    check(captions.takeReleased().isEmpty && captions.tick(now: 10.5) == nil && captions.takeReleased().map(\.number) == [2],
+          "its translation is done when no more of it comes")
+
+    var short = LiveCaptions()
+    _ = short.heard("好的。", now: 0)
+    check(short.heard("那我们", now: 1) == nil && short.current?.text == "好的。那我们", "a short caption is not cut at its full stop")
+
+    var talk = LiveCaptions()
+    var cut: [String] = []
+    for second in 0..<35 { if let caption = talk.heard(second == 12 ? "四，" : "四", now: Double(second)) { cut.append(caption.text) } }
+    check(cut.count == 2 && cut[0].count == 14 && cut[0].hasSuffix("，") && cut[1].count == 20,
+          "a long speech is cut after a comma, and anywhere once very long: \(cut.map(\.count))")
+    check(talk.translated("x", now: 35) == 2, "a piece long after is not given to the caption before")
+    let last = talk.finishAll(now: 36)
+    check(last != nil && talk.current == nil && talk.awaiting.isEmpty && talk.takeReleased().count == 3,
+          "listening stops: everything ends as it is")
+    check(LiveCaptions.ends("Hello... OK? Yes!") == 3 && LiveCaptions.ends("没有") == 0, "sentence ends counted")
+}
 check(LiveEvent.appendMessage(PCM.data([1, 2])) == #"{"type":"session.input_audio_buffer.append","audio":"AQACAA=="}"#, "append message")
 check((try? JSONSerialization.jsonObject(with: Data(LiveEvent.languageMessage("vi").utf8))) != nil, "language message is JSON")
 check(LiveSession.outputCode(for: Language.named("zh-Hant")!) == "zh" && LiveSession.outputCode(for: Language.named("th")!) == nil,
@@ -350,7 +405,7 @@ do {
           "nothing new, nothing told")
 
     let config = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["zh", "vi"],
-                                           terms: ["报价"], pairs: [("报价", "báo giá")])
+                                           terms: ["报价"], pairs: [("报价", "báo giá")], speakers: true)
     let object = (try? JSONSerialization.jsonObject(with: Data(config.utf8))) as? [String: Any] ?? [:]
     check(object["audio_format"] as? String == "pcm_s16le" && object["sample_rate"] as? Int == 24_000
           && object["num_channels"] as? Int == 1, "the sound as the microphone gives it")
@@ -395,10 +450,62 @@ do {
     check(said == [SonioxTranscript.Sentence(text: "Chào anh", translation: "", language: "vi")], "Vietnamese needs no translation")
     check(vietnamese.take([token("<end>", language: "")]).isEmpty && vietnamese.finish() == nil, "an end with nothing said is nothing")
 
+    // A room of several people (`splits`, translated by GPT): a sentence ends where another person
+    // starts, where the language changes, and after a long speech's full stop, without waiting for
+    // Soniox's end of sentence; pieces of Soniox's translation still coming go to the sentence they
+    // belong to, not to the one being said.
+    func spoken(_ text: String, _ speaker: String, language: String = "zh", final: Bool = true) -> SonioxToken {
+        SonioxToken(text: text, isFinal: final, isTranslation: false, language: language, speaker: speaker)
+    }
+    check(SonioxEvent.parse(#"{"tokens":[{"text":"好","is_final":true,"language":"zh","speaker":"2","end_ms":1840}]}"#)
+          == [.tokens([spoken("好", "2")])], "who said it is read")
+    check(object["enable_speaker_diarization"] as? Bool == true, "each word says who said it")
+    let alone = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "zh", hints: ["vi"], terms: [], pairs: [],
+                                          speakers: false)
+    check(!alone.contains("diarization") && !alone.contains("context"), "the user's turn is one person, no glossary sent empty")
+    var room = SonioxTranscript(target: "vi")
+    room.splits = true
+    check(room.take([spoken("这个价格", "1"), spoken("可以吗？", "1")], now: 1).isEmpty, "a short question goes on until its end")
+    let first = room.take([spoken("Được anh", "2", language: "vi")], now: 2)
+    check(first == [SonioxTranscript.Sentence(text: "这个价格可以吗？", language: "zh", speaker: "1")]
+          && room.current.text == "Được anh" && room.current.speaker == "2", "another speaker: the first sentence ends \(first)")
+    _ = room.take([token("Giá này", translation: true), token(" được không?", final: false, translation: true)], now: 2.3)
+    check(room.previews.first?.translation == "Giá này được không?" && room.current.translation.isEmpty,
+          "its translation goes to it, not to the next speaker's sentence: \(room.previews)")
+    _ = room.take([token(" được không?", translation: true)], now: 2.4)
+    let third = room.take([spoken("那我们", "3"), spoken("下周一", "3")], now: 3)
+    check(third == [SonioxTranscript.Sentence(text: "Được anh", language: "vi", speaker: "2")], "a third speaker")
+    _ = room.take([token("Vậy chúng ta", translation: true)], now: 3.2)
+    check(room.previews.isEmpty && room.current.translation == "Vậy chúng ta",
+          "once a sentence's translation has its full stop, the next pieces are the current one's")
+    let long = room.take([spoken("我们这个月的订单比较多所以交货时间可能要晚一点。", "3"), spoken("另外", "3", final: false)], now: 4)
+    check(long.count == 1 && long[0].text.hasPrefix("那我们下周一我们这个月") && room.current.text == "另外",
+          "a long speech is translated at its full stop: \(long)")
+    let english = room.take([spoken("我觉得没问题。", "3"), spoken("Sounds", "3", language: "en"), spoken(" good", "3", language: "en")], now: 5)
+    check(english.count == 1 && english[0].text == "我觉得没问题。" && room.current.text == "Sounds good" && room.current.language == "en",
+          "another language after a sentence: \(english)")
+    let ok = room.take([spoken("<end>", "")], now: 6)
+    check(ok == [SonioxTranscript.Sentence(text: "Sounds good", language: "en", speaker: "3")],
+          "the end of a sentence finishes it without waiting for Soniox's translation")
+    _ = room.take([token("Tôi thấy", translation: true)], now: 9)
+    check(room.previews.isEmpty, "pieces long after are not given to an old sentence")
+    var short = SonioxTranscript(target: "vi")
+    short.splits = true
+    _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")], now: 1)
+    check(short.current.text == "好OK的", "a word of English in a short phrase stays in it")
+    var mixed = SonioxTranscript(target: "zh")
+    mixed.splits = true
+    let quote = mixed.take([spoken("Anh gửi giúp em cái", "", language: "vi"), spoken(" quotation", "", language: "en"),
+                            spoken(" nhé", "", language: "vi")], now: 1)
+    check(quote.isEmpty && mixed.current.text == "Anh gửi giúp em cái quotation nhé",
+          "an English word inside a Vietnamese sentence stays in it: \(quote)")
+
     var meter = CostMeter()
     meter.streamed(seconds: 3_600, soniox: true)
     check(abs(meter.dollars - 0.18) < 1e-9, "Soniox: about 0.18 USD an hour sent")
     let soniox = CostMeter.perHour(live: true, soniox: true, model: .luna, readAloud: true, openAIVoice: false)
+    let checked = CostMeter.perHour(live: true, soniox: true, translatesAgain: true, model: .luna, readAloud: true, openAIVoice: false)
+    check(abs(checked - 0.18 - 0.0756) < 1e-9, "each sentence translated again by Luna: about 0.08 USD more an hour")
     check(abs(soniox - 0.18) < 1e-9 && soniox < CostMeter.perHour(live: true, model: .luna, readAloud: true, openAIVoice: false) / 10,
           "over ten times cheaper than Dịch liền")
 }

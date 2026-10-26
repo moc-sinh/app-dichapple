@@ -32,7 +32,8 @@ final class Listener: @unchecked Sendable {
     private static let longestPiece = PCM.rate * 20
 
     init(silence: Double, streams: Bool) {
-        segmenter = SpeechSegmenter(silence: silence)
+        // Ten seconds at most: a room that talks on is translated as it goes, not 15 s late.
+        segmenter = SpeechSegmenter(silence: silence, maxLength: 10)
         self.streams = streams
     }
 
@@ -150,10 +151,16 @@ struct ConversationServices {
 /// How it translates (Cách dịch):
 /// - Chính xác: each sentence is recognised and translated once it ends (2–3 s), with the
 ///   glossary and the meeting's context; several at once, shown in the order they were said.
-/// - Dịch liền: OpenAI's live speech translation, text (and voice) as the others speak; the user's
-///   words come out in the partners' language while they speak.
+/// - Dịch liền: OpenAI's live speech translation, text (and voice) as the others speak, cut into
+///   sentences, each translated again by GPT for the text; the user's words come out in the
+///   partners' language while they speak.
 /// - Soniox: Soniox's live recognition and translation, text word by word as people speak (a
-///   fraction of Dịch liền's price); each sentence is read aloud the moment it ends.
+///   fraction of Dịch liền's price). With an OpenAI key, sentences are cut speaker by speaker and
+///   each is translated again by GPT with the meeting's context before it is read aloud.
+///
+/// A room that talks on is not let to run ahead of the voice: it reads faster while behind, and an
+/// old sentence with newer ones waiting is left on the screen unread. The speed log (menu ⋯) says
+/// how long each step of each sentence took, for a real meeting that felt slow.
 @MainActor @Observable
 final class ConversationModel {
     enum Engine: String, CaseIterable, Identifiable {
@@ -213,6 +220,8 @@ final class ConversationModel {
         /// What it is translated into.
         var target: String
         var state: State
+        /// Who said it, as Soniox tells the room's speakers apart ("1", "2"…); empty when not told.
+        var speaker = ""
 
         var isVietnamese: Bool { language == Language.vietnamese.code }
     }
@@ -299,7 +308,11 @@ final class ConversationModel {
     @ObservationIgnored private var playingMine = 0
     @ObservationIgnored private var liveToVietnamese: LiveSession?
     @ObservationIgnored private var liveToPartner: LiveSession?
+    /// The entry being heard live, per side (true: the others'), and when it last grew.
     @ObservationIgnored private var captions: [Bool: (id: UUID, last: Date)] = [:]
+    /// Dịch liền's captions cut into sentences (true: the others'), and each caption's entry.
+    @ObservationIgnored private var liveCaptions: [Bool: LiveCaptions] = [:]
+    @ObservationIgnored private var liveEntries: [Bool: [Int: UUID]] = [:]
     @ObservationIgnored private var partnerTailUntil = Date.distantPast
     @ObservationIgnored private var liveRetries = 0
     @ObservationIgnored private var sonioxToVietnamese: SonioxSession?
@@ -316,9 +329,22 @@ final class ConversationModel {
     /// Voices already made: Đọc lại plays them at once, without paying again.
     @ObservationIgnored private var voiceCache = VoiceCache()
     @ObservationIgnored private var aloneTask: Task<Void, Never>?
+    /// Soniox sentences GPT is translating, by their number in the transcript (true: the others').
+    @ObservationIgnored private var sonioxEntries: [Bool: [Int: UUID]] = [:]
+    /// Seconds of sound sent to each Soniox session (true: the others'), for how far it lags.
+    @ObservationIgnored private var sonioxSent: [Bool: Double] = [:]
+    /// Entries already read aloud: one read from Soniox's translation is not read again for GPT's.
+    @ObservationIgnored private var voiced: Set<UUID> = []
+    /// Counts the others' sentences queued to be read, so one can tell how many wait behind it.
+    @ObservationIgnored private var theirsQueued = 0
+    @ObservationIgnored private var lastDropNote = Date.distantPast
+    @ObservationIgnored private var speedLog = SpeedLog()
 
     /// Sentences recognised and translated at once: a busy meeting does not fall behind.
-    private static let parallel = 3
+    private static let parallel = 4
+    /// The others' sentence whose voice is this late (seconds after its translation), with newer
+    /// ones waiting, is left on the screen unread: the voice keeps up with the room.
+    private static let stale = 6.0
 
     init() {
         let defaults = UserDefaults.standard
@@ -400,6 +426,8 @@ final class ConversationModel {
         if engine == .soniox { openSoniox() }
         if wantsToTalk { talk(true) }
         warmUpGoogle()
+        log(nil, "Bắt đầu · \(engine.rawValue) · \(readAloud ? "đọc to" : "chỉ chữ") · dịch đối phương \(Self.name(of: quality.model))"
+            + " · lời tôi \(Self.name(of: SharedStore.model)) · giọng \(voice)")
     }
 
     /// With a Google voice, the connection is opened before the first sentence needs it, and a key
@@ -423,11 +451,18 @@ final class ConversationModel {
         audio.stop()
         // After the sound already queued: the sentence being said still goes in.
         if let listener { audio.queue.async { listener.flush() } }
+        // The sentences being said are translated as they are.
+        for fromOthers in [true, false] {
+            if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
+        }
         closeLive()
-        finishCaptions(all: true)
+        endLiveCaptions(all: true)
+        for current in captions.values { finishCaption(current.id) }
+        captions = [:]
         billLive()
         UIApplication.shared.isIdleTimerDisabled = false
         MeetingStore.save(meeting)
+        log(nil, "Dừng")
     }
 
     /// Sentences still being recognised or translated.
@@ -454,7 +489,7 @@ final class ConversationModel {
         // -60 dBFS (a quiet room) to -15 (a voice close by).
         self.level = max(0, min(1, (level + 60) / 45))
         hearsSpeech = speaking
-        if engine == .live { finishCaptions(all: false) }
+        if engine == .live { endLiveCaptions(all: false) }
         if engine == .soniox { expireSentences() }
     }
 
@@ -545,8 +580,10 @@ final class ConversationModel {
         let seconds = Double(samples.count) / Double(PCM.rate)
         let wav = await Task.detached(priority: .userInitiated) { PCM.wav(samples) }.value
         let transcript: SpeechServices.Transcript
+        let began = Date()
         do {
             transcript = try await services.transcribe(apiKey, wav, recognitionPrompt())
+            log(id, "nhận \(SpeedLog.seconds(Date().timeIntervalSince(began))) · câu dài \(SpeedLog.seconds(seconds))")
         } catch is CancellationError {
             return remove(id)
         } catch {
@@ -589,9 +626,11 @@ final class ConversationModel {
         // What the partners hear is the user's own words: the app's translation model. The others'
         // words are only read by the user: the cheaper model by default.
         let model = entry.mine ? SharedStore.model : quality.model
+        let began = Date()
         do {
             let result = try await services.translate(apiKey, entry.text, target, context(before: entry.at), model)
             charge { $0.used(result.usage, by: model) }
+            log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))")
             let translation = result.text
             update(id) {
                 $0.translation = translation
@@ -652,14 +691,17 @@ final class ConversationModel {
         if Language.named(language.code) != nil { SharedStore.lastPartnerCode = language.code }
     }
 
-    /// The meeting's latest sentences, as the translator's context.
+    /// The meeting's latest sentences, as the translator's context: those still being translated
+    /// too (sentences are translated several at once), with who said them when known.
     private func context(before at: Date) -> [ChatLine] {
-        meeting.lines.filter { $0.at < at }.suffix(8).map {
-            ChatLine(side: $0.mine ? .me : .partner, text: $0.text, date: $0.at)
+        entries.filter { $0.at < at && !$0.text.isEmpty }.suffix(8).map {
+            ChatLine(side: $0.mine ? .me : .partner, text: $0.speaker.isEmpty ? $0.text : "(Người \($0.speaker)) \($0.text)",
+                     date: $0.at)
         }
     }
 
-    /// Names and terms the recognizer should spell right: the glossary, and the last sentences.
+    /// Names and terms the recognizer should spell right: the glossary only. The last sentences
+    /// went with it once, and a prompt in Chinese had a Vietnamese sentence written in Chinese.
     private func recognitionPrompt() -> String {
         var terms: [String] = []
         for line in SharedStore.glossary.split(whereSeparator: \.isNewline) {
@@ -668,16 +710,15 @@ final class ConversationModel {
                 if !term.isEmpty, term.count <= 40 { terms.append(term) }
             }
         }
-        var prompt = terms.isEmpty ? "" : "Thuật ngữ / Terms: " + terms.prefix(40).joined(separator: ", ") + "\n"
-        prompt += meeting.lines.suffix(2).map(\.text).joined(separator: " ")
-        return prompt
+        return terms.isEmpty ? "" : "Thuật ngữ / Terms: " + terms.prefix(40).joined(separator: ", ")
     }
 
     /// Into the minutes, in the order things were said (sentences are translated several at once).
     private func record(_ id: UUID) {
         guard let entry = entries.first(where: { $0.id == id }), !entry.text.isEmpty else { return }
         let line = Meeting.Line(at: entry.at, mine: entry.mine, language: entry.language, text: entry.text,
-                                translation: entry.translation, target: entry.target)
+                                translation: entry.translation, target: entry.target,
+                                speaker: entry.speaker.isEmpty ? nil : entry.speaker)
         let index = meeting.lines.lastIndex { $0.at <= line.at }.map { $0 + 1 } ?? 0
         meeting.lines.insert(line, at: index)
         billLive()
@@ -730,22 +771,35 @@ final class ConversationModel {
         let ready = Date()
         let sound = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
         guard let id else {
-            return queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+            return queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready, entry: nil)
         }
         Task {
             await waitForEarlier(than: id)
-            queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready)
+            queueSpeech(sound, text: text, mine: mine, requested: requested, generation: generation, ready: ready, entry: id)
         }
     }
 
+    /// Read aloud once: a sentence read from Soniox's translation is not read again when GPT's comes.
+    private func sayOnce(_ entry: Entry) {
+        guard voiced.insert(entry.id).inserted else { return }
+        say(entry.translation, mine: entry.mine, language: Self.language(code: entry.target), entry: entry.id)
+    }
+
     /// Read after what is already queued (unless the queue was dropped meanwhile).
-    private func queueSpeech(_ sound: VoiceStream, text: String, mine: Bool, requested: Bool, generation: Int, ready: Date) {
+    private func queueSpeech(_ sound: VoiceStream, text: String, mine: Bool, requested: Bool, generation: Int, ready: Date,
+                             entry id: UUID?) {
         guard generation == speechGeneration else { return }
+        var serial = 0
+        if !mine, !requested {
+            theirsQueued += 1
+            serial = theirsQueued
+        }
         let previous = speechChain
         speechChain = Task { [weak self] in
             await previous?.value
             guard let self, generation == self.speechGeneration else { return }
-            await self.play(sound, text: text, generation: generation, mine: mine, requested: requested, ready: ready)
+            await self.play(sound, text: text, generation: generation, mine: mine, requested: requested, ready: ready,
+                            serial: serial, entry: id)
         }
     }
 
@@ -815,7 +869,9 @@ final class ConversationModel {
     /// Sound enough to begin reading without running dry while the rest is made: 0.4 s.
     private static let startingSound = Int(Double(PCM.rate * 2) * 0.4)
 
-    private func play(_ sound: VoiceStream, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date) async {
+    /// `serial`: the others' sentence's place in the queue (0 for the user's and Đọc lại).
+    private func play(_ sound: VoiceStream, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date,
+                      serial: Int, entry id: UUID?) async {
         // Never over the user: a translation ready while they speak waits until they let go.
         while talking, running { try? await Task.sleep(nanoseconds: 100_000_000) }
         // Like an interpreter, the others' words are read once the room pauses: read over someone
@@ -841,6 +897,21 @@ final class ConversationModel {
         guard next.pcm.count > 1 else {
             if let error = next.failure, !(error is CancellationError) { problem = Self.voiceProblem(error) }
             return
+        }
+        // A room that talks on: an old sentence is left on the screen while newer ones wait to be
+        // read, and the voice reads faster while it is behind (the pitch stays).
+        let behind = Date().timeIntervalSince(ready)
+        let newer = serial > 0 ? theirsQueued - serial : 0
+        if newer > 0, behind > Self.stale {
+            log(id, "bỏ đọc: chậm \(SpeedLog.seconds(behind)), \(newer) câu mới hơn đang chờ")
+            return
+        }
+        let rate: Float = serial == 0 ? 1 : newer >= 2 || behind > 5 ? 1.35 : newer >= 1 || behind > 2.5 ? 1.2 : 1
+        audio.setRate(rate)
+        if serial > 0 {
+            let faster = String(format: " · nhanh %.2f×", rate).replacingOccurrences(of: ".", with: ",")
+            log(id, "đọc sau \(SpeedLog.seconds(behind))" + (rate > 1 ? faster : "")
+                + (newer > 0 ? " · \(newer) câu chờ" : ""))
         }
         beginAloud(mine: mine)
         echo.spoke(text, at: Self.now)
@@ -904,6 +975,8 @@ final class ConversationModel {
     private func openLive() {
         liveRetries = 0
         othersGate.reset()
+        liveCaptions = [:]
+        liveEntries = [:]
         liveToVietnamese = makeSession(Language.vietnamese.code)
         openPartnerSession()
     }
@@ -968,6 +1041,7 @@ final class ConversationModel {
         if engine == .soniox {
             guard let session = sonioxToVietnamese else { return }
             session.send(audio: chunk)
+            sonioxSent[true, default: 0] += PCM.seconds(chunk)
         } else {
             guard let session = liveToVietnamese else { return }
             session.send(audio: chunk)
@@ -979,6 +1053,7 @@ final class ConversationModel {
         if engine == .soniox {
             guard let session = sonioxToPartner else { return }
             session.send(audio: chunk)
+            sonioxSent[false, default: 0] += PCM.seconds(chunk)
         } else {
             guard let session = liveToPartner else { return }
             session.send(audio: chunk)
@@ -994,16 +1069,28 @@ final class ConversationModel {
             liveRetries = 0
             if problem?.hasPrefix("Mất kết nối") == true { problem = nil }
         case .source(let delta):
-            caption(fromOthers) { $0.text += delta }
+            liveSource(delta, fromOthers: fromOthers)
         case .target(let delta):
-            caption(fromOthers) { $0.translation += delta }
+            liveTarget(delta, fromOthers: fromOthers)
         case .audio(let pcm):
             if fromOthers {
                 // Đọc to only, never over the user, and not a Vietnamese speaker's words again.
                 guard readAloud, !talking, !othersSpeakVietnamese else { return }
+                // Behind a room that talks on: read faster, and past six seconds behind the sound
+                // is let go (the text stays), so the voice is never far after the speaker.
+                let backlog = audio.backlog
+                if backlog > 6 {
+                    if Date().timeIntervalSince(lastDropNote) > 5 {
+                        lastDropNote = Date()
+                        log(nil, "Dịch liền: chậm \(SpeedLog.seconds(backlog)), bỏ bớt tiếng đọc")
+                    }
+                    return
+                }
+                audio.setRate(backlog > 4 ? 1.35 : backlog > 2 ? 1.2 : 1)
                 beginAloud(mine: false)
                 audio.play(pcm) { [weak self] in self?.endAloud(mine: false) }
             } else {
+                audio.setRate(1)
                 beginAloud(mine: true)
                 audio.play(pcm) { [weak self] in self?.endAloud(mine: true) }
             }
@@ -1025,6 +1112,9 @@ final class ConversationModel {
             // a second word of it closing (the server's, then the socket's) opens nothing more.
             session.close()
             if fromOthers { liveToVietnamese = nil } else { liveToPartner = nil }
+            // What the dropped session was still translating will not come.
+            endLiveCaptions(all: true, sides: [fromOthers])
+            log(nil, "Dịch liền mất kết nối, nối lại")
             liveRetries += 1
             guard liveRetries <= 5 else {
                 problem = "Không nối lại được Dịch liền. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
@@ -1044,33 +1134,101 @@ final class ConversationModel {
 
     /// The sentence being heard live is Vietnamese (a Vietnamese speaker in the room).
     private var othersSpeakVietnamese: Bool {
-        guard let id = captions[true]?.id, let entry = entries.first(where: { $0.id == id }), entry.text.count >= 12
-        else { return false }
-        return LanguageDetector.isVietnamese(entry.text)
+        guard let text = liveCaptions[true]?.current?.text, text.count >= 12 else { return false }
+        return LanguageDetector.isVietnamese(text)
     }
 
-    /// Live captions: what comes within 2.5 s of the last piece belongs to the same sentence.
-    private func caption(_ fromOthers: Bool, _ change: (inout Entry) -> Void) {
-        let now = Date()
-        if let current = captions[fromOthers], now.timeIntervalSince(current.last) < 2.5,
-           entries.contains(where: { $0.id == current.id }) {
-            update(current.id, change)
-            captions[fromOthers] = (current.id, now)
+    /// More of what was said, live: into its caption, which may end the one before.
+    private func liveSource(_ delta: String, fromOthers: Bool) {
+        var router = liveCaptions[fromOthers] ?? LiveCaptions()
+        let ended = router.heard(delta, now: Self.now)
+        liveCaptions[fromOthers] = router
+        if let ended { endLiveCaption(ended, fromOthers: fromOthers) }
+        if let current = router.current { showLiveCaption(current, fromOthers: fromOthers) }
+        settleLiveCaptions(fromOthers)
+    }
+
+    /// More of the live translation: to the caption it belongs to (one already ended, while its
+    /// translation is still coming), not always to the one being heard.
+    private func liveTarget(_ delta: String, fromOthers: Bool) {
+        var router = liveCaptions[fromOthers] ?? LiveCaptions()
+        let number = router.translated(delta, now: Self.now)
+        liveCaptions[fromOthers] = router
+        if let current = router.current, current.number == number {
+            showLiveCaption(current, fromOthers: fromOthers)
+        } else if let caption = router.awaiting.first(where: { $0.number == number }),
+                  let id = liveEntries[fromOthers]?[number], let entry = entries.first(where: { $0.id == id }),
+                  entry.state == .hearing || entry.state == .translating {
+            update(id) { $0.translation = caption.translation.trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        settleLiveCaptions(fromOthers)
+    }
+
+    /// Dịch liền: the captions being heard end after a quiet moment (`all`: everything ends now).
+    private func endLiveCaptions(all: Bool, sides: [Bool] = [true, false]) {
+        for fromOthers in sides {
+            guard var router = liveCaptions[fromOthers] else { continue }
+            let ended = all ? router.finishAll(now: Self.now) : router.tick(now: Self.now)
+            liveCaptions[fromOthers] = router
+            if let ended { endLiveCaption(ended, fromOthers: fromOthers) }
+            settleLiveCaptions(fromOthers)
+        }
+    }
+
+    private func showLiveCaption(_ caption: LiveCaptions.Caption, fromOthers: Bool) {
+        let text = caption.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let translation = caption.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = liveEntries[fromOthers]?[caption.number], entries.contains(where: { $0.id == id }) {
+            update(id) {
+                $0.text = text
+                $0.translation = translation
+            }
+            captions[fromOthers] = (id, Date())
             return
         }
-        if let previous = captions[fromOthers] { finishCaption(previous.id) }
-        var entry = Entry(id: UUID(), at: now, mine: !fromOthers, language: fromOthers ? "" : Language.vietnamese.code,
-                          text: "", translation: "",
+        let entry = Entry(id: UUID(), at: Date(), mine: !fromOthers, language: fromOthers ? "" : Language.vietnamese.code,
+                          text: text, translation: translation,
                           target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing)
-        change(&entry)
         entries.append(entry)
-        captions[fromOthers] = (entry.id, now)
+        liveEntries[fromOthers, default: [:]][caption.number] = entry.id
+        captions[fromOthers] = (entry.id, Date())
     }
 
-    private func finishCaptions(all: Bool) {
-        for (key, current) in captions where all || Date().timeIntervalSince(current.last) >= 2.5 {
-            finishCaption(current.id)
-            captions[key] = nil
+    /// A caption's words are all in (its translation may still be coming). The others' are
+    /// translated again by GPT, with the meeting's latest sentences and the glossary, for the text
+    /// (the live voice has already read them); the user's are kept as the partners heard them.
+    private func endLiveCaption(_ caption: LiveCaptions.Caption, fromOthers: Bool) {
+        guard let id = liveEntries[fromOthers]?[caption.number], let entry = entries.first(where: { $0.id == id }) else { return }
+        if captions[fromOthers]?.id == id { captions[fromOthers] = nil }
+        let text = caption.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard fromOthers else { return update(id) { $0.text = text } }
+        // A piece of translation of nothing heard: the end of a sentence already translated.
+        guard !text.isEmpty else { return remove(id) }
+        let language = entry.language.isEmpty ? Self.language(of: text, heard: nil) : entry.language
+        log(id, "Dịch liền · \(language) · \(TranscriptFilter.syllableCount(text)) âm tiết · câu dài \(SpeedLog.seconds(Self.now - caption.started))")
+        update(id) {
+            $0.text = text
+            $0.language = language
+        }
+        // A Vietnamese speaker in the room: shown as they said it.
+        if language == Language.vietnamese.code { return finishCaption(id) }
+        update(id) { $0.state = .translating }
+        noteSpoken(language, text: text)
+        Task { await self.translateAgain(id, target: .vietnamese, speaks: false) }
+    }
+
+    /// Captions whose live translation is all in: the user's are kept now.
+    private func settleLiveCaptions(_ fromOthers: Bool) {
+        guard var router = liveCaptions[fromOthers] else { return }
+        let released = router.takeReleased()
+        liveCaptions[fromOthers] = router
+        for caption in released {
+            guard let id = liveEntries[fromOthers]?.removeValue(forKey: caption.number), !fromOthers else { continue }
+            update(id) {
+                $0.text = caption.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                $0.translation = caption.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            finishCaption(id)
         }
     }
 
@@ -1099,21 +1257,25 @@ final class ConversationModel {
         othersGate.reset()
         othersSending = false
         transcripts = [:]
+        sonioxEntries = [:]
         sonioxToVietnamese = makeSoniox(target: Language.vietnamese.code)
         openSonioxPartner()
     }
 
     /// Everything the others say is translated into Vietnamese; the user's words into the partners'
-    /// language. Soniox hears any language, so it is told which to expect only as a hint.
+    /// language. Soniox hears any language, so it is told which to expect only as a hint. The room's
+    /// session tells its speakers apart.
     private func makeSoniox(target: String) -> SonioxSession? {
         guard let key = SharedStore.sonioxKey else { return nil }
+        let room = target == Language.vietnamese.code
         let partner = SonioxEvent.code(for: partnerLanguage)
-        let hints = target == Language.vietnamese.code ? [partner, Language.vietnamese.code] : [Language.vietnamese.code]
-        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary)
+        let hints = room ? [partner, Language.vietnamese.code] : [Language.vietnamese.code]
+        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary, speakers: room)
         session.onEvent = { [weak self, weak session] event in
             guard let self, let session else { return }
             self.soniox(event, from: session)
         }
+        sonioxSent[room] = 0
         session.open()
         return session
     }
@@ -1124,7 +1286,18 @@ final class ConversationModel {
         if let current = sonioxToPartner, current.target == code, current.isOpen { return }
         sonioxToPartner?.close()
         transcripts[false] = nil
+        sonioxEntries[false] = nil
         sonioxToPartner = makeSoniox(target: code)
+    }
+
+    /// Each sentence Soniox finishes is translated again by GPT (an OpenAI key is there), so
+    /// sentences are cut by speaker and language as they are said (see `SonioxTranscript.splits`).
+    private var sonioxUsesGPT: Bool { !(apiKey ?? "").isEmpty }
+
+    private func newTranscript(target: String) -> SonioxTranscript {
+        var transcript = SonioxTranscript(target: target)
+        transcript.splits = sonioxUsesGPT
+        return transcript
     }
 
     private func soniox(_ event: SonioxEvent, from session: SonioxSession) {
@@ -1134,12 +1307,16 @@ final class ConversationModel {
         case .tokens(let tokens):
             liveRetries = 0
             if problem?.hasPrefix("Mất kết nối") == true { problem = nil }
-            var transcript = transcripts[fromOthers] ?? SonioxTranscript(target: session.target)
-            let finished = transcript.take(tokens)
+            var transcript = transcripts[fromOthers] ?? newTranscript(target: session.target)
+            let finished = transcript.take(tokens, now: Self.now)
             transcripts[fromOthers] = transcript
-            for sentence in finished { finishSentence(sentence, fromOthers: fromOthers) }
+            // How far the words Soniox settled are behind the sound sent to it.
+            let lag = transcript.settledEnd.map { (sonioxSent[fromOthers] ?? 0) - $0 }
+            for sentence in finished { finishSentence(sentence, fromOthers: fromOthers, lag: lag) }
+            showPreviews(transcript.previews, fromOthers: fromOthers)
             let current = transcript.current
-            if !current.isEmpty { showSentence(current, fromOthers: fromOthers) }
+            // Cut by GPT's sentences, a piece of translation no sentence took is not shown on its own.
+            if transcript.splits ? !current.text.isEmpty : !current.isEmpty { showSentence(current, fromOthers: fromOthers) }
         case .finished:
             break
         case .failed(let code, let message):
@@ -1162,7 +1339,9 @@ final class ConversationModel {
             session.close()
             if let sentence = transcripts[fromOthers]?.finish() { finishSentence(sentence, fromOthers: fromOthers) }
             transcripts[fromOthers] = nil
+            sonioxEntries[fromOthers] = nil
             if fromOthers { sonioxToVietnamese = nil } else { sonioxToPartner = nil }
+            log(nil, "Soniox mất kết nối, nối lại")
             liveRetries += 1
             guard liveRetries <= 5 else {
                 problem = "Không nối lại được Soniox. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
@@ -1184,11 +1363,13 @@ final class ConversationModel {
     @discardableResult
     private func showSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) -> UUID {
         let now = Date()
+        let speaker = fromOthers ? sentence.speaker : ""
         if let current = captions[fromOthers], entries.contains(where: { $0.id == current.id }) {
             update(current.id) {
                 $0.text = sentence.text
                 $0.translation = sentence.translation
                 if !sentence.language.isEmpty { $0.language = sentence.language }
+                if !speaker.isEmpty { $0.speaker = speaker }
             }
             captions[fromOthers] = (current.id, now)
             return current.id
@@ -1196,22 +1377,98 @@ final class ConversationModel {
         let entry = Entry(id: UUID(), at: now, mine: !fromOthers,
                           language: sentence.language.isEmpty && !fromOthers ? Language.vietnamese.code : sentence.language,
                           text: sentence.text, translation: sentence.translation,
-                          target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing)
+                          target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing,
+                          speaker: speaker)
         entries.append(entry)
         captions[fromOthers] = (entry.id, now)
         return entry.id
     }
 
-    /// A sentence ended: into the minutes, and read aloud at once (the user's always, the others'
-    /// with Đọc to), after what is already being read.
-    private func finishSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) {
+    /// A sentence ended. With an OpenAI key it is translated again by GPT, with the meeting's
+    /// latest sentences and the glossary (Soniox's own translation shows meanwhile), then kept and
+    /// read aloud (the user's always, the others' with Đọc to). Without one, Soniox's is kept.
+    private func finishSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool, lag: Double? = nil) {
         let id = showSentence(sentence, fromOthers: fromOthers)
         captions[fromOthers] = nil
         // The phone's Vietnamese voice heard again through the microphone.
-        if fromOthers, echo.isEcho(sentence.text, at: Self.now) { return remove(id) }
-        finishCaption(id)
-        guard let entry = entries.first(where: { $0.id == id }), entry.state == .done, !entry.translation.isEmpty else { return }
-        if entry.mine || readAloud { say(entry.translation, mine: entry.mine, language: Self.language(code: entry.target)) }
+        if fromOthers, echo.isEcho(sentence.text, at: Self.now) {
+            log(id, "Soniox: tiếng của máy nghe lại, bỏ")
+            return remove(id)
+        }
+        var note = "Soniox"
+        if fromOthers, !sentence.speaker.isEmpty { note += " · Người \(sentence.speaker)" }
+        note += " · \(sentence.language.isEmpty ? "?" : sentence.language) · \(TranscriptFilter.syllableCount(sentence.text)) âm tiết"
+        if let lag { note += " · nhận chậm \(SpeedLog.seconds(lag))" }
+        log(id, note)
+        let language = sentence.text.isEmpty ? sentence.language : Self.language(of: sentence.text, heard: sentence.language)
+        // A Vietnamese speaker in the room is shown as they said it.
+        guard sonioxUsesGPT, !sentence.text.isEmpty, !fromOthers || language != Language.vietnamese.code else {
+            if !language.isEmpty { update(id) { $0.language = language } }
+            finishCaption(id)
+            guard let entry = entries.first(where: { $0.id == id }), entry.state == .done, !entry.translation.isEmpty else { return }
+            if entry.mine || readAloud { sayOnce(entry) }
+            return
+        }
+        let target = fromOthers ? Language.vietnamese : partnerLanguage
+        update(id) {
+            $0.text = sentence.text
+            $0.translation = sentence.translation
+            $0.language = language
+            $0.target = target.code
+            $0.state = .translating
+        }
+        if fromOthers { noteSpoken(language, text: sentence.text) }
+        sonioxEntries[fromOthers, default: [:]][sentence.number] = id
+        Task {
+            await self.translateAgain(id, target: target, speaks: true)
+            // Soniox's pieces still coming for it go on to it (not to the next sentence), unseen.
+            if self.sonioxEntries[fromOthers]?[sentence.number] == id { self.sonioxEntries[fromOthers]?[sentence.number] = nil }
+        }
+        // GPT that does not answer soon (a slow network): Soniox's translation is read meanwhile.
+        guard !fromOthers || readAloud else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let entry = self.entries.first(where: { $0.id == id }), entry.state == .translating,
+                  !entry.translation.isEmpty, !self.voiced.contains(id) else { return }
+            self.log(id, "GPT chưa xong sau 5 s: đọc bản dịch của Soniox")
+            self.sayOnce(entry)
+        }
+    }
+
+    /// GPT's translation of a sentence heard live (Soniox's, or a Dịch liền caption), with the
+    /// meeting's latest sentences: what is shown and kept, and read aloud when `speaks` (the user's
+    /// always, the others' with Đọc to). When it fails, the live translation stays.
+    private func translateAgain(_ id: UUID, target: Language, speaks: Bool) async {
+        guard let apiKey, let entry = entries.first(where: { $0.id == id }) else { return }
+        // What the partners hear is the user's own words: the app's translation model.
+        let model = entry.mine ? SharedStore.model : quality.model
+        let began = Date()
+        do {
+            let result = try await services.translate(apiKey, entry.text, target, context(before: entry.at), model)
+            charge { $0.used(result.usage, by: model) }
+            let translation = result.text
+            update(id) {
+                $0.translation = translation
+                $0.state = .done
+            }
+            log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))")
+        } catch {
+            update(id) { $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done }
+            log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
+        }
+        guard let done = entries.first(where: { $0.id == id }), done.state == .done else { return }
+        record(id)
+        if speaks, !done.translation.isEmpty, done.mine || readAloud { sayOnce(done) }
+    }
+
+    /// Soniox's translation of the sentences GPT is still translating, as it comes.
+    private func showPreviews(_ previews: [SonioxTranscript.Sentence], fromOthers: Bool) {
+        for preview in previews where !preview.translation.isEmpty {
+            guard let id = sonioxEntries[fromOthers]?[preview.number],
+                  let entry = entries.first(where: { $0.id == id }), entry.state == .translating,
+                  entry.translation != preview.translation else { continue }
+            update(id) { $0.translation = preview.translation }
+        }
     }
 
     /// A sentence Soniox ended but whose translation never came, or one it stopped sending words
@@ -1228,6 +1485,21 @@ final class ConversationModel {
             }
         }
     }
+
+    // MARK: Speed log
+
+    /// A line of the speed log (`id`: the sentence it is about, by the start of its id).
+    private func log(_ id: UUID?, _ text: String) {
+        speedLog.add(id.map { "\($0.uuidString.prefix(4)) \(text)" } ?? text)
+    }
+
+    /// For the user to send when Hội thoại feels slow: timings, languages and lengths, never words.
+    var speedLogText: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        return "MSTrans \(version) · nhật ký tốc độ Hội thoại\n" + speedLog.text
+    }
+
+    static func name(of model: TranslationModel) -> String { model == .luna ? "Luna" : "Sol" }
 
     // MARK: Summary
 
@@ -1257,7 +1529,8 @@ final class ConversationModel {
 
     private static let summaryInstructions = """
     You write the minutes of a business meeting for a Vietnamese professional. The input is its transcript: each \
-    sentence with its time, who spoke ("Tôi" is the user, otherwise the language spoken), what was said (recognised \
+    sentence with its time, who spoke ("Tôi" is the user, otherwise the language spoken, after "Người 1", "Người 2"… \
+    when the speakers were told apart, which may now and then be wrong), what was said (recognised \
     automatically, so it may hold recognition mistakes) and its translation. Write in Vietnamese, short and plain, \
     under these headings: "Nội dung chính" (bullets), "Đã thống nhất" (decisions; numbers, prices, quantities and \
     dates exactly as said), "Việc cần làm" (who does what, by when, when said), "Còn bỏ ngỏ" (open questions). \

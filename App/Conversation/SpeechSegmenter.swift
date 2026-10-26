@@ -134,9 +134,18 @@ struct SpeechSegmenter {
 
         current.append(contentsOf: frame)
         quietFrames = db < release ? quietFrames + 1 : 0
-        if Double(quietFrames) * Self.frameSeconds >= silence { return finish() }
+        let said = Double(current.count - lead - quietFrames * Self.frame) / Double(PCM.rate)
+        if Double(quietFrames) * Self.frameSeconds >= pause(after: said) { return finish() }
         if Double(current.count) >= maxLength * Double(PCM.rate) { return cut() }
         return nil
+    }
+
+    /// The pause that ends an utterance `said` seconds long: the one set, for a sentence of up to
+    /// three seconds; shorter as it goes on, down to 0.35 s at eight. A room that talks on is cut at
+    /// its breaths, and translated as it goes rather than in pieces of the longest length.
+    func pause(after said: Double) -> Double {
+        let shortest = min(silence, 0.35)
+        return silence - (silence - shortest) * max(0, min(1, (said - 3) / 5))
     }
 
     /// The noise level: the quiet end (10th percentile) of the last five seconds.

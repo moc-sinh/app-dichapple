@@ -158,20 +158,23 @@ struct ConversationView: View {
                 .foregroundStyle(Color.brandGreen)
             Text("Bấm **nút tròn bên trái** (sóng âm) để bắt đầu nghe, rồi đặt iPhone giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")
             if model.readAloud {
-                Text("**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Hợp nói chuyện 1–1: lúc điện thoại đang đọc, app tạm không nghe.")
+                Text("**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Khi nhiều người nói liên tục, giọng đọc nhanh hơn và bỏ qua câu đã cũ để theo kịp; chữ vẫn hiện đủ.")
+                    + Text(model.engine == .accurate ? " Lúc điện thoại đang đọc, Chính xác tạm không nghe." : "")
             } else {
                 Text("**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.")
             }
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
             if model.engine == .soniox {
-                Text("Cách dịch: Soniox, chữ và bản dịch chạy ngay khi mọi người đang nói, hết câu là đọc. Đổi trong menu ⋯.")
+                Text(SharedStore.apiKey == nil
+                     ? "Cách dịch: Soniox, chữ và bản dịch chạy ngay khi mọi người đang nói, hết câu là đọc. Đổi trong menu ⋯."
+                     : "Cách dịch: Soniox, chữ chạy ngay khi mọi người đang nói, tách câu theo từng người; hết câu GPT dịch lại cho chuẩn rồi đọc. Đổi trong menu ⋯.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if SharedStore.sonioxKey == nil {
                     NoteBox(text: "Chưa có key Soniox. Dán key trong Cài đặt › Soniox.")
                 }
             } else if model.engine == .live {
-                Text("Cách dịch: Dịch liền, chữ chạy ngay khi người khác đang nói. Đổi trong menu ⋯.")
+                Text("Cách dịch: Dịch liền, chữ và giọng chạy ngay khi người khác đang nói; hết câu GPT dịch lại chữ cho chuẩn. Đổi trong menu ⋯.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if !model.liveSpeaksPartner {
@@ -185,7 +188,7 @@ struct ConversationView: View {
             if GoogleVoice.name(of: model.voice) != nil, SharedStore.googleKey == nil {
                 NoteBox(text: "Chưa có key Google nên đang đọc bằng giọng iPhone. Dán key trong Cài đặt › Giọng Google.")
             }
-            Text("Chi phí \(model.engine == .soniox ? "Soniox" : "OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
+            Text("Chi phí \(model.engine != .soniox ? "OpenAI" : SharedStore.apiKey == nil ? "Soniox" : "Soniox và OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -229,7 +232,9 @@ struct ConversationView: View {
     private var talkDisabled: Bool { model.engine == .live && !model.liveSpeaksPartner }
 
     private var hourlyCost: Double {
-        CostMeter.perHour(live: model.engine == .live, soniox: model.engine == .soniox, model: model.quality.model,
+        CostMeter.perHour(live: model.engine == .live, soniox: model.engine == .soniox,
+                          translatesAgain: model.engine == .live || (model.engine == .soniox && SharedStore.apiKey != nil),
+                          model: model.quality.model,
                           readAloud: model.readAloud, openAIVoice: ConversationModel.isOpenAIVoice(model.voice))
     }
 
@@ -303,7 +308,6 @@ struct ConversationView: View {
                 Label("Dịch lời đối phương", systemImage: "dollarsign.circle")
             }
             .pickerStyle(.menu)
-            .disabled(model.engine != .accurate)
             Picker(selection: $model.silence) {
                 ForEach(ConversationModel.silenceChoices, id: \.self) { seconds in
                     Text(String(format: "%.1f giây", seconds).replacingOccurrences(of: ".", with: ",")).tag(seconds)
@@ -346,6 +350,11 @@ struct ConversationView: View {
                 showingSaved = true
             } label: {
                 Label("Cuộc họp đã lưu", systemImage: "folder")
+            }
+            Button {
+                Clipboard.copyPrivately(model.speedLogText)
+            } label: {
+                Label("Sao chép nhật ký tốc độ", systemImage: "stopwatch")
             }
             Divider()
             Button {} label: {
@@ -523,8 +532,9 @@ struct ConversationEntryRow: View {
 
     private var who: String {
         if entry.mine { return "Tôi → \(Meeting.languageName(entry.target))" }
-        if entry.language.isEmpty { return "Đang nghe" }
-        return Meeting.languageName(entry.language)
+        let speaker = entry.speaker.isEmpty ? "" : "Người \(entry.speaker) · "
+        if entry.language.isEmpty { return speaker + "Đang nghe" }
+        return speaker + Meeting.languageName(entry.language)
     }
 
     /// Green: the user. Orange: a partner. Grey: someone speaking Vietnamese.
@@ -686,7 +696,7 @@ struct MeetingDetailView: View {
                 ForEach(Array(meeting.lines.enumerated()), id: \.offset) { _, line in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(line.mine ? "Tôi" : Meeting.languageName(line.language))
+                            Text(line.who)
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(line.mine ? Color.brandGreen : Color.brandOrange)
                             Spacer()
