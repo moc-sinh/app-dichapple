@@ -34,10 +34,13 @@ object TranscriptFilter {
         return longest.toDouble() / letters.length > 0.6
     }
 
-    /** More syllables than the sound could hold: nobody says eight a second for long. */
+    /**
+     * More syllables than the sound could hold: nobody says eleven a second for long (a fast Chinese
+     * speaker says eight, which eight as the limit took for noise and dropped).
+     */
     fun isImplausiblyFast(text: String, seconds: Double): Boolean {
         val syllables = syllableCount(text)
-        return syllables >= 8 && syllables > 8 * maxOf(0.5, seconds - 0.35) + 1
+        return syllables >= 8 && syllables > 11 * maxOf(0.5, seconds - 0.35) + 1
     }
 
     /** Words, except in Chinese and Japanese, where each character is a syllable. */
@@ -105,11 +108,15 @@ object TranscriptFilter {
 }
 
 /**
- * The phone's own voice heard again: a sentence made of the words the phone said a moment ago is
- * that echo, not someone speaking.
+ * The phone's own voice heard again: a sentence made of what the phone said a moment ago is that
+ * echo, not someone speaking.
+ *
+ * Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: the phone
+ * reads a lot in a busy meeting, and a colleague's sentence made of common words ("của chúng tôi",
+ * "我们的") was taken for its echo and lost.
  */
 class EchoGuard {
-    private class Said(val at: Double, val words: Set<String>)
+    private class Said(val at: Double, val words: Set<String>, val pairs: Set<String>)
 
     private val recent = ArrayList<Said>()
 
@@ -139,25 +146,34 @@ class EchoGuard {
             if (word.isNotEmpty()) words.add(word.toString())
             return words
         }
+
+        fun pairs(words: List<String>): List<String> = words.zipWithNext { a, b -> "$a $b" }
     }
 
     /** The phone said `text` at `at` (seconds, any clock). */
     fun spoke(text: String, at: Double) {
-        val found = words(text).toSet()
-        if (found.isEmpty()) return
-        recent.add(Said(at, found))
+        val words = words(text)
+        if (words.isEmpty()) return
+        recent.add(Said(at, words.toSet(), pairs(words).toSet()))
         recent.removeAll { at - it.at > WINDOW }
     }
 
     fun isEcho(text: String, at: Double): Boolean {
         val heard = words(text)
         if (heard.isEmpty()) return false
-        val short = heard.size < 3
-        val window = if (short) SHORT_WINDOW else WINDOW
+        // A word or two: all of them said by the phone just before.
+        if (heard.size < 3) {
+            val said = HashSet<String>()
+            for (s in recent) if (at - s.at <= SHORT_WINDOW) said.addAll(s.words)
+            return heard.all { it in said }
+        }
         val said = HashSet<String>()
-        for (s in recent) if (at - s.at <= window) said.addAll(s.words)
+        for (s in recent) if (at - s.at <= WINDOW) said.addAll(s.pairs)
         if (said.isEmpty()) return false
-        val matched = heard.count { it in said }
-        return if (short) matched == heard.size else matched.toDouble() / heard.size >= 0.6
+        val pairs = pairs(heard)
+        val matched = pairs.count { it in said }
+        // Half of a long sentence (what the recognizer heard of the phone's voice has a mistake here
+        // and there), all of a short one: "这个呢" after the phone said "这个价格" is someone asking.
+        return matched * 2 >= pairs.size && matched >= minOf(pairs.size, 3)
     }
 }

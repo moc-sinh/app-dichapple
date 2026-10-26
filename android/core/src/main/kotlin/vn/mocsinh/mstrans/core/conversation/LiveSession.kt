@@ -197,3 +197,152 @@ class LiveGate {
         left = 0
     }
 }
+
+/**
+ * Dịch liền's captions, cut into sentences. OpenAI's live translation sends what it heard and its
+ * translation as two streams of pieces, saying neither where a sentence ends nor which sentence a
+ * piece of translation belongs to; and a room that talks on never goes quiet for long, so one
+ * caption ran on for minutes, several people in it. A caption is cut after a full stop once it is a
+ * few seconds long (after a comma once it is long, anywhere once it is very long), and the
+ * translation still coming for it goes to it (`awaiting`) until it has as many sentence ends as what
+ * was said, or none has come for a while.
+ */
+class LiveCaptions {
+    data class Caption(
+        val number: Int,
+        val text: String = "",
+        val translation: String = "",
+        /** When its first piece came (seconds, any clock). */
+        val started: Double,
+    )
+
+    companion object {
+        /** Nothing heard this long: the caption ends. */
+        const val QUIET = 2.5
+        /** A caption is cut after a full stop once it is this long; after a comma, and anywhere. */
+        const val SHORTEST = 3.0
+        const val LONG = 10.0
+        const val LONGEST = 20.0
+        /** No piece of its translation this long: an ended caption's translation is done. */
+        const val TRANSLATION_QUIET = 3.0
+
+        private const val SENTENCE_ENDS = ".?!。？！…"
+
+        /** Sentence ends in `text` ("..." is one). */
+        fun ends(text: String): Int {
+            var count = 0
+            var previous = false
+            for (character in text) {
+                val end = character in SENTENCE_ENDS
+                if (end && !previous) count += 1
+                previous = end
+            }
+            return count
+        }
+
+        /** Its translation has as many sentence ends as what was said. */
+        fun isComplete(caption: Caption): Boolean {
+            val said = ends(caption.text)
+            return said > 0 && ends(caption.translation) >= said
+        }
+    }
+
+    /** The caption being heard. */
+    var current: Caption? = null
+        private set
+    /** Ended captions whose translation may still be coming, oldest first. */
+    val awaiting: List<Caption> get() = waiting
+    private val waiting = ArrayList<Caption>()
+    private val released = ArrayList<Caption>()
+    private var last = 0.0
+    private val lastPiece = HashMap<Int, Double>()
+    private var nextNumber = 1
+
+    /** More of what was said; returns the caption it ended, if any. */
+    fun heard(delta: String, now: Double): Caption? {
+        var ended: Caption? = null
+        val caption = current
+        if (caption != null && cuts(caption, delta, now)) ended = finishCurrent(now)
+        begin(now)
+        current = current?.let { it.copy(text = it.text + delta) }
+        last = now
+        return ended
+    }
+
+    /** More of the translation; returns the number of the caption it went to. */
+    fun translated(delta: String, now: Double): Int {
+        while (waiting.isNotEmpty()) {
+            val first = waiting[0]
+            if (isComplete(first) || now - (lastPiece[first.number] ?: now) > TRANSLATION_QUIET) {
+                release(first.number)
+                continue
+            }
+            waiting[0] = first.copy(translation = first.translation + delta)
+            lastPiece[first.number] = now
+            return first.number
+        }
+        begin(now)
+        current = current?.let { it.copy(translation = it.translation + delta) }
+        last = now
+        return current?.number ?: 0
+    }
+
+    /** Time passing: the caption being heard ends after a quiet moment; returns it. */
+    fun tick(now: Double): Caption? {
+        for (caption in waiting.toList()) {
+            if (now - (lastPiece[caption.number] ?: now) > TRANSLATION_QUIET) release(caption.number)
+        }
+        if (current == null || now - last < QUIET) return null
+        return finishCurrent(now)
+    }
+
+    /** Listening stops, or the session is gone: everything ends as it is; returns the caption heard. */
+    fun finishAll(now: Double): Caption? {
+        val ended = if (current == null) null else finishCurrent(now)
+        while (waiting.isNotEmpty()) release(waiting[0].number)
+        return ended
+    }
+
+    /** Captions whose translation is in (or stopped coming), since this was last asked. */
+    fun takeReleased(): List<Caption> {
+        val taken = released.toList()
+        released.clear()
+        return taken
+    }
+
+    private fun begin(now: Double) {
+        if (current != null) return
+        current = Caption(number = nextNumber, started = now)
+        nextNumber += 1
+    }
+
+    private fun finishCurrent(now: Double): Caption? {
+        val caption = current ?: return null
+        current = null
+        if (caption.text.any { it.isLetterOrDigit() } && !isComplete(caption)) {
+            waiting.add(caption)
+            lastPiece[caption.number] = now
+            while (waiting.size > 2) release(waiting[0].number)
+        } else {
+            released.add(caption)
+        }
+        return caption
+    }
+
+    private fun release(number: Int) {
+        val index = waiting.indexOfFirst { it.number == number }
+        if (index < 0) return
+        released.add(waiting.removeAt(index))
+        lastPiece.remove(number)
+    }
+
+    /** A piece of speech after the caption's end of sentence (or clause, or anything, as it grows). */
+    private fun cuts(caption: Caption, delta: String, now: Double): Boolean {
+        if (delta.none { it.isLetterOrDigit() }) return false
+        val end = caption.text.trim().lastOrNull() ?: return false
+        val age = now - caption.started
+        if (end in SENTENCE_ENDS) return age >= SHORTEST
+        if (end in ",，、;；:：") return age >= LONG
+        return age >= LONGEST
+    }
+}

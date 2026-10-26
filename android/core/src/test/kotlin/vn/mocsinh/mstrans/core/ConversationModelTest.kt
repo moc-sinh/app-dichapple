@@ -26,9 +26,14 @@ class ConversationModelTest {
             started = true
         }
 
+        override fun setEchoCancelling(on: Boolean) = Unit
+
         override fun stop() {
             started = false
         }
+
+        override val backlog: Double = 0.0
+        override fun setRate(rate: Float) = Unit
 
         override fun onAudioThread(block: () -> Unit) = block()
 

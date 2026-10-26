@@ -11,6 +11,7 @@ import vn.mocsinh.mstrans.core.conversation.CostMeter
 import vn.mocsinh.mstrans.core.conversation.EchoGuard
 import vn.mocsinh.mstrans.core.conversation.GoogleVoice
 import vn.mocsinh.mstrans.core.conversation.LiveEvent
+import vn.mocsinh.mstrans.core.conversation.LiveCaptions
 import vn.mocsinh.mstrans.core.conversation.LiveGate
 import vn.mocsinh.mstrans.core.conversation.LiveSession
 import vn.mocsinh.mstrans.core.conversation.PCM
@@ -131,6 +132,17 @@ class ConversationPartsTest {
         muted.unmute()
         c.check(muted.push(speech(1.2) + quiet(1.0)).size == 1, "heard again after unmute")
 
+        // The pause that ends a sentence gets shorter as someone talks on: a room that never pauses long
+        // is cut at its breaths, not every ten seconds.
+        val paused = SpeechSegmenter(0.8)
+        c.check(paused.pause(2.0) == 0.8 && abs(paused.pause(5.5) - 0.575) < 1e-9 && abs(paused.pause(12.0) - 0.35) < 1e-9,
+            "the pause: as set, then down to 0.35 s at eight seconds")
+        c.check(SpeechSegmenter(0.3).pause(12.0) == 0.3, "never longer than the one set")
+        c.check(segments(quiet(1.0) + speech(9.0) + quiet(0.5) + speech(2.0) + quiet(1.0), silence = 0.8).size == 2,
+            "after nine seconds, a breath of half a second ends the sentence")
+        c.check(segments(quiet(1.0) + speech(2.0) + quiet(0.5) + speech(2.0) + quiet(1.0), silence = 0.8).size == 1,
+            "after two seconds, it does not")
+
         c.check(PCM.wav(shortArrayOf(1, -2, 3)).size == 44 + 6, "WAV header is 44 bytes")
         c.check(PCM.samples(PCM.data(shortArrayOf(1, -2, 32767, -32768))).contentEquals(shortArrayOf(1, -2, 32767, -32768)), "PCM round trip")
         c.done()
@@ -160,6 +172,18 @@ class ConversationPartsTest {
         guard.spoke("我们周五之前发报价", 40.0)
         c.check(guard.isEcho("我们周五前发报价。", 42.0), "Chinese echo by characters")
         c.check(!guard.isEcho("价格太高了", 42.0), "Chinese reply is not echo")
+        // By pairs of words: a colleague's sentence of common words is not the phone's echo.
+        guard.spoke("Chúng tôi sẽ gửi báo giá cho anh trước thứ Sáu và giao hàng trong hai tuần.", 50.0)
+        guard.spoke("Giá này là giá tốt nhất của chúng tôi rồi.", 54.0)
+        c.check(guard.isEcho("giá này là giá tốt nhất của chúng tôi", 57.0), "the phone's Vietnamese heard back")
+        c.check(guard.isEcho("chúng tôi sẽ gửi báo giá cho anh trước thứ bảy và giao hàng trong hai tuần", 57.0),
+            "heard back with a word misheard")
+        c.check(!guard.isEcho("Anh ơi giá của chúng tôi là tốt rồi", 57.0), "a colleague's sentence of common words is not echo")
+        c.check(!guard.isEcho("Cảm ơn", 58.0) && guard.isEcho("giá tốt", 58.0), "a word or two: all said just before")
+        guard.spoke("这个价格可以吗？", 60.0)
+        c.check(!guard.isEcho("这个呢", 61.0) && guard.isEcho("这个价格", 61.0), "a short sentence: all of it said by the phone")
+        c.check(TranscriptFilter.isImplausiblyFast("我们这个价格可以吗", 0.5) && !TranscriptFilter.isImplausiblyFast("我们这个价格可以吗", 1.2),
+            "a fast Chinese speaker (eight a second) is not noise")
         c.done()
     }
 
@@ -185,6 +209,23 @@ class ConversationPartsTest {
         c.check(SpeechServices.normalized("zh-TW") == "zh-Hant" && SpeechServices.normalized("vi-VN") == "vi" &&
             SpeechServices.normalized("EN") == "en", "language codes")
         c.check(Prompt.spoken("English").contains("speech recognition"), "spoken prompt")
+        // A meeting's sentence: who said it, and the sentences before it with who said them and how
+        // they were translated; the topic goes with the instructions.
+        val prompt = Prompt.spoken("Vietnamese", " báo giá máy CNC ")
+        c.check(prompt.endsWith("\nThe meeting is about: báo giá máy CNC") && prompt.contains("never summarise"),
+            "the meeting's topic is told, and nothing is to be left out")
+        c.check(!Prompt.spoken("Vietnamese").contains("about:"), "no topic, none told")
+        val spoken = SpokenContext(
+            SpokenContext.speaker(false, "2"), listOf(
+                SpokenContext.Line(SpokenContext.speaker(false, "1"), "这个价格\n可以吗？", "Giá này được không?"),
+                SpokenContext.Line(SpokenContext.speaker(true, ""), "Được anh", "好的"),
+                SpokenContext.Line(SpokenContext.speaker(false, ""), "那我们", ""),
+            ), "x",
+        )
+        c.check(Prompt.spokenInput("下周一确认。", spoken) ==
+            "<context>\nNgười 1: 这个价格 可以吗？ → Giá này được không?\nUser: Được anh → 好的\nParticipant: 那我们\n</context>\n" +
+            "<message speaker=\"Người 2\">\n下周一确认。\n</message>", "the meeting's sentences, who said them and their translations")
+        c.check(Prompt.spokenInput("好", SpokenContext()) == "<message speaker=\"Participant\">\n好\n</message>", "the first sentence: no context")
         c.check(SpeechServices.voiceInstructions(Language.vietnamese).contains("Vietnamese accent"), "the voice is told the language")
         c.check(PCM.wav(PCM.data(shortArrayOf(1, -2, 3))).contentEquals(PCM.wav(shortArrayOf(1, -2, 3))), "WAV around PCM bytes")
         c.check(PCM.seconds(ByteArray(48_000)) == 1.0, "a second of PCM")
@@ -267,6 +308,42 @@ class ConversationPartsTest {
         c.done()
     }
 
+    /** Dịch liền's captions: cut into sentences in a room that talks on, each with its own translation. */
+    @Test
+    fun liveCaptions() {
+        val c = Checks()
+        val captions = LiveCaptions()
+        c.check(captions.heard("这个价格", 0.0) == null && captions.heard("可以便宜一点吗？", 3.2) == null &&
+            captions.current?.text == "这个价格可以便宜一点吗？", "a caption grows as it is said")
+        c.check(captions.translated("Giá này", 3.5) == 1 && captions.current?.translation == "Giá này", "its translation too")
+        val ended = captions.heard("我们", 4.0)
+        c.check(ended?.text == "这个价格可以便宜一点吗？" && captions.current?.text == "我们", "the next words after a full stop: a new caption")
+        c.check(captions.translated(" có bớt được không?", 4.3) == 1 && captions.takeReleased().isEmpty(),
+            "the rest of its translation goes to the caption it belongs to")
+        c.check(captions.translated("Chúng tôi", 4.6) == 2 && captions.current?.translation == "Chúng tôi",
+            "once it has as many sentence ends as was said, pieces go to the next")
+        c.check(captions.takeReleased().map { it.translation } == listOf("Giá này có bớt được không?"), "and the first is done")
+        c.check(captions.tick(6.0) == null && captions.tick(7.2)?.text == "我们", "a quiet moment ends the caption")
+        c.check(captions.takeReleased().isEmpty() && captions.tick(10.5) == null && captions.takeReleased().map { it.number } == listOf(2),
+            "its translation is done when no more of it comes")
+
+        val short = LiveCaptions()
+        short.heard("好的。", 0.0)
+        c.check(short.heard("那我们", 1.0) == null && short.current?.text == "好的。那我们", "a short caption is not cut at its full stop")
+
+        val talk = LiveCaptions()
+        val cut = ArrayList<String>()
+        for (second in 0 until 35) talk.heard(if (second == 12) "四，" else "四", second.toDouble())?.let { cut.add(it.text) }
+        c.check(cut.size == 2 && cut[0].length == 14 && cut[0].endsWith("，") && cut[1].length == 20,
+            "a long speech is cut after a comma, and anywhere once very long: ${cut.map { it.length }}")
+        c.check(talk.translated("x", 35.0) == 2, "a piece long after is not given to the caption before")
+        val last = talk.finishAll(36.0)
+        c.check(last != null && talk.current == null && talk.awaiting.isEmpty() && talk.takeReleased().size == 3,
+            "listening stops: everything ends as it is")
+        c.check(LiveCaptions.ends("Hello... OK? Yes!") == 3 && LiveCaptions.ends("没有") == 0, "sentence ends counted")
+        c.done()
+    }
+
     @Test
     fun liveGateAndCost() {
         val c = Checks()
@@ -322,6 +399,8 @@ class ConversationPartsTest {
         val c = Checks()
         fun token(text: String, final: Boolean = true, translation: Boolean = false, language: String = "zh") =
             SonioxToken(text, final, translation, if (translation) "vi" else language)
+        fun spoken(text: String, speaker: String, language: String = "zh", final: Boolean = true) =
+            SonioxToken(text, final, false, language, speaker)
         val message = """{"tokens":[{"text":"你好","is_final":true,"language":"zh","translation_status":"original"},""" +
             """{"text":"Xin chào","is_final":false,"language":"vi","translation_status":"translation"},{"text":"<end>","is_final":true}],""" +
             """"final_audio_proc_ms":760,"total_audio_proc_ms":880}"""
@@ -344,6 +423,15 @@ class ConversationPartsTest {
             "a sentence ends half a second after the speaker stops")
         c.check(config["context"].toString().contains(""""translation_terms":[{"source":"报价","target":"báo giá"}]"""), "the glossary goes along")
         c.check(SonioxEvent.code(Language.named("zh-Hant")!!) == "zh" && SonioxEvent.code(Language.vietnamese) == "vi", "language codes")
+        c.check(SonioxEvent.parse("""{"tokens":[{"text":"好","is_final":true,"language":"zh","speaker":"2","start_ms":1700,"end_ms":1840}]}""") ==
+            listOf(SonioxEvent.Tokens(listOf(SonioxToken("好", true, false, "zh", "2", 1700, 1840)))), "who said it, and when, is read")
+        val room = Json.parseToJsonElement(SonioxEvent.configMessage("k", "stt-rt-v5", "vi", listOf("zh", "vi"), emptyList(), emptyList(),
+            speakers = true, about = listOf("setting" to "Business meeting", "topic" to "báo giá máy CNC"))).jsonObject
+        c.check(room["enable_speaker_diarization"]!!.jsonPrimitive.boolean, "each word says who said it")
+        c.check(room["context"].toString() == """{"general":[{"key":"setting","value":"Business meeting"},{"key":"topic","value":"báo giá máy CNC"}]}""",
+            "what the meeting is about goes to Soniox's general context: ${room["context"]}")
+        val alone = SonioxEvent.configMessage("k", "stt-rt-v5", "zh", listOf("vi"), emptyList(), emptyList())
+        c.check(!alone.contains("diarization") && !alone.contains("context"), "the user's turn is one person, no glossary sent empty")
 
         val glossary = "báo giá = 报价\nMộc Sinh = Mộc Sinh\nFOB = giá FOB\n\n"
         val into = SonioxEvent.glossary(glossary, intoVietnamese = true)
@@ -373,12 +461,71 @@ class ConversationPartsTest {
         c.check(said == listOf(SonioxTranscript.Sentence("Chào anh", "", "vi")), "Vietnamese needs no translation")
         c.check(vietnamese.take(listOf(token("<end>", language = ""))).isEmpty() && vietnamese.finish() == null, "an end with nothing said is nothing")
 
+        // Soniox sends each piece of translation right after the words it translates, and settles the
+        // stream from its start: a piece belongs to the sentence of the words just before it.
+        fun sentence(text: String, translation: String = "", language: String = "zh", speaker: String = "") =
+            SonioxTranscript.Sentence(text, translation, language, speaker)
+        val split = SonioxTranscript("vi").apply { splits = true }
+        c.check(split.take(listOf(spoken("这个价格", "1"), spoken("可以吗？", "1"))).isEmpty(), "a short question goes on until its end")
+        split.take(listOf(token("Giá này", translation = true), token(" được không?", final = false, translation = true)))
+        c.check(split.current.translation == "Giá này được không?", "Soniox's translation shows on the sentence being said, as it comes")
+        val first = split.take(listOf(token(" được không?", translation = true), spoken("Được anh", "2", "vi")))
+        c.check(first == listOf(sentence("这个价格可以吗？", "Giá này được không?", speaker = "1")) && split.current.text == "Được anh" &&
+            split.current.speaker == "2" && split.current.translation.isEmpty(),
+            "another speaker: the first sentence ends, with its translation (it came before the next words): $first")
+        val long = split.take(listOf(spoken("那我们下周一确认订单", "3"), spoken("因为这个月比较忙。", "3")))
+        c.check(long == listOf(sentence("Được anh", language = "vi", speaker = "2"), sentence("那我们下周一确认订单因为这个月比较忙。", speaker = "3")),
+            "a third speaker, whose long speech is cut at its full stop: $long")
+        split.take(listOf(token("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng", translation = true)))
+        c.check(split.previews.map { it.translation } == listOf("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng") && split.current.translation.isEmpty(),
+            "the translation after a cut at a full stop is the cut sentence's: ${split.previews}")
+        split.take(listOf(token(" vì tháng này", final = false, translation = true), spoken("另外", "3", final = false),
+            token("Ngoài ra", final = false, translation = true)))
+        c.check(split.previews.firstOrNull()?.translation == "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng vì tháng này" &&
+            split.current.translation == "Ngoài ra", "guessed pieces: before the next guessed words, the cut sentence's; after them, the one being said")
+        split.take(listOf(token(" vì tháng này khá bận.", translation = true), spoken("另外", "3")))
+        c.check(split.previews.map { it.translation } == listOf("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng vì tháng này khá bận.") &&
+            split.current.text == "另外", "its last piece still shows with the next words settling: ${split.previews}")
+        split.take(listOf(token("Ngoài ra", translation = true)))
+        c.check(split.previews.isEmpty() && split.current.translation == "Ngoài ra", "after them, every piece is the new sentence's")
+        val english = split.take(listOf(spoken("我觉得没问题。", "3"), spoken("Sounds", "3", "en"), spoken(" good", "3", "en")))
+        c.check(english.size == 1 && english[0].text == "另外我觉得没问题。" && split.current.text == "Sounds good" && split.current.language == "en",
+            "another language after a sentence: $english")
+        val ok = split.take(listOf(spoken("<end>", "")))
+        c.check(ok == listOf(sentence("Sounds good", language = "en", speaker = "3")), "the end of a sentence finishes it without waiting")
+        split.take(listOf(token("Nghe được đấy.", translation = true)))
+        c.check(split.previews.firstOrNull()?.translation == "Nghe được đấy.", "its translation, after the end, is its own")
+        val shortPhrase = SonioxTranscript("vi").apply { splits = true }
+        shortPhrase.take(listOf(spoken("好", "1"), spoken("OK", "1", "en"), spoken("的", "1")))
+        c.check(shortPhrase.current.text == "好OK的", "a word of English in a short phrase stays in it")
+        // A speaker cut by another: the next speaker's first piece of translation is theirs at once.
+        val cutShort = SonioxTranscript("vi").apply { splits = true }
+        cutShort.take(listOf(spoken("我们这个价格", "1")))
+        cutShort.take(listOf(token("Giá này của chúng tôi", translation = true)))
+        val cut = cutShort.take(listOf(spoken("好的", "2")))
+        cutShort.take(listOf(token("Được", translation = true)))
+        c.check(cut.firstOrNull()?.translation == "Giá này của chúng tôi" && cutShort.current.translation == "Được" && cutShort.previews.isEmpty(),
+            "the next speaker's translation is theirs: ${cutShort.previews} / ${cutShort.current}")
+        val timed = SonioxTranscript("vi")
+        timed.take(listOf(SonioxToken("好", true, false, "zh", startMs = 1700, endMs = 1840), SonioxToken("的", false, false, "zh", startMs = 1900, endMs = 2100)))
+        c.check(timed.current.startMs == 1700 && timed.current.endMs == 2100, "a sentence says where its words begin and end")
+        // Talking on without a full stop: cut at a comma once very long.
+        val monologue = SonioxTranscript("vi").apply { splits = true }
+        val clause = monologue.take(listOf(spoken("我们".repeat(20) + "，", "1"), spoken("然后", "1")))
+        c.check(clause.size == 1 && clause[0].text.endsWith("，") && monologue.current.text == "然后", "a very long speech is cut at a comma")
+        c.check(monologue.take(listOf(spoken("我们，", "1"))).isEmpty(), "a short one is not")
+        val mixed = SonioxTranscript("zh").apply { splits = true }
+        val quote = mixed.take(listOf(spoken("Anh gửi giúp em cái", "", "vi"), spoken(" quotation", "", "en"), spoken(" nhé", "", "vi")))
+        c.check(quote.isEmpty() && mixed.current.text == "Anh gửi giúp em cái quotation nhé", "an English word inside a Vietnamese sentence stays in it")
+
         val meter = CostMeter()
         meter.streamed(3_600.0, soniox = true)
         c.check(abs(meter.dollars - 0.18) < 1e-9, "Soniox: about 0.18 USD an hour sent")
         val sonioxHour = CostMeter.perHour(true, true, TranslationModel.LUNA, true, false)
         c.check(abs(sonioxHour - 0.18) < 1e-9 && sonioxHour < CostMeter.perHour(true, false, TranslationModel.LUNA, true, false) / 10,
             "over ten times cheaper than Dịch liền")
+        val checked = CostMeter.perHour(true, true, TranslationModel.LUNA, true, false, translatesAgain = true)
+        c.check(abs(checked - 0.18 - 0.0756) < 1e-9, "each sentence translated again by Luna: about 0.08 USD more an hour")
         c.done()
     }
 }

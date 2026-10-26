@@ -35,6 +35,11 @@ data class SonioxToken(
     val isTranslation: Boolean,
     /** The language it is in ("vi", "zh"…), empty when not told. */
     val language: String,
+    /** Who said it (Soniox's speaker number, "1", "2"…), empty when not told. */
+    val speaker: String = "",
+    /** Where it begins and ends in the sound sent, in milliseconds (words said, not their translation). */
+    val startMs: Int? = null,
+    val endMs: Int? = null,
 ) {
     /** `<end>`: the speaker finished a sentence. `<fin>`: what was asked to be settled now is. */
     val endsSentence: Boolean get() = text == "<end>" || text == "<fin>"
@@ -63,6 +68,8 @@ sealed class SonioxEvent {
                 SonioxToken(
                     t, token["is_final"].bool() ?: false,
                     token["translation_status"].str() == "translation", token["language"].str() ?: "",
+                    speaker = token["speaker"].str() ?: token["speaker"].int()?.toString() ?: "",
+                    startMs = token["start_ms"].int(), endMs = token["end_ms"].int(),
                 )
             }
             if (tokens.isNotEmpty()) events.add(Tokens(tokens))
@@ -72,17 +79,27 @@ sealed class SonioxEvent {
 
         /**
          * The session's first message: how the sound comes (24 kHz mono PCM16), the languages
-         * expected, the words to hear right, and what everything heard is translated into. A
-         * sentence ends half a second after the speaker stops, so it is read aloud at once.
+         * expected, the words to hear right, and what everything heard is translated into. A sentence
+         * ends half a second after the speaker stops (the shortest Soniox allows). `speakers`: each
+         * word says who said it, so a room of several people is cut sentence by sentence, speaker by
+         * speaker. `about`: what the talk is (its setting, topic, who the user is), for Soniox's
+         * `general` context, which guides both the words it hears and its translation.
          */
         fun configMessage(
             apiKey: String, model: String, target: String, hints: List<String>,
-            terms: List<String>, pairs: List<Pair<String, String>>,
+            terms: List<String>, pairs: List<Pair<String, String>>, speakers: Boolean = false,
+            about: List<Pair<String, String>> = emptyList(),
         ): String = buildJsonObject {
             put("api_key", apiKey)
             put("audio_format", "pcm_s16le")
-            if (terms.isNotEmpty() || pairs.isNotEmpty()) {
+            if (about.isNotEmpty() || terms.isNotEmpty() || pairs.isNotEmpty()) {
                 putJsonObject("context") {
+                    if (about.isNotEmpty()) put("general", buildJsonArray {
+                        for ((key, value) in about) add(buildJsonObject {
+                            put("key", key)
+                            put("value", value)
+                        })
+                    })
                     if (terms.isNotEmpty()) put("terms", buildJsonArray { terms.forEach { add(JsonPrimitive(it)) } })
                     if (pairs.isNotEmpty()) put("translation_terms", buildJsonArray {
                         for ((source, targetTerm) in pairs) add(buildJsonObject {
@@ -94,6 +111,7 @@ sealed class SonioxEvent {
             }
             put("enable_endpoint_detection", true)
             put("enable_language_identification", true)
+            if (speakers) put("enable_speaker_diarization", true)
             put("language_hints", buildJsonArray { hints.forEach { add(JsonPrimitive(it)) } })
             put("max_endpoint_delay_ms", 500)
             put("model", model)
@@ -135,62 +153,150 @@ sealed class SonioxEvent {
 }
 
 /**
- * What one Soniox session has heard, cut into sentences: the one being said (its settled words,
- * then Soniox's guess at the rest) and those finished.
+ * What one Soniox session has heard, cut into sentences: the one being said (its settled words, then
+ * Soniox's guess at the rest, shown as they come) and those finished.
+ *
+ * With `splits` (the app makes each sentence's translation itself, with GPT), a sentence also ends
+ * where another person starts speaking, where the language changes, and after a long speech's full
+ * stop, without waiting for Soniox's end of sentence: in a room where people talk on without pausing,
+ * Soniox's sentences ran into one another, several speakers and languages in one.
+ *
+ * Soniox sends what was said and its translation as one stream, each piece of translation right after
+ * the words it translates (its docs; its own SDK prints a piece under the words before it), and settles
+ * the stream from its start. So a piece of translation belongs to the sentence of the words just
+ * before it in the stream: a sentence cut at its full stop still gets the translation of its last words
+ * (`awaiting`, shown as a preview), and the next sentence's words settling mean that translation is all in.
  */
 class SonioxTranscript(
     /** What it is translated into. */
     val target: String,
 ) {
-    data class Sentence(val text: String = "", val translation: String = "", val language: String = "") {
+    class Sentence(
+        val text: String = "",
+        val translation: String = "",
+        /** The language it was said in, empty when not told. */
+        val language: String = "",
+        /** Who said it (Soniox's speaker number), empty when not told. */
+        val speaker: String = "",
+        /** Counts the session's sentences, so a finished one can be found again. */
+        val number: Int = 0,
+        /** Where its words begin and end in the session's sound (milliseconds), when told. */
+        val startMs: Int? = null,
+        val endMs: Int? = null,
+    ) {
         val isEmpty: Boolean get() = text.isEmpty() && translation.isEmpty()
+
+        fun copy(text: String = this.text, translation: String = this.translation) =
+            Sentence(text, translation, language, speaker, number, startMs, endMs)
+
+        /** The same words, translation, language and speaker (its number and times aside). */
+        override fun equals(other: Any?): Boolean = other is Sentence && text == other.text &&
+            translation == other.translation && language == other.language && speaker == other.speaker
+
+        override fun hashCode(): Int = listOf(text, translation, language, speaker).hashCode()
+
+        override fun toString(): String = "Sentence(text=$text, translation=$translation, language=$language, speaker=$speaker, number=$number)"
     }
 
     private class Builder {
         val text = StringBuilder()
         val translation = StringBuilder()
         var language = ""
+        var speaker = ""
+        var number = 0
+        var startMs: Int? = null
+        var endMs: Int? = null
         val isEmpty get() = text.isEmpty() && translation.isEmpty()
         fun clear() {
             text.setLength(0)
             translation.setLength(0)
             language = ""
+            speaker = ""
+            startMs = null
+            endMs = null
         }
     }
 
+    /** Cut at a change of speaker or language and after a long speech's full stop (see above). */
+    var splits = false
     private val settled = Builder()
     private val guess = Builder()
     /** The speaker finished the sentence; its translation may still be on its way. */
     var ended = false
         private set
+    /** `splits`: finished sentences whose translation may still be coming, and those whose last came now. */
+    private val awaiting = ArrayList<Sentence>()
+    private val released = ArrayList<Sentence>()
+    /** Soniox's guess at the translation of a finished sentence, and which one. */
+    private val awaitingGuess = StringBuilder()
+    private var awaitingGuessNumber = 0
+    /** The sentence of the words settled last (0: none yet): the next settled piece of translation is its. */
+    private var owner = 0
+    private var nextNumber = 1
+    /** Where the words settled last end in the sound sent (seconds), for how far Soniox lags. */
+    var settledEnd: Double? = null
+        private set
+
+    init {
+        settled.number = nextNumber
+    }
 
     /** The sentence being said, as far as it is known. */
     val current: Sentence
         get() = Sentence(
             settled.text.toString() + guess.text, settled.translation.toString() + guess.translation,
-            settled.language.ifEmpty { guess.language },
+            settled.language.ifEmpty { guess.language }, settled.speaker.ifEmpty { guess.speaker }, settled.number,
+            settled.startMs ?: guess.startMs, guess.endMs ?: settled.endMs,
         )
 
     /** One message's tokens; returns the sentences it finished. */
     fun take(tokens: List<SonioxToken>): List<Sentence> {
         val finished = ArrayList<Sentence>()
-        // The guess comes again whole in every message.
+        // The guesses come again whole in every message.
         guess.clear()
+        awaitingGuess.setLength(0)
+        released.clear()
+        // A guessed word came in this message: guessed translation after it is of the words being said.
+        var guessing = false
         for (token in tokens) {
             if (token.endsSentence) {
                 ended = true
                 continue
             }
+            if (token.isTranslation) {
+                addTranslation(token, guessing)
+                continue
+            }
             // Words said after the end begin the next sentence.
-            if (ended && !token.isTranslation) finish()?.let { finished.add(it) }
-            add(token, if (token.isFinal) settled else guess)
+            if (ended) finish()?.let { finished.add(it) }
+            if (token.isFinal) {
+                if (splits && startsAnother(token)) finish()?.let { finished.add(it) }
+                add(token, settled)
+                token.endMs?.let { settledEnd = it / 1000.0 }
+                // Settled words of this sentence: what came before them, translations too, is settled.
+                owner = settled.number
+                released.addAll(awaiting)
+                awaiting.clear()
+                if (splits && endsLongSpeech(token)) finish()?.let { finished.add(it) }
+            } else {
+                add(token, guess)
+                guessing = true
+            }
         }
-        // An ended sentence is done once nothing of it is guessed and its translation is in (or it
-        // needs none: said in the language it is translated into).
-        val translated = settled.translation.isNotEmpty() || settled.language == target || settled.text.isBlank()
-        if (ended && guess.isEmpty && translated) finish()?.let { finished.add(it) }
+        // An ended sentence is done once nothing of it is guessed and, without `splits`, its
+        // translation is in (or it needs none: said in the language it is translated into).
+        val translated = splits || settled.translation.isNotEmpty() || settled.language == target || settled.text.isBlank()
+        val guessed = if (splits) guess.text.isNotEmpty() else !guess.isEmpty
+        if (ended && !guessed && translated) finish()?.let { finished.add(it) }
         return finished
     }
+
+    /** The finished sentences still getting Soniox's translation, and those whose last piece just came. */
+    val previews: List<Sentence>
+        get() = (released + awaiting).map { sentence ->
+            val translation = if (sentence.number == awaitingGuessNumber) sentence.translation + awaitingGuess else sentence.translation
+            sentence.copy(translation = translation.trim())
+        }
 
     /** Ends the sentence being said, with what is known of it (null when nothing is). */
     fun finish(): Sentence? {
@@ -198,8 +304,61 @@ class SonioxTranscript(
         settled.clear()
         guess.clear()
         ended = false
+        nextNumber += 1
+        settled.number = nextNumber
         val trimmed = sentence.copy(text = sentence.text.trim(), translation = sentence.translation.trim())
-        return if (trimmed.isEmpty) null else trimmed
+        if (trimmed.isEmpty) return null
+        // The translation of its last words may still come (unless none is needed).
+        if (splits && owner == trimmed.number && trimmed.text.isNotEmpty() && trimmed.language != target) {
+            awaiting.add(trimmed)
+            while (awaiting.size > 2) awaiting.removeAt(0)
+        }
+        return trimmed
+    }
+
+    /** A settled word that is someone else's, or another language, while the sentence has words. */
+    private fun startsAnother(token: SonioxToken): Boolean {
+        val said = settled.text.toString().trim()
+        if (said.isEmpty() || token.text.none { it.isLetterOrDigit() }) return false
+        if (token.speaker.isNotEmpty() && settled.speaker.isNotEmpty() && token.speaker != settled.speaker) return true
+        // Another language after a sentence or a clause of some length. A foreign word inside a sentence
+        // ("好 OK 的", "gửi em cái quotation nhé") stays in it: no full stop or comma before it.
+        if (token.language.isEmpty() || settled.language.isEmpty() || token.language == settled.language) return false
+        if (said.last() !in ".?!。？！…,，、;；:：") return false
+        return TranscriptFilter.syllableCount(said) >= 4
+    }
+
+    /**
+     * A full stop ending a long speech, or a comma in a very long one (someone talking on for ten seconds
+     * and more without a full stop): it is translated now, the rest goes on as a new sentence.
+     */
+    private fun endsLongSpeech(token: SonioxToken): Boolean {
+        val syllables = TranscriptFilter.syllableCount(settled.text.toString())
+        if (endsSentence(token.text)) return syllables >= 12
+        val last = token.text.trim().lastOrNull() ?: return false
+        return last in ",，、;；" && syllables >= 40
+    }
+
+    /**
+     * A piece of translation: of the words just before it. A settled piece follows the words settled
+     * last (`owner`), which may be a sentence already cut; a guessed one, the words guessed before it in
+     * this message, or else the settled ones. Without `splits`, the sentence being said.
+     */
+    private fun addTranslation(token: SonioxToken, guessing: Boolean) {
+        val number = if (!splits || guessing || owner == 0) settled.number else owner
+        if (number != settled.number) {
+            // A cut sentence's: the one waiting for it (one let go of is gone, and the piece with it).
+            val index = awaiting.indexOfFirst { it.number == number }
+            if (index < 0) return
+            if (token.isFinal) {
+                awaiting[index] = awaiting[index].copy(translation = awaiting[index].translation + token.text)
+            } else {
+                awaitingGuess.append(token.text)
+                awaitingGuessNumber = number
+            }
+            return
+        }
+        add(token, if (token.isFinal) settled else guess)
     }
 
     private fun add(token: SonioxToken, sentence: Builder) {
@@ -208,6 +367,16 @@ class SonioxTranscript(
         } else {
             sentence.text.append(token.text)
             if (sentence.language.isEmpty()) sentence.language = token.language
+            if (sentence.speaker.isEmpty()) sentence.speaker = token.speaker
+            if (sentence.startMs == null) sentence.startMs = token.startMs
+            token.endMs?.let { sentence.endMs = it }
+        }
+    }
+
+    companion object {
+        fun endsSentence(text: String): Boolean {
+            val last = text.trim().lastOrNull() ?: return false
+            return last in ".?!。？！…"
         }
     }
 }
@@ -223,9 +392,15 @@ class SonioxSession(
     private val hints: List<String>,
     glossary: String,
     private val scope: CoroutineScope,
-    private val url: String = "wss://stt-rt.soniox.com/transcribe-websocket",
+    /** Tells who said each word (the room's session; the user's turn is one person). */
+    private val speakers: Boolean = false,
+    /** What the talk is about, for Soniox's `general` context. */
+    private val about: List<Pair<String, String>> = emptyList(),
+    private val url: String = URL,
 ) {
     companion object {
+        const val URL = "wss://stt-rt.soniox.com/transcribe-websocket"
+
         /** Newest first: the next is tried when Soniox no longer knows the one before. */
         val models = listOf("stt-rt-v5", "stt-rt-v4")
     }
@@ -250,7 +425,7 @@ class SonioxSession(
         isOpen = true
         val ws = Http.sockets.newWebSocket(request, Listener())
         socket = ws
-        sendText(SonioxEvent.configMessage(apiKey, models[model], target, hints, terms.first, terms.second))
+        sendText(SonioxEvent.configMessage(apiKey, models[model], target, hints, terms.first, terms.second, speakers, about))
         // Soniox ends a session that hears nothing for a while: a session not spoken to is kept open.
         keepalive?.cancel()
         keepalive = scope.launch {

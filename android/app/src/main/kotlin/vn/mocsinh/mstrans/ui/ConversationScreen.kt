@@ -266,7 +266,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             append(model.textSize.ordinal).append('|').append(waiting).append('|')
             for (e in shown) {
                 append(e.id).append(e.state.toString()).append(e.text.length).append(':').append(e.translation.length)
-                    .append(e.language).append(e.target).append(';')
+                    .append(e.language).append(e.target).append(e.speaker).append(';')
             }
         }
         val empty = entries.isEmpty()
@@ -307,10 +307,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
         else -> c.orange
     }
 
-    private fun who(entry: ConversationModel.Entry): String = when {
-        entry.mine -> "Tôi → ${Language.displayName(entry.target)}"
-        entry.language.isEmpty() -> "Đang nghe"
-        else -> Language.displayName(entry.language)
+    private fun who(entry: ConversationModel.Entry): String {
+        if (entry.mine) return "Tôi → ${Language.displayName(entry.target)}"
+        val speaker = if (entry.speaker.isEmpty()) "" else "Người ${entry.speaker} · "
+        return speaker + if (entry.language.isEmpty()) "Đang nghe" else Language.displayName(entry.language)
     }
 
     private fun entryRow(entry: ConversationModel.Entry): View {
@@ -376,8 +376,14 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             addView(activity.label("Cách dùng", TextSize.HEADLINE, c.green, bold = true).leading(R.drawable.ic_info, c.green, 20, 8))
             addView(activity.label(rich("Bấm **nút tròn bên trái** (sóng âm) để bắt đầu nghe, rồi đặt điện thoại giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")))
             addView(activity.label(rich(
-                if (model.readAloud) "**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Hợp nói chuyện 1–1: lúc điện thoại đang đọc, app tạm không nghe."
-                else "**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.",
+                if (model.readAloud) {
+                    "**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Khi nhiều người nói liên tục, giọng đọc nhanh hơn " +
+                        "và bỏ qua câu đã cũ để theo kịp; chữ vẫn hiện đủ." +
+                        if (model.engine == Engine.ACCURATE) " Lúc điện thoại đang đọc, Chính xác tạm không nghe." else ""
+                } else {
+                    "**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục." +
+                        if (model.engine == Engine.SONIOX) " Micro nghe người ngồi xa rõ hơn ở chế độ này." else ""
+                },
             )))
             addView(activity.label(rich(
                 "Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang " +
@@ -385,12 +391,15 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             )))
             when (model.engine) {
                 Engine.SONIOX -> {
-                    addView(activity.label("Cách dịch: Soniox, chữ và bản dịch chạy ngay khi mọi người đang nói, hết câu là đọc. Đổi trong menu ⋯.",
-                        TextSize.SUBHEADLINE, c.secondary))
+                    addView(activity.label(
+                        if (settings.apiKey == null) "Cách dịch: Soniox, chữ và bản dịch chạy ngay khi mọi người đang nói, hết câu là đọc. Đổi trong menu ⋯."
+                        else "Cách dịch: Soniox, chữ chạy ngay khi mọi người đang nói, tách câu theo từng người; hết câu GPT dịch lại cho chuẩn rồi đọc. Đổi trong menu ⋯.",
+                        TextSize.SUBHEADLINE, c.secondary,
+                    ))
                     if (settings.sonioxKey == null) addView(activity.noteBox("Chưa có key Soniox. Dán key trong Cài đặt › Soniox."))
                 }
                 Engine.LIVE -> {
-                    addView(activity.label("Cách dịch: Dịch liền, chữ chạy ngay khi người khác đang nói. Đổi trong menu ⋯.",
+                    addView(activity.label("Cách dịch: Dịch liền, chữ và giọng chạy ngay khi người khác đang nói; hết câu GPT dịch lại chữ cho chuẩn. Đổi trong menu ⋯.",
                         TextSize.SUBHEADLINE, c.secondary))
                     if (!model.liveSpeaksPartner) addView(activity.noteBox(
                         "Dịch liền chưa đọc được ${model.partnerLanguage.name}. Muốn nói, đổi Cách dịch sang Chính xác (menu ⋯).",
@@ -405,8 +414,11 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
                 addView(activity.noteBox("Chưa có key Google nên đang đọc bằng giọng điện thoại. Dán key trong Cài đặt › Giọng Google."))
             }
             addView(activity.label(
-                "Chi phí ${if (model.engine == Engine.SONIOX) "Soniox" else "OpenAI"} với lựa chọn hiện tại: ${CostMeter.text(hourlyCost())} " +
-                    "mỗi giờ có người nói. Khoảng lặng không tính tiền.",
+                if (model.engine == Engine.SONIOX) {
+                    "Chi phí ${if (settings.apiKey == null) "Soniox" else "Soniox và OpenAI"} với lựa chọn hiện tại: ${CostMeter.text(hourlyCost())} mỗi giờ họp."
+                } else {
+                    "Chi phí OpenAI với lựa chọn hiện tại: ${CostMeter.text(hourlyCost())} mỗi giờ có người nói. Khoảng lặng không tính tiền."
+                },
                 TextSize.SUBHEADLINE, c.secondary,
             ))
         }
@@ -420,6 +432,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     private fun hourlyCost(): Double = CostMeter.perHour(
         live = model.engine == Engine.LIVE, soniox = model.engine == Engine.SONIOX, model = model.quality.model,
         readAloud = model.readAloud, openAIVoice = ConversationModel.isOpenAIVoice(model.voice),
+        translatesAgain = model.engine == Engine.LIVE || (model.engine == Engine.SONIOX && settings.apiKey != null),
     )
 
     // Controls
@@ -534,7 +547,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             qualities.add(2, 200 + i, i, quality.title).isChecked = quality == model.quality
         }
         qualities.setGroupCheckable(2, true, true)
-        qualities.item.isEnabled = model.engine == Engine.ACCURATE
+        menu.add(2, 250, 1, if (model.topic.isEmpty()) "Chủ đề cuộc họp…" else "Chủ đề: ${model.topic}")
 
         val silences = menu.addSubMenu(Menu.NONE, Menu.NONE, 2, "Ngừng bao lâu là hết câu")
         ConversationModel.silenceChoices.forEachIndexed { i, seconds ->
@@ -559,13 +572,15 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
         menu.add(6, 601, 6, "Chia sẻ biên bản").isEnabled = hasLines
         menu.add(6, 602, 7, "Cuộc họp mới").isEnabled = model.canStartNewMeeting
         menu.add(6, 603, 8, "Cuộc họp đã lưu")
+        menu.add(6, 604, 8, "Sao chép nhật ký tốc độ")
         menu.add(7, 700, 9, "Cuộc họp này: ${CostMeter.text(model.spent)} (ước tính)").isEnabled = false
 
         popup.setOnMenuItemClickListener { item ->
             val id = item.itemId
             when (id) {
                 in 100..199 -> model.engine = Engine.entries[id - 100]
-                in 200..299 -> model.quality = ConversationModel.Quality.entries[id - 200]
+                250 -> editTopic()
+                in 200..249 -> model.quality = ConversationModel.Quality.entries[id - 200]
                 in 300..399 -> model.silence = ConversationModel.silenceChoices[id - 300]
                 in 400..499 -> model.voice = ConversationModel.voices[id - 400].first
                 in 500..599 -> model.textSize = ConversationModel.TextSize.entries[id - 500]
@@ -576,11 +591,32 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
                 601 -> activity.shareText(model.meeting.transcript)
                 602 -> model.newMeeting()
                 603 -> openSaved()
+                604 -> {
+                    activity.copyText(model.speedLogText)
+                    activity.toast("Đã chép nhật ký tốc độ")
+                }
                 else -> return@setOnMenuItemClickListener false
             }
             true
         }
         popup.show()
+    }
+
+    /** What the meeting is about: told to GPT with every sentence, to Soniox when listening starts. */
+    private fun editTopic() {
+        val field = activity.field("Ví dụ: báo giá máy CNC với nhà cung cấp Thâm Quyến", model.topic)
+        val box = FrameLayout(activity).apply {
+            setPadding(activity.dp(20), activity.dp(8), activity.dp(20), 0)
+            addView(field, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("Chủ đề cuộc họp")
+            .setMessage("Vài chữ về nội dung, đối tác, sản phẩm: giúp nghe và dịch đúng thuật ngữ, đúng ngữ cảnh. " +
+                "GPT dùng ngay; Soniox dùng từ lần bấm nghe sau. Để trống nếu không cần.")
+            .setView(box)
+            .setPositiveButton("Lưu") { _, _ -> model.setTopic(field.text.toString()) }
+            .setNegativeButton("Hủy", null)
+            .show()
     }
 
     // Pages
@@ -718,7 +754,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
                 for (line in meeting.lines) {
                     addView(activity.vertical(4).apply {
                         addView(activity.horizontal().apply {
-                            addView(activity.label(if (line.mine) "Tôi" else Language.displayName(line.language), TextSize.FOOTNOTE,
+                            addView(activity.label(line.who, TextSize.FOOTNOTE,
                                 if (line.mine) c.green else c.orange, bold = true), weighted())
                             addView(activity.label(Dates.time(line.at), TextSize.CAPTION, c.secondary))
                         }, matchWidth())

@@ -143,9 +143,20 @@ class SpeechSegmenter(
 
         current.append(frame, from, from + FRAME)
         quietFrames = if (db < release) quietFrames + 1 else 0
-        if (quietFrames * FRAME_SECONDS >= silence) return finish()
+        val said = (current.size - lead - quietFrames * FRAME).toDouble() / PCM.RATE
+        if (quietFrames * FRAME_SECONDS >= pause(said)) return finish()
         if (current.size >= maxLength * PCM.RATE) return cut()
         return null
+    }
+
+    /**
+     * The pause that ends an utterance `said` seconds long: the one set, for a sentence of up to three
+     * seconds; shorter as it goes on, down to 0.35 s at eight. A room that talks on is cut at its
+     * breaths, and translated as it goes rather than in pieces of the longest length.
+     */
+    fun pause(said: Double): Double {
+        val shortest = minOf(silence, 0.35)
+        return silence - (silence - shortest) * ((said - 3) / 5).coerceIn(0.0, 1.0)
     }
 
     /** The noise level: the quiet end (10th percentile) of the last five seconds. */

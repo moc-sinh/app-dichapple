@@ -37,7 +37,9 @@ class MSTransApp : Application() {
     val meetings: MeetingStore by lazy { MeetingStore(File(filesDir, "Meetings")) }
     val phoneVoice: AndroidPhoneVoice by lazy { AndroidPhoneVoice(this) }
     val conversation: ConversationModel by lazy {
-        ConversationModel(settings, store, AndroidAudio(this), meetings, scope, ConversationServices.live(settings, phoneVoice))
+        ConversationModel(settings, store, AndroidAudio(this), meetings, scope, ConversationServices.live(settings, phoneVoice)).also {
+            it.appVersion = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+        }
     }
 
     override fun onCreate() {

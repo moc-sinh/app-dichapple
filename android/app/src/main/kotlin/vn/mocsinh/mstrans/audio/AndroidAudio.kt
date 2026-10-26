@@ -11,6 +11,7 @@ import android.media.AudioRecord
 import android.media.AudioRecordingConfiguration
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.PlaybackParams
 import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
 import android.os.Handler
@@ -46,6 +47,9 @@ class AndroidAudio(context: Context) : AudioPort {
     @Volatile private var running = false
     private var communication = false
     private var interrupted = false
+    /** Sound given to `play` and not yet heard: its length, by piece (main thread). */
+    private val pending = HashMap<Long, Double>()
+    private var nextPiece = 0L
 
     /** A phone call or another app took the microphone: Android silences this one (Android 10+). */
     private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
@@ -100,6 +104,19 @@ class AndroidAudio(context: Context) : AudioPort {
             priority = Thread.MAX_PRIORITY
             start()
         }
+    }
+
+    /**
+     * Đọc to turned on or off while listening: the microphone opens again on the voice-call path with
+     * echo cancelling (the phone speaks while it listens), or on the recognition path without it,
+     * which hears far voices better.
+     */
+    override fun setEchoCancelling(on: Boolean) {
+        if (!running || on == communication) return
+        val samples = onSamples
+        stop()
+        onSamples = samples
+        start(on)
     }
 
     /** The microphone at 24 kHz where the phone has it, else at 48 or 16 kHz, converted. */
@@ -178,7 +195,18 @@ class AndroidAudio(context: Context) : AudioPort {
             main.post(done)
             return
         }
-        speaker.enqueue(pcm, done)
+        val piece = nextPiece++
+        pending[piece] = PCM.seconds(pcm)
+        speaker.enqueue(pcm) {
+            pending.remove(piece)
+            done()
+        }
+    }
+
+    override val backlog: Double get() = pending.values.sum()
+
+    override fun setRate(rate: Float) {
+        speaker.rate = rate
     }
 
     override fun stopPlayback() = speaker.stop()
@@ -246,6 +274,8 @@ class Resampler(private val from: Int, private val to: Int) {
  */
 class Speaker(private val main: Handler, name: String) {
     @Volatile var usage = AudioAttributes.USAGE_MEDIA
+    /** How fast it reads (1 as made); the pitch stays. Taken up by the writer thread. */
+    @Volatile var rate = 1f
 
     private class Piece(val generation: Int, val pcm: ByteArray?, val done: (() -> Unit)?)
     private class Waiting(val end: Long, val done: () -> Unit)
@@ -254,6 +284,7 @@ class Speaker(private val main: Handler, name: String) {
     @Volatile private var generation = 0
 
     // The writer thread's own.
+    private var appliedRate = 1f
     private var track: AudioTrack? = null
     private var trackGeneration = -1
     private var written = 0L
@@ -284,6 +315,7 @@ class Speaker(private val main: Handler, name: String) {
         while (true) {
             val piece = pieces.poll(20, TimeUnit.MILLISECONDS)
             if (trackGeneration != generation) release()
+            applyRate()
             if (piece == null) {
                 report()
                 continue
@@ -337,11 +369,22 @@ class Speaker(private val main: Handler, name: String) {
         }
         t.play()
         track = t
+        appliedRate = 1f
+        applyRate()
         trackGeneration = generation
         written = 0
         lastHead = 0
         stalledSince = 0
         return t
+    }
+
+    /** A new reading speed, at the same pitch. */
+    private fun applyRate() {
+        val t = track ?: return
+        val wanted = rate
+        if (wanted == appliedRate) return
+        appliedRate = wanted
+        runCatching { t.playbackParams = PlaybackParams().setSpeed(wanted).setPitch(1f) }
     }
 
     /** Small writes that do not block, so a stop is heard within a few milliseconds. */

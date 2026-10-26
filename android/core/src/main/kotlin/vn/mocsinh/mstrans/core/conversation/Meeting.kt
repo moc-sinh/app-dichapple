@@ -33,6 +33,8 @@ data class Meeting(
     var summary: String? = null,
     /** What it cost with OpenAI and Soniox, estimated. */
     var cost: CostMeter? = null,
+    /** What it was about, as the user wrote it (Chủ đề cuộc họp); null when not told. */
+    var topic: String? = null,
 ) {
     data class Line(
         val at: Long,
@@ -44,7 +46,17 @@ data class Meeting(
         val translation: String,
         /** What it was translated into. */
         val target: String,
-    )
+        /** Who said it, as Soniox tells the room's speakers apart ("1", "2"…); null when not told. */
+        val speaker: String? = null,
+    ) {
+        /** "Tôi", or who spoke which language ("Người 2 · Tiếng Trung"). */
+        val who: String
+            get() {
+                if (mine) return "Tôi"
+                val language = Language.displayName(language)
+                return if (speaker.isNullOrEmpty()) language else "Người $speaker · $language"
+            }
+    }
 
     val ended: Long get() = lines.lastOrNull()?.at ?: started
 
@@ -62,9 +74,10 @@ data class Meeting(
         get() {
             val time = SimpleDateFormat("HH:mm:ss", Locale.US)
             val text = StringBuilder("Cuộc họp $title ($length)\n")
+            val topic = topic
+            if (!topic.isNullOrEmpty()) text.append("Chủ đề: $topic\n")
             for (line in lines) {
-                val who = if (line.mine) "Tôi" else Language.displayName(line.language)
-                text.append("\n[${time.format(Date(line.at))}] $who: ${line.text}\n")
+                text.append("\n[${time.format(Date(line.at))}] ${line.who}: ${line.text}\n")
                 if (line.translation.isNotEmpty()) text.append("  → ${line.translation}\n")
             }
             val summary = summary
@@ -85,10 +98,12 @@ data class Meeting(
                 put("text", it.text)
                 put("translation", it.translation)
                 put("target", it.target)
+                it.speaker?.let { speaker -> put("speaker", speaker) }
             }
         }))
         put("summary", summary?.let { JsonPrimitive(it) } ?: JsonNull)
         put("cost", cost?.let { JsonPrimitive(it.dollars) } ?: JsonNull)
+        topic?.let { put("topic", it) }
     }
 
     companion object {
@@ -99,7 +114,7 @@ data class Meeting(
                 Line(
                     l["at"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null,
                     l["mine"].bool() ?: false, l["language"].str() ?: "", l["text"].str() ?: "",
-                    l["translation"].str() ?: "", l["target"].str() ?: "",
+                    l["translation"].str() ?: "", l["target"].str() ?: "", l["speaker"].str(),
                 )
             }
             return Meeting(
@@ -108,6 +123,7 @@ data class Meeting(
                 lines = lines.toMutableList(),
                 summary = o["summary"].str(),
                 cost = (o["cost"] as? JsonPrimitive)?.doubleOrNull?.let { CostMeter(it) },
+                topic = o["topic"].str(),
             )
         }
     }
@@ -188,12 +204,20 @@ data class CostMeter(var dollars: Double = 0.0) {
     }
 
     companion object {
-        /** Per hour of people speaking, for the choices made. */
-        fun perHour(live: Boolean, soniox: Boolean, model: TranslationModel, readAloud: Boolean, openAIVoice: Boolean): Double {
-            if (soniox) return 60 * Rate.SONIOX_PER_MINUTE + if (readAloud && openAIVoice) 60 * Rate.VOICE_PER_MINUTE else 0.0
-            if (live) return 60 * Rate.LIVE_PER_MINUTE
+        /**
+         * Per hour of people speaking, for the choices made: about 12 sentences a minute, each about 750
+         * tokens in and 60 out (160 with Sol's reasoning). `translatesAgain`: each sentence of Soniox or
+         * Dịch liền is translated again by GPT, as Chính xác's are. Soniox is paid by the hour of meeting.
+         */
+        fun perHour(
+            live: Boolean, soniox: Boolean, model: TranslationModel, readAloud: Boolean, openAIVoice: Boolean,
+            translatesAgain: Boolean = false,
+        ): Double {
             val (input, _, output) = model.price
             val sentence = (750 * input + (if (model == TranslationModel.LUNA) 60 else 160) * output) / 1_000_000
+            val again = if (translatesAgain) 720 * sentence else 0.0
+            if (soniox) return 60 * Rate.SONIOX_PER_MINUTE + again + if (readAloud && openAIVoice) 60 * Rate.VOICE_PER_MINUTE else 0.0
+            if (live) return 60 * Rate.LIVE_PER_MINUTE + again
             var hour = 60 * Rate.TRANSCRIBE_PER_MINUTE + 720 * sentence
             if (readAloud && openAIVoice) hour += 60 * Rate.VOICE_PER_MINUTE
             return hour

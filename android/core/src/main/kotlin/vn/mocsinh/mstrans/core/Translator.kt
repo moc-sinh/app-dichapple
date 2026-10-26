@@ -53,6 +53,27 @@ data class Translation(
     val usage: TokenUsage? = null,
 )
 
+/**
+ * What a sentence of a meeting is translated with (Hội thoại): who said it, the sentences said before
+ * it and how they were translated, what the meeting is about.
+ */
+data class SpokenContext(
+    /** "User" (the app's user), "Người 2" (a participant Soniox told apart by voice), or "Participant". */
+    val speaker: String = "Participant",
+    /** Oldest first. */
+    val lines: List<Line> = emptyList(),
+    /** What the meeting is about, in the user's words; empty when not told. */
+    val topic: String = "",
+) {
+    /** One of the meeting's sentences before it; `translation` empty when it has none (yet). */
+    data class Line(val speaker: String, val text: String, val translation: String = "")
+
+    companion object {
+        fun speaker(mine: Boolean, number: String): String =
+            if (mine) "User" else if (number.isEmpty()) "Participant" else "Người $number"
+    }
+}
+
 /** One request per translation to the OpenAI Responses API. */
 class Translator(
     private val apiKey: String,
@@ -62,28 +83,39 @@ class Translator(
 ) {
     /**
      * Translates `text` into `target`. Into Vietnamese means a message from the partner; anything
-     * else means the user's own message, optionally with a back-translation. `spoken`: speech from a
-     * meeting, recognised automatically (Hội thoại).
+     * else means the user's own message, optionally with a back-translation.
      */
     suspend fun translate(
         text: String,
         target: Language,
         context: List<ChatLine> = emptyList(),
         checkMeaning: Boolean = false,
-        spoken: Boolean = false,
     ): Translation {
         val outgoing = target.code != Language.vietnamese.code
-        val withMeaning = outgoing && checkMeaning
+        val instructions = if (outgoing) Prompt.outgoing(target, settings) else Prompt.incoming(settings)
+        return request(instructions, Prompt.input(text, context), target, outgoing && checkMeaning)
+    }
+
+    /**
+     * Speech from a meeting or a talk, recognised automatically (Hội thoại): translated with who said
+     * it, the meeting's latest sentences and their translations, and what the meeting is about.
+     */
+    suspend fun translateSpoken(text: String, target: Language, context: SpokenContext): Translation {
+        val outgoing = target.code != Language.vietnamese.code
         var instructions = if (outgoing) Prompt.outgoing(target, settings) else Prompt.incoming(settings)
-        if (spoken) instructions += Prompt.spoken(if (outgoing) target.englishName else "Vietnamese")
-        val structured = requestBody(instructions, Prompt.input(text, context), withMeaning)
+        instructions += Prompt.spoken(if (outgoing) target.englishName else "Vietnamese", context.topic)
+        return request(instructions, Prompt.spokenInput(text, context), target, false)
+    }
+
+    private suspend fun request(instructions: String, input: String, target: Language, withMeaning: Boolean): Translation {
+        val structured = requestBody(instructions, input, withMeaning)
         var usedFormat = true
         val json = try {
             send(structured)
         } catch (e: TranslateError) {
             if (e.kind != TranslateError.Kind.FORMAT_UNSUPPORTED) throw e
             usedFormat = false
-            send(requestBody(instructions, Prompt.input(text, context), null))
+            send(requestBody(instructions, input, null))
         }
         // Cut off (too long): half a translation must never replace the message.
         if (json["status"].str() == "incomplete") {
@@ -176,6 +208,23 @@ class Translator(
     }
 
     companion object {
+        @Volatile private var warmedAt = 0L
+
+        /**
+         * Opens the connection to OpenAI before it is needed (every 45 s at most), so a translation
+         * does not also wait for DNS and TLS. A HEAD without a key is refused at once and costs nothing.
+         */
+        fun warmUp(endpoint: String = Config.ENDPOINT) {
+            val now = System.currentTimeMillis()
+            if (now - warmedAt <= 45_000) return
+            warmedAt = now
+            val request = Request.Builder().url(endpoint).head().build()
+            Http.client.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) = response.close()
+                override fun onFailure(call: okhttp3.Call, e: IOException) = Unit
+            })
+        }
+
         fun outputText(json: JsonObject): String? {
             val items = json["output"].arr() ?: return null
             val text = StringBuilder()
@@ -276,13 +325,46 @@ How to translate:
         return s
     }
 
-    /** Added for speech (Hội thoại): what the recognizer wrote, not what someone typed. */
-    fun spoken(into: String): String =
-        "\n\nThe message is speech from a live meeting or conversation, written down by automatic speech recognition: " +
-            "it may lack punctuation and contain recognition mistakes, fillers (ừ, à, thì là, kiểu như, um, 那个, えーと), " +
-            "repetitions and false starts. Translate what the speaker means into clear spoken $into that sounds " +
-            "natural read aloud: fix obvious recognition mistakes from the context, drop fillers and repeats, keep every " +
-            "fact, number, name and commitment. Several people may speak; <context> holds the meeting's latest sentences."
+    /**
+     * Added for speech (Hội thoại): what the recognizer wrote while people talk, not what someone
+     * typed; cut as it is said, so a message may be part of a sentence; several people, each told.
+     */
+    fun spoken(into: String, topic: String = ""): String {
+        var s = "\n\nThe message is speech from a live meeting or conversation, written down by automatic speech recognition " +
+            "while people talk: it may lack punctuation and contain recognition mistakes, fillers (ừ, à, thì là, kiểu như, " +
+            "um, 那个, えーと), repetitions and false starts. Translate what the speaker means into clear, natural spoken " +
+            "$into: fix obvious recognition mistakes from the context, the topic and the glossary, and drop fillers " +
+            "and repeats, but never summarise or shorten: every point, fact, number, name, date and commitment stays.\n" +
+            "Speech is cut into messages as people talk on, so a message may be only part of a sentence, or the rest of " +
+            "the sentence before it. Translate exactly the words it holds, so that it reads on from the translation before " +
+            "it when it continues that sentence; never add anything that was not said, and never repeat what an earlier " +
+            "translation already says.\n" +
+            "Several people may take part. <context> holds the meeting's latest sentences, oldest first: who said it " +
+            "(\"User\" is the Vietnamese user of this app; \"Người 1\", \"Người 2\"… are other participants told apart by voice, " +
+            "now and then wrongly; \"Participant\" when not told), what was said and, after \"→\", its translation as already " +
+            "shown. Use it to work out who and what \"he\", \"they\", \"this\", \"that price\" refer to, and translate names and " +
+            "terms the same way as before. The speaker attribute of <message> says who said it. In a meeting people speak " +
+            "to one another, not only to the user: choose forms of address from who speaks to whom."
+        val about = topic.trim()
+        if (about.isNotEmpty()) s += "\nThe meeting is about: $about"
+        return s
+    }
+
+    /** A meeting's sentence: the latest ones before it, each with who said it and its translation, then it. */
+    fun spokenInput(text: String, context: SpokenContext): String {
+        fun oneLine(text: String) = text.lines().filter { it.isNotEmpty() }.joinToString(" ")
+        val s = StringBuilder()
+        if (context.lines.isNotEmpty()) {
+            s.append("<context>\n")
+            for (line in context.lines) {
+                s.append(line.speaker).append(": ").append(oneLine(line.text))
+                if (line.translation.isNotEmpty()) s.append(" → ").append(oneLine(line.translation))
+                s.append("\n")
+            }
+            s.append("</context>\n")
+        }
+        return s.append("<message speaker=\"").append(context.speaker).append("\">\n").append(text).append("\n</message>").toString()
+    }
 
     private val guidance = mapOf(
         "zh" to "Write Simplified Chinese the way mainland Chinese business people chat (for example on WeChat with a supplier or customer): concise and natural; use 您 where respect is natural; avoid stiff, literary or overly formal phrasing.",
