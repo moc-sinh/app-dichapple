@@ -93,6 +93,24 @@ check(segments(quiet(6, db: -38)).isEmpty, "a noisy room (projector, air conditi
 check(segments(quiet(1) + speech(0.1) + quiet(1)).isEmpty, "a click is not speech")
 check(segments(quiet(1, db: -40) + speech(1.5, db: -22) + quiet(1, db: -40)).count == 1, "speech over a noisy room is heard")
 check(segments(quiet(1) + speech(1.5, db: -42) + quiet(1)).count == 1, "a far voice is heard")
+// A voice too quiet to begin an utterance over a noisy room is still sound above it: Dịch liền sends
+// it on (it sent nothing, and the voice was never translated).
+do {
+    var segmenter = SpeechSegmenter()
+    _ = segmenter.push(quiet(3, db: -50))
+    check(!segmenter.audible && !segmenter.speaking, "the room's own noise is neither")
+    let far = zip(speech(2, db: -42), quiet(2, db: -50)).map { Int16(clamping: Int($0) + Int($1)) }
+    var audible = 0
+    var speaking = 0
+    for start in stride(from: 0, to: far.count, by: 2_400) {
+        _ = segmenter.push(Array(far[start..<min(far.count, start + 2_400)]))
+        if segmenter.audible { audible += 1 }
+        if segmenter.speaking { speaking += 1 }
+    }
+    check(speaking == 0 && audible >= 16, "a far, quiet voice: audible \(audible) tenths of 20, an utterance \(speaking)")
+    _ = segmenter.push(quiet(1, db: -50))
+    check(!segmenter.audible, "and quiet again after it")
+}
 
 // A long talk is cut as it goes, near a breath, never in tiny pieces.
 do {
@@ -209,6 +227,11 @@ do {
     check(captions.takeReleased().isEmpty && captions.tick(now: 10.5) == nil && captions.takeReleased().map(\.number) == [2],
           "its translation is done when no more of it comes")
 
+    var stopped = LiveCaptions()
+    _ = stopped.heard("好的，下周一确认。", now: 0)
+    check(stopped.tick(now: 0.5) == nil && stopped.tick(now: 0.9)?.text == "好的，下周一确认。",
+          "after a full stop, a short quiet moment ends the caption (GPT waited 2.5 s for it)")
+
     var short = LiveCaptions()
     _ = short.heard("好的。", now: 0)
     check(short.heard("那我们", now: 1) == nil && short.current?.text == "好的。那我们", "a short caption is not cut at its full stop")
@@ -243,6 +266,10 @@ do {
     check(body.hasSuffix("\u{1}\u{2}\r\n--\(form.boundary)--\r\n"), "form closes after the file")
 }
 check(Prompt.spoken(into: "English").contains("speech recognition"), "spoken prompt")
+check(Prompt.spoken(into: "Vietnamese").contains("repeats or confirms") && !Prompt.spoken(into: "Vietnamese").contains("never repeat"),
+      "a number confirmed again is translated again, not dropped as said before")
+check(Prompt.meeting().contains("what one participant said") && !Prompt.meeting().contains("written by the partner"),
+      "the others' words in a meeting: said by one of several people, not a message to the user")
 do {
     // A meeting's sentence: who said it, and the sentences before it with who said them and how
     // they were translated; the topic goes with the instructions.
@@ -593,6 +620,25 @@ do {
     check(ended.map(\.text) == ["好的。"] && twice.previews.map(\.translation) == ["Được"], "its guessed translation shows")
     _ = twice.take([token("Được rồi.", translation: true)])
     check(twice.previews.map(\.translation) == ["Được rồi."], "settled, it replaces the guess: \(twice.previews)")
+    // The room's session hears the user's turns too: their voice is taken out, a partner's is not.
+    var voices = MyVoiceFilter()
+    func voiced(_ text: String, _ speaker: String, _ language: String, at second: Double) -> SonioxToken {
+        SonioxToken(text: text, isFinal: true, isTranslation: false, language: language, speaker: speaker,
+                    startMs: Int(second * 1000), endMs: Int(second * 1000) + 300)
+    }
+    check(voices.filter([voiced("这个价格", "1", "zh", at: 1)], origin: 0).count == 1, "before any turn, everything passes")
+    voices.began(at: 10)
+    let inTurn = voices.filter([voiced("Anh gửi", "2", "vi", at: 10.2), voiced("OK", "2", "en", at: 11), token("Được", translation: true),
+                                voiced("等一下", "1", "zh", at: 11.5), token("Đợi chút", translation: true),
+                                voiced("hello", "3", "en", at: 12)], origin: 0)
+    check(inTurn.map(\.text) == ["等一下", "Đợi chút"],
+          "in a turn: the user's words and their translation go, a partner's voice stays, an unknown one goes: \(inTurn.map(\.text))")
+    voices.ended(at: 13)
+    check(voices.filter([voiced("好的", "3", "zh", at: 13.2)], origin: 0).isEmpty, "a moment after the turn, still the user's")
+    check(voices.filter([voiced("好的", "3", "zh", at: 14)], origin: 0).count == 1, "after it, everyone passes")
+    check(voices.filter([voiced("vâng", "2", "vi", at: 1.5)], origin: 0).count == 1
+          && voices.filter([voiced("vâng", "2", "vi", at: 1.5)], origin: 10).isEmpty,
+          "a session opened again: its times count from where its sound begins")
     var short = SonioxTranscript(target: "vi")
     short.splits = true
     _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")])

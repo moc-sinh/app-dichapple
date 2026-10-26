@@ -210,8 +210,9 @@ struct LiveCaptions {
         let started: Double
     }
 
-    /// Nothing heard this long: the caption ends.
+    /// Nothing heard this long: the caption ends; after a full stop, sooner (it waited 2.5 s for GPT).
     static let quiet = 2.5
+    static let quietAfterFullStop = 0.8
     /// A caption is cut after a full stop once it is this long; after a comma, and anywhere.
     static let shortest = 3.0
     static let long = 10.0
@@ -260,7 +261,9 @@ struct LiveCaptions {
         for caption in awaiting where now - (lastPiece[caption.number] ?? now) > Self.translationQuiet {
             release(caption.number)
         }
-        guard current != nil, now - last >= Self.quiet else { return nil }
+        guard let caption = current else { return nil }
+        let ended = caption.text.trimmingCharacters(in: .whitespacesAndNewlines).last.map(Self.sentenceEnds.contains) == true
+        guard now - last >= (ended ? Self.quietAfterFullStop : Self.quiet) else { return nil }
         return finishCurrent(now: now)
     }
 

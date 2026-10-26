@@ -130,12 +130,16 @@ struct ConversationView: View {
                 .padding(.vertical, 10)
             }
             .modifier(FollowsBottom(following: $following))
-            .onChange(of: TranscriptEnd(last: shown.last, count: shown.count, pending: pending)) { _, _ in
+            .onChange(of: TranscriptEnd(last: shown.last?.id, count: shown.count, pending: pending)) { _, _ in
                 if following {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottom, anchor: .bottom) }
                 } else {
                     unseen = true
                 }
+            }
+            // The last sentence growing word by word: kept in view, without an animation for each word.
+            .onChange(of: shown.last.map { "\($0.text.count) \($0.translation.count) \($0.state)" }) { _, _ in
+                if following { proxy.scrollTo(Self.bottom, anchor: .bottom) }
             }
             .onChange(of: following) { _, now in
                 if now { unseen = false }
@@ -355,7 +359,7 @@ struct ConversationView: View {
                 Label("Tóm tắt cuộc họp", systemImage: "list.bullet.rectangle")
             }
             .disabled(model.meeting.lines.isEmpty)
-            ShareLink(item: model.meeting.transcript) {
+            ShareLink(item: MinutesText(meeting: model.meeting), preview: SharePreview("Biên bản cuộc họp")) {
                 Label("Chia sẻ biên bản", systemImage: "square.and.arrow.up")
             }
             .disabled(model.meeting.lines.isEmpty)
@@ -756,11 +760,23 @@ struct MeetingDetailView: View {
     }
 }
 
-/// What the transcript's end shows: when it changes, the transcript follows it down.
+/// What the transcript's end shows: a new sentence there, and the transcript follows it down.
 private struct TranscriptEnd: Equatable {
-    let last: ConversationModel.Entry?
+    let last: UUID?
     let count: Int
     let pending: Int
+}
+
+/// The minutes' text, written only when shared: the menu is made again each time the screen is,
+/// with every word heard, and the whole meeting's text was written each time.
+private struct MinutesText: Transferable {
+    let meeting: Meeting
+
+    var text: String { meeting.transcript }
+
+    static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation(exporting: \.text)
+    }
 }
 
 /// Follows the transcript's end while it is in view; stops once the user scrolls up to read

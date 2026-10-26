@@ -461,6 +461,80 @@ struct SonioxTranscript {
     }
 }
 
+/// The user's own voice in what the room's Soniox session hears. The room is listened to during the
+/// user's turns (Tôi nói) too, so a partner who answers meanwhile, or finishes a sentence as the
+/// button goes down, is not lost; the user's words, which their own session translates, are taken
+/// out. In a turn only a voice known to be a partner's passes: one Soniox heard before, outside the
+/// user's turns, in another language than Vietnamese, and never in Vietnamese in a turn.
+struct MyVoiceFilter {
+    /// The user's turns, in seconds of the room's sound (the last one open while it lasts).
+    private(set) var turns: [(from: Double, to: Double)] = []
+    private var mine: Set<String> = []
+    private var theirs: Set<String> = []
+    /// The last settled word was taken out: the settled translation after it goes too.
+    private var droppingSettled = false
+    /// Sound around a turn that is still the user's: the button pressed a moment after they began,
+    /// and how far Soniox's times are off.
+    static let margin = 0.3
+
+    mutating func began(at: Double) {
+        guard turns.last?.to != .infinity else { return }
+        turns.append((at, .infinity))
+        if turns.count > 20 { turns.removeFirst() }
+    }
+
+    mutating func ended(at: Double) {
+        for index in turns.indices where turns[index].to == .infinity { turns[index].to = at }
+    }
+
+    /// The room's tokens without the user's words said in their turns, and the translation of those
+    /// words (`origin`: where this session's sound begins in the turns' seconds).
+    mutating func filter(_ tokens: [SonioxToken], origin: Double) -> [SonioxToken] {
+        guard !turns.isEmpty else {
+            for token in tokens { learn(token) }
+            return tokens
+        }
+        var kept: [SonioxToken] = []
+        var dropping = droppingSettled
+        for token in tokens {
+            if token.endsSentence {
+                kept.append(token)
+            } else if token.isTranslation {
+                if !dropping { kept.append(token) }
+            } else {
+                dropping = isMine(token, origin: origin)
+                if token.isFinal { droppingSettled = dropping }
+                if !dropping { kept.append(token) }
+            }
+        }
+        return kept
+    }
+
+    private mutating func isMine(_ token: SonioxToken, origin: Double) -> Bool {
+        guard let start = token.startMs else {
+            learn(token)
+            return false
+        }
+        let at = origin + Double(start) / 1000
+        guard turns.contains(where: { at >= $0.from - Self.margin && at <= $0.to + Self.margin }) else {
+            learn(token)
+            return false
+        }
+        if token.isFinal, !token.speaker.isEmpty, token.language == Language.vietnamese.code {
+            mine.insert(token.speaker)
+            theirs.remove(token.speaker)
+        }
+        return token.language == Language.vietnamese.code || !theirs.contains(token.speaker)
+    }
+
+    /// A word outside the user's turns: a voice heard in another language is a partner's.
+    private mutating func learn(_ token: SonioxToken) {
+        guard token.isFinal, !token.isTranslation, !token.speaker.isEmpty, !token.language.isEmpty,
+              token.language != Language.vietnamese.code, !mine.contains(token.speaker) else { return }
+        theirs.insert(token.speaker)
+    }
+}
+
 /// One Soniox session: sound goes in, and what was said comes back as text with its translation
 /// into one language, word by word while the speaker is still talking. Two-way talk needs one per
 /// direction. Used on the main queue only: what the socket says is handled there too.

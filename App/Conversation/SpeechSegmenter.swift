@@ -23,6 +23,13 @@ struct SpeechSegmenter {
 
     /// Someone is speaking now.
     private(set) var speaking = false
+    /// Sound some way above the room's noise, if not as loud as an utterance must begin: a far or
+    /// quiet voice. Dịch liền sends it on (the echo cancelling it needs makes far voices weaker, and
+    /// one heard only this loud was never sent, nor translated).
+    private(set) var audible = false
+    private var audibleFrames = 0
+    /// Frames it stays audible after the last loud ones: between syllables too.
+    private var audibleHold = 0
     /// The microphone is not listened to while the phone speaks a translation aloud (its own
     /// voice would be translated again).
     private(set) var muted = false
@@ -110,6 +117,10 @@ struct SpeechSegmenter {
         if muted { return nil }
         let db = PCM.dbfs(frame)
         remember(db)
+        // Three frames in a row (a click is one), and a moment after.
+        audibleFrames = db >= max(Self.minimumSpeechDb - 6, floorDb + 6) ? audibleFrames + 1 : 0
+        audibleHold = audibleFrames >= 3 ? 15 : max(0, audibleHold - 1)
+        audible = audibleHold > 0
         let onset = max(Self.minimumSpeechDb, floorDb + 10)
         let release = max(Self.minimumSpeechDb - 6, floorDb + 5)
 

@@ -23,14 +23,16 @@ func t(_ text: String, final: Bool = true) -> SonioxToken {
 final class Calls: @unchecked Sendable {
     let lock = NSLock()
     var translated: [(text: String, target: String, context: [String], speaker: String, topic: String, model: TranslationModel)] = []
+    var spares: [String] = []
     var spoken: [String] = []
     var translateDelay: UInt64 = 300_000_000
     var voiceBytes = 96_000
     var warmUps = 0
     /// Returns how many times `text` was asked before.
-    func add(_ text: String, _ target: String, _ context: SpokenContext, _ model: TranslationModel) -> Int {
+    func add(_ text: String, _ target: String, _ context: SpokenContext, _ model: TranslationModel, spare: Bool) -> Int {
         let lines = context.lines.map { "\($0.speaker): \($0.text)" + ($0.translation.isEmpty ? "" : " → \($0.translation)") }
         lock.lock(); defer { lock.unlock() }
+        if spare { spares.append(text) }
         let before = translated.filter { $0.text == text }.count
         translated.append((text, target, lines, context.speaker, context.topic, model))
         return before
@@ -69,8 +71,8 @@ struct Simulation {
         model.quality = .economy
         model.services = ConversationServices(
             transcribe: { _, _, _ in .init(text: "", language: nil) },
-            translate: { _, text, target, context, model in
-                let before = calls.add(text, target.code, context, model)
+            translate: { _, text, target, context, model, spare in
+                let before = calls.add(text, target.code, context, model, spare: spare)
                 // The first request for a sentence marked STALL hangs, as on a stalled phone network.
                 try await Task.sleep(nanoseconds: text.contains("STALL") && before == 0 ? 30_000_000_000 : calls.translateDelay)
                 if text.contains("FAIL") { throw URLError(.timedOut) }
@@ -161,11 +163,27 @@ struct Simulation {
 
         // The user speaks.
         model.talk(true)
+        let roomBefore = others.sent
         await feed(speech(1.5))
         check(partner.sent > 1, "the user's sound goes to their own session")
+        check(others.sent - roomBefore > 1.4, "and the room's session still hears the room")
+        // The user's voice, heard by the room's session too, is taken out of it; a partner speaking
+        // meanwhile is not.
+        let turnAt = Int(others.sent * 1000)
+        others.say([w("Anh gửi giúp em", "5", "vi", start: turnAt - 1300, end: turnAt - 800),
+                    w("等一下。", "1", start: turnAt - 600, end: turnAt - 200), w("<end>", "")])
+        check(!model.entries.contains { $0.text.contains("Anh gửi giúp em") && !$0.mine },
+              "the user's voice in the room's session is not someone else")
+        check(model.entries.last?.text == "等一下。" && model.entries.last?.mine == false,
+              "a partner speaking during the user's turn is heard: \(model.entries.suffix(2).map(\.text))")
         partner.say([w("Anh gửi giúp em báo giá nhé", "", "vi", end: 1400)])
         model.talk(false)
-        check(partner.finalized == 1, "letting go settles the user's last words at once")
+        let mineSent = partner.sent
+        await feed(speech(0.2))
+        check(partner.sent - mineSent > 0.15, "the sound said just before letting go still goes to the user's session")
+        check(partner.finalized == 0, "and only then are their last words settled")
+        await sleep(0.3)
+        check(partner.finalized == 1, "a moment after letting go")
         partner.say([t("请", final: true), w("<fin>", "")])
         let mine = model.entries.last
         check(mine?.mine == true && mine?.state == .translating && mine?.speaker == "", "the user's sentence goes to GPT")
@@ -215,6 +233,9 @@ struct Simulation {
         check(model.entries.last?.state == .done && model.entries.last?.translation == "[vi] STALL 我们明天发货。",
               "a stalled GPT is asked again, and its second answer comes in time: \(String(describing: model.entries.last))")
         check(calls.translated.filter { $0.text.hasPrefix("STALL") }.count == 2, "asked twice, no more")
+        check(calls.spares.filter { $0.hasPrefix("STALL") } == ["STALL 我们明天发货。"]
+              && calls.translated.filter { $0.text.hasPrefix("STALL") }.count == 2,
+              "the second time on a connection of its own, the first on the usual one: \(calls.spares)")
         check(model.speedLogText.contains("hỏi thêm lần nữa"), "noted in the speed log")
 
         // A thought said in two breaths is one sentence: Soniox's end after a comma is a pause.
@@ -233,7 +254,7 @@ struct Simulation {
         check(model.entries.last?.text == "那个" && model.entries.last?.state != .hearing, "ended after a quiet moment")
         await sleep(0.5)
         let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
-        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 3: 那我们下周一确认订单") == true,
+        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 1: 等一下。") == true,
               "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
 
         // A room that talks on: the voice catches up.
