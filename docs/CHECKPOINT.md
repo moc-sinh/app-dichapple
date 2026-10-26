@@ -1,12 +1,26 @@
-# Checkpoint — 21/10/2026
+# Checkpoint — 26/10/2026
 
-Điểm dừng để phiên mới làm tiếp. Mọi mã đã được push lên nhánh `claude/funny-gates-s6pl2c`
-(PR #1 nháp vào `claude/stoic-hopper-f60iid`). Không có thay đổi nào chưa commit.
+Điểm dừng để phiên mới (có thể ở tài khoản khác) làm tiếp. Mọi mã đã được push lên nhánh
+`claude/funny-gates-s6pl2c` (PR #1 nháp vào `claude/stoic-hopper-f60iid`) của repo `moc-sinh/app-dichapple`.
+Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang được tài khoản khác: file này là bàn giao.
+
+## Bắt đầu phiên mới
+
+1. Đọc hết file này, rồi `docs/HUONG-DAN.md` (phần Hội thoại) và `App/Conversation/ConversationModel.swift`.
+2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
+   - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
+   - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
+     (175 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
+3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
+   `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.11.0 (họp nhiều người: tách câu theo người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ;
-  xem mục 1.11.0). Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
+- **Bản mới nhất:** 1.11.0 (họp nhiều người: tách câu theo người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ,
+  chữ là chính; xem mục 1.11.0). Commit `e3073b6` (+ commit bàn giao này), CI run 70 đang chạy lúc bàn giao; run 69
+  (commit `d9fc451`) đã build IPA xanh trước khi bị huỷ nhường run 70. **Chưa gửi link IPA 1.11.0 cho người dùng**:
+  phiên mới lấy link từ run mới nhất xanh trên nhánh. Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
   xanh), 1.9.1 (sửa bàn phím tự tắt, run 65, cả keyboard-smoke xanh), 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
   đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
   "chưa mượt, phản hồi chưa nhanh". Người dùng thấy 1.7.0 "khá ổn". Các mục bên dưới là lịch sử theo từng bản.
@@ -211,15 +225,21 @@
      vì đổi người thường không có dấu chấm, trước đây giữ mảnh dịch của câu sau mãi). Nói liền không dấu chấm thì cắt ở
      dấu phẩy khi đã 40 âm tiết.
   Menu "Dịch lời đối phương" bật cho mọi Cách dịch; ước tính chi phí cộng tiền GPT dịch lại. Test: `Tests/Conversation`
-  175 kiểm tra. Mô phỏng trên Linux (model thật, Soniox/Dịch liền/AudioIO giả, `scratchpad/sim2`): 3 người nói xen
+  175 kiểm tra. Mô phỏng trên Linux (model thật, Soniox/Dịch liền/AudioIO giả, `Tests/ConversationSim/run.sh`): 3 người nói xen
   kẽ, câu Việt, tiếng vọng, Tôi nói, GPT lỗi, GPT chậm, 8 câu dồn dập (đọc nhanh rồi bỏ câu cũ), Dịch liền cắt câu và
   gán mảnh dịch, tiếng tồn quá 6 s, câu của mình không qua GPT. **Chưa thử trên máy thật**: chờ người dùng gửi nhật
   ký tốc độ sau một cuộc họp thật.
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Người dùng thử 1.11.0 trong cuộc họp thật (Soniox và Dịch liền) rồi gửi nhật ký tốc độ: đọc nó trước khi sửa
-   tiếp (Soniox chậm hay GPT chậm hay giọng chậm), đừng đoán.
+0. Gửi link IPA 1.11.0. Người dùng thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+   tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
+   đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s` (Soniox chậm),
+   `GPT Luna X s` (dịch lại chậm), `đọc sau X s` / `bỏ đọc` (giọng). **Ưu tiên của người dùng: chữ dịch đầy đủ,
+   đúng nghĩa, không trễ; giọng đọc là tính năng phụ.** Hướng còn lại nếu nhật ký cho thấy cần: Dịch liền vẫn qua
+   `LiveGate` (chỉ gửi khi có người nói, vì 2 USD/giờ) nên người nói nhỏ có thể bị sót; Soniox phân biệt người nói
+   theo thời gian thực đôi khi nhầm (câu bị cắt giữa chừng, GPT vẫn có ngữ cảnh); người dùng đang để Tiết kiệm (Luna),
+   Chuẩn nhất (Sol) dịch sát nghĩa hơn nhưng thêm ~2 USD/giờ.
 
 1. Đang chờ người dùng chọn giọng (Google / Edge / chưa thêm); giọng Google đã có sẵn trong 1.10.x. Nếu chọn Edge:
    chưa làm, cần nói rõ rủi ro (không chính thức) trước.
@@ -240,7 +260,9 @@
   NaturalLanguage nên chỉ chạy được trên CI.
 - Sau khi build xong gửi link IPA. Người dùng cài bằng AltStore (Apple ID miễn phí), dùng Windows,
   không có Mac; iPhone Pro Max, iOS 26, chat chủ yếu Zalo và WeChat.
-- Muốn biết bàn phím có khựng thì đọc nhật ký gõ người dùng gửi, đừng đoán.
+- Muốn biết bàn phím có khựng thì đọc nhật ký gõ người dùng gửi, đừng đoán. Hội thoại cũng vậy: đọc nhật ký tốc độ.
+- Hội thoại: người dùng dùng Soniox và Dịch liền (OpenAI), mức Dịch lời đối phương = Tiết kiệm (Luna), họp 3–5
+  người. Chữ dịch là chính (đủ, đúng nghĩa, không trễ); giọng đọc là tính năng phụ.
 - Dùng ít trợ lý nền; nhiều trợ lý song song làm hết hạn mức rất nhanh.
 - Chỉ một phiên làm việc trên nhánh này một lúc; trước khi push luôn `git fetch` và gộp.
 
