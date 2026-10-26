@@ -493,6 +493,24 @@ do {
     short.splits = true
     _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")], now: 1)
     check(short.current.text == "好OK的", "a word of English in a short phrase stays in it")
+    // A sentence cut where another person began has no full stop in its translation: the pieces
+    // after a moment are the next sentence's, even while they keep coming.
+    var cutShort = SonioxTranscript(target: "vi")
+    cutShort.splits = true
+    _ = cutShort.take([spoken("我们这个价格", "1")], now: 1)
+    _ = cutShort.take([spoken("好的", "2")], now: 1.2)
+    _ = cutShort.take([token("Giá", translation: true)], now: 1.5)
+    _ = cutShort.take([token(" của", translation: true)], now: 2.5)
+    check(cutShort.previews.first?.translation == "Giá của", "its translation goes to it at first")
+    _ = cutShort.take([token(" Được", translation: true)], now: 3.4)
+    check(cutShort.previews.isEmpty && cutShort.current.translation == " Được",
+          "two seconds on, the next sentence's: \(cutShort.previews) / \(cutShort.current.translation)")
+    // Talking on without a full stop: cut at a comma once very long.
+    var monologue = SonioxTranscript(target: "vi")
+    monologue.splits = true
+    let clause = monologue.take([spoken(String(repeating: "我们", count: 20) + "，", "1"), spoken("然后", "1")], now: 1)
+    check(clause.count == 1 && clause[0].text.hasSuffix("，") && monologue.current.text == "然后", "a very long speech is cut at a comma")
+    check(monologue.take([spoken("我们，", "1")], now: 2).isEmpty, "a short one is not")
     var mixed = SonioxTranscript(target: "zh")
     mixed.splits = true
     let quote = mixed.take([spoken("Anh gửi giúp em cái", "", language: "vi"), spoken(" quotation", "", language: "en"),

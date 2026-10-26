@@ -162,6 +162,7 @@ struct ConversationView: View {
                     + Text(model.engine == .accurate ? " Lúc điện thoại đang đọc, Chính xác tạm không nghe." : "")
             } else {
                 Text("**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.")
+                    + Text(model.engine == .soniox ? " Micro nghe người ngồi xa rõ hơn ở chế độ này." : "")
             }
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
             if model.engine == .soniox {
@@ -188,7 +189,9 @@ struct ConversationView: View {
             if GoogleVoice.name(of: model.voice) != nil, SharedStore.googleKey == nil {
                 NoteBox(text: "Chưa có key Google nên đang đọc bằng giọng iPhone. Dán key trong Cài đặt › Giọng Google.")
             }
-            Text("Chi phí \(model.engine != .soniox ? "OpenAI" : SharedStore.apiKey == nil ? "Soniox" : "Soniox và OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
+            Text(model.engine == .soniox
+                 ? "Chi phí \(SharedStore.apiKey == nil ? "Soniox" : "Soniox và OpenAI") với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ họp."
+                 : "Chi phí OpenAI với lựa chọn hiện tại: \(CostMeter.text(hourlyCost)) mỗi giờ có người nói. Khoảng lặng không tính tiền.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

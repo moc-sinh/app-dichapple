@@ -239,7 +239,12 @@ final class ConversationModel {
     // MARK: Settings, kept between launches (this app's own defaults: the keyboard never needs them)
 
     /// Đọc to: the others' words are read aloud in Vietnamese too. Chỉ chữ: only shown.
-    var readAloud: Bool { didSet { defaults.set(readAloud, forKey: Keys.readAloud) } }
+    var readAloud: Bool {
+        didSet {
+            defaults.set(readAloud, forKey: Keys.readAloud)
+            if running, readAloud != oldValue { cancelEchoIfNeeded() }
+        }
+    }
     var engine: Engine { didSet { defaults.set(engine.rawValue, forKey: Keys.engine) } }
     /// `Language.autoCode`: the language the others spoke last.
     var partnerCode: String { didSet { defaults.set(partnerCode, forKey: Keys.partner) } }
@@ -319,10 +324,8 @@ final class ConversationModel {
     @ObservationIgnored private var sonioxToPartner: SonioxSession?
     /// What each Soniox session has heard (true: the others'), cut into sentences.
     @ObservationIgnored private var transcripts: [Bool: SonioxTranscript] = [:]
-    /// Dịch liền and Soniox: the others' sound is sent while someone speaks, not while the room is quiet.
+    /// Dịch liền: the others' sound is sent while someone speaks, not while the room is quiet.
     @ObservationIgnored private var othersGate = LiveGate()
-    /// The others' sound was going out a moment ago.
-    @ObservationIgnored private var othersSending = false
     /// Seconds sent to Dịch liền and not yet in the meeting's cost (added a sentence at a time,
     /// not ten times a second).
     @ObservationIgnored private var unbilledLive = 0.0
@@ -409,9 +412,7 @@ final class ConversationModel {
         self.listener = listener
         audio.onSamples = Listener.sink(listener)
         do {
-            // Dịch liền and Soniox speak while they listen: Apple's echo cancelling keeps the phone's
-            // voice out. Chính xác does not listen while the phone speaks, and hears far voices better without it.
-            try audio.start(echoCancelling: engine.streams)
+            try audio.start(echoCancelling: echoCancelling)
         } catch {
             problem = error.localizedDescription
             self.listener = nil
@@ -1016,23 +1017,50 @@ final class ConversationModel {
         transcripts = [:]
     }
 
+    /// Apple's echo cancelling, which keeps the phone's voice out of what the microphone hears, but
+    /// also favours a voice close to the phone: far voices in a meeting room come through weaker, and
+    /// are missed or misheard. Only when the phone speaks while it listens: Dịch liền (it speaks the
+    /// user's words as they talk), and Soniox reading the others' words aloud. Soniox in Chỉ chữ
+    /// speaks only the user's words, while the room's sound is held back; Chính xác does not
+    /// listen while the phone speaks.
+    private var echoCancelling: Bool { engine == .live || (engine == .soniox && readAloud) }
+
+    /// Đọc to or Chỉ chữ chosen while listening: the microphone is opened again with or without it.
+    private func cancelEchoIfNeeded() {
+        do {
+            try audio.setEchoCancelling(echoCancelling)
+            log(nil, echoCancelling ? "Bật khử tiếng vọng (đọc to)" : "Tắt khử tiếng vọng: micro nghe xa hơn")
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
     /// The microphone's sound goes to the session for whoever speaks: the user's while the button is
     /// down, everyone else's otherwise. The other session gets silence for a moment, so it finishes
-    /// what it was saying. A quiet room is not sent at all (live sessions are paid by the minute sent).
+    /// what it was saying. Dịch liền is not sent a quiet room (it is paid by the minute sent, 2 USD an
+    /// hour); Soniox is sent all of it (0.18 USD an hour): a quiet or far voice the level meter took
+    /// for the room, or the first syllable after a pause, is never lost, and Soniox hears for itself
+    /// where a sentence ends.
     private func stream(_ data: Data, speech: Bool) {
         guard running, engine.streams else { return }
         let silent = Data(count: data.count)
         if talking {
             sendMine(data)
-            for chunk in othersGate.feed(silent, speech: false) { sendOthers(chunk) }
+            if engine == .soniox {
+                sendOthers(silent)
+            } else {
+                for chunk in othersGate.feed(silent, speech: false) { sendOthers(chunk) }
+            }
         } else {
-            // The phone speaking the partners' language is not someone in the room to translate.
-            let phoneSpeaksMine = playingMine > 0
-            let chunks = othersGate.feed(phoneSpeaksMine ? silent : data, speech: speech && !phoneSpeaksMine)
-            for chunk in chunks { sendOthers(chunk) }
-            // The room went quiet: Soniox settles what it still guesses now, not when someone next speaks.
-            if engine == .soniox, othersSending, chunks.isEmpty { sonioxToVietnamese?.finalize() }
-            othersSending = !chunks.isEmpty
+            // The phone speaking the partners' language is not someone in the room to translate; nor
+            // is its Vietnamese (Đọc lại) when no echo cancelling takes it out.
+            let phoneSpeaks = playingMine > 0 || (playingAloud > 0 && !echoCancelling)
+            if engine == .soniox {
+                sendOthers(phoneSpeaks ? silent : data)
+            } else {
+                let chunks = othersGate.feed(phoneSpeaks ? silent : data, speech: speech && !phoneSpeaks)
+                for chunk in chunks { sendOthers(chunk) }
+            }
             if Date() < partnerTailUntil { sendMine(silent) }
         }
     }
@@ -1255,7 +1283,6 @@ final class ConversationModel {
     private func openSoniox() {
         liveRetries = 0
         othersGate.reset()
-        othersSending = false
         transcripts = [:]
         sonioxEntries = [:]
         sonioxToVietnamese = makeSoniox(target: Language.vietnamese.code)

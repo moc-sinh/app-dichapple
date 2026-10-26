@@ -152,6 +152,8 @@ struct SonioxTranscript {
     private var awaitingGuess = ""
     /// When each awaiting sentence finished, or last had a piece of translation.
     private var awaitingSince: [Int: Double] = [:]
+    /// When each awaiting sentence finished.
+    private var awaitingFinished: [Int: Double] = [:]
     private var now: Double = 0
     private var nextNumber = 1
     /// Where the words settled last end in the sound sent (seconds), for how far Soniox lags.
@@ -219,6 +221,7 @@ struct SonioxTranscript {
     private mutating func release(_ number: Int) {
         awaiting.removeAll { $0.number == number }
         awaitingSince[number] = nil
+        awaitingFinished[number] = nil
     }
 
     /// Ends the sentence being said, with what is known of it (nil when nothing is).
@@ -236,6 +239,7 @@ struct SonioxTranscript {
         if splits, !sentence.text.isEmpty, sentence.language != target, !Self.endsSentence(sentence.translation) {
             awaiting.append(sentence)
             awaitingSince[sentence.number] = now
+            awaitingFinished[sentence.number] = now
             while awaiting.count > 2 { release(awaiting[0].number) }
         }
         return sentence
@@ -253,9 +257,13 @@ struct SonioxTranscript {
         return TranscriptFilter.syllableCount(said) >= 4
     }
 
-    /// A full stop ending a long speech: it is translated now, the rest goes on as a new sentence.
+    /// A full stop ending a long speech, or a comma in a very long one (someone talking on for ten
+    /// seconds and more without a full stop): it is translated now, the rest goes on as a new sentence.
     private func endsLongSpeech(_ token: SonioxToken) -> Bool {
-        Self.endsSentence(token.text) && TranscriptFilter.syllableCount(settled.text) >= 12
+        let syllables = TranscriptFilter.syllableCount(settled.text)
+        if Self.endsSentence(token.text) { return syllables >= 12 }
+        guard let last = token.text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return false }
+        return ",，、;；".contains(last) && syllables >= 40
     }
 
     static func endsSentence(_ text: String) -> Bool {
@@ -264,12 +272,17 @@ struct SonioxTranscript {
     }
 
     /// A piece of translation: to the oldest finished sentence still waiting for it, while it seems
-    /// to be its (no full stop yet, and a piece came for it lately), otherwise to the one being said.
+    /// to be its (no full stop yet, a piece came for it lately, and not long since it finished: Soniox
+    /// translates a sentence moments after its words), otherwise to the one being said. A sentence cut
+    /// where another speaker began has no full stop in its translation: without the time limit, it took
+    /// the next sentence's translation for as long as the room talked on.
     private mutating func addTranslation(_ token: SonioxToken, now: Double) {
         if splits {
             while let first = awaiting.first {
                 let quietFor = now - (awaitingSince[first.number] ?? now)
-                if Self.endsSentence(first.translation) || (now > 0 && quietFor > 1.5) {
+                let finishedFor = now - (awaitingFinished[first.number] ?? now)
+                let window = min(4, 1.5 + 0.08 * Double(TranscriptFilter.syllableCount(first.text)))
+                if Self.endsSentence(first.translation) || (now > 0 && (quietFor > 1.5 || finishedFor > window)) {
                     release(first.number)
                     continue
                 }

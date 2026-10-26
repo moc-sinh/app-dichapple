@@ -66,6 +66,17 @@ final class AudioIO: NSObject {
         running = true
     }
 
+    /// Echo cancelling switched while listening (Đọc to turned on or off): the engine stops for a
+    /// moment, and the microphone opens again with it or without it.
+    func setEchoCancelling(_ on: Bool) throws {
+        guard running, engine.inputNode.isVoiceProcessingEnabled != on else { return }
+        stopPlayback()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        try engine.inputNode.setVoiceProcessingEnabled(on)
+        try startEngine()
+    }
+
     func stop() {
         running = false
         stopPlayback()

@@ -201,8 +201,17 @@
   6. **Nhật ký tốc độ** (`SpeedLog`, menu ⋯ › Sao chép nhật ký tốc độ): mỗi câu ghi Soniox nhận chậm bao lâu (giây
      tiếng đã gửi trừ `end_ms` của chữ đã chốt), GPT mất bao lâu, đọc sau bao lâu/nhanh bao nhiêu/bỏ câu nào; không
      ghi lời nói. 400 dòng gần nhất, mất khi tắt app.
+  7. Người dùng nói rõ (26/10): **chữ là chính**, giọng đọc chỉ là một tính năng phụ; họp 4–5 người vẫn phải theo dõi
+     được bản dịch chữ đầy đủ, đúng nghĩa, không trễ. Thêm: Soniox nhận tiếng **liên tục** (không qua `LiveGate`), người
+     nói nhỏ/ngồi xa mà mức âm không vượt ngưỡng không còn bị bỏ, Soniox tự nhận chỗ hết câu (bỏ `finalize` khi phòng
+     im); chi phí Soniox thành theo giờ họp (~0,18 USD). **Khử tiếng vọng của Apple chỉ bật khi máy vừa nghe vừa nói**
+     (`echoCancelling`: Dịch liền, hoặc Soniox + Đọc to); Soniox + Chỉ chữ thì tắt để micro nghe xa hơn, và lúc máy đọc
+     (Tôi nói, Đọc lại) thì phòng được gửi im lặng; đổi Đọc to/Chỉ chữ khi đang nghe thì mở lại micro
+     (`AudioIO.setEchoCancelling`). Mảnh dịch Soniox chỉ đi vào câu đã xong trong 1,5–4 s sau khi câu xong (câu bị cắt
+     vì đổi người thường không có dấu chấm, trước đây giữ mảnh dịch của câu sau mãi). Nói liền không dấu chấm thì cắt ở
+     dấu phẩy khi đã 40 âm tiết.
   Menu "Dịch lời đối phương" bật cho mọi Cách dịch; ước tính chi phí cộng tiền GPT dịch lại. Test: `Tests/Conversation`
-  171 kiểm tra. Mô phỏng trên Linux (model thật, Soniox/Dịch liền/AudioIO giả, `scratchpad/sim2`): 3 người nói xen
+  175 kiểm tra. Mô phỏng trên Linux (model thật, Soniox/Dịch liền/AudioIO giả, `scratchpad/sim2`): 3 người nói xen
   kẽ, câu Việt, tiếng vọng, Tôi nói, GPT lỗi, GPT chậm, 8 câu dồn dập (đọc nhanh rồi bỏ câu cũ), Dịch liền cắt câu và
   gán mảnh dịch, tiếng tồn quá 6 s, câu của mình không qua GPT. **Chưa thử trên máy thật**: chờ người dùng gửi nhật
   ký tốc độ sau một cuộc họp thật.
