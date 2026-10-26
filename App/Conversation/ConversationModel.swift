@@ -359,6 +359,18 @@ final class ConversationModel {
     @ObservationIgnored private var theirsQueued = 0
     @ObservationIgnored private var lastDropNote = Date.distantPast
     @ObservationIgnored private var speedLog = SpeedLog()
+    /// Soniox sentences being said or translated: when they were said, and how soon their words and
+    /// their first translation showed, for the speed log.
+    @ObservationIgnored private var heardTimes: [UUID: HeardTime] = [:]
+
+    /// Seconds into a Soniox session's sound: where a sentence's words begin and end, and how much
+    /// had been sent when its words, then its first translation, showed.
+    private struct HeardTime {
+        var start: Double?
+        var end: Double?
+        var shown: Double?
+        var translated: Double?
+    }
 
     /// Sentences recognised and translated at once: a busy meeting does not fall behind.
     private static let parallel = 4
@@ -507,6 +519,7 @@ final class ConversationModel {
         meeting = Meeting()
         meeting.topic = topic.isEmpty ? nil : topic
         entries = []
+        heardTimes = [:]
         unrecognised = [:]
         detectedPartner = nil
         problem = nil
@@ -1429,7 +1442,7 @@ final class ConversationModel {
             liveRetries = 0
             if problem?.hasPrefix("Mất kết nối") == true { problem = nil }
             var transcript = transcripts[fromOthers] ?? newTranscript(target: session.target)
-            let finished = transcript.take(tokens, now: Self.now)
+            let finished = transcript.take(tokens)
             transcripts[fromOthers] = transcript
             // How far the words Soniox settled are behind the sound sent to it.
             let lag = transcript.settledEnd.map { (sonioxSent[fromOthers] ?? 0) - $0 }
@@ -1493,6 +1506,7 @@ final class ConversationModel {
                 if !speaker.isEmpty { $0.speaker = speaker }
             }
             captions[fromOthers] = (current.id, now)
+            noteHeard(current.id, sentence, fromOthers: fromOthers)
             return current.id
         }
         let entry = Entry(id: UUID(), at: now, mine: !fromOthers,
@@ -1504,7 +1518,22 @@ final class ConversationModel {
         // Someone started a sentence: by its end, GPT's connection is open.
         if sonioxUsesGPT { services.warmUp() }
         captions[fromOthers] = (entry.id, now)
+        noteHeard(entry.id, sentence, fromOthers: fromOthers)
         return entry.id
+    }
+
+    /// When a Soniox sentence was said, and how soon after its first word its words and its first
+    /// translation showed (in the session's sound: Soniox's lag and the app's together).
+    private func noteHeard(_ id: UUID, _ sentence: SonioxTranscript.Sentence, fromOthers: Bool) {
+        let sent = sonioxSent[fromOthers] ?? 0
+        var times = heardTimes[id] ?? HeardTime()
+        if times.start == nil, let start = sentence.startMs { times.start = Double(start) / 1000 }
+        if let end = sentence.endMs { times.end = Double(end) / 1000 }
+        if let start = times.start {
+            if times.shown == nil, !sentence.text.isEmpty { times.shown = sent - start }
+            if times.translated == nil, !sentence.translation.isEmpty { times.translated = sent - start }
+        }
+        heardTimes[id] = times
     }
 
     /// A sentence ended. With an OpenAI key it is translated again by GPT, with the meeting's
@@ -1516,16 +1545,19 @@ final class ConversationModel {
         // The phone's Vietnamese voice heard again through the microphone.
         if fromOthers, echo.isEcho(sentence.text, at: Self.now) {
             log(id, "Soniox: tiếng của máy nghe lại, bỏ")
+            heardTimes[id] = nil
             return remove(id)
         }
         var note = "Soniox"
         if fromOthers, !sentence.speaker.isEmpty { note += " · Người \(sentence.speaker)" }
         note += " · \(sentence.language.isEmpty ? "?" : sentence.language) · \(TranscriptFilter.syllableCount(sentence.text)) âm tiết"
         if let lag { note += " · nhận chậm \(SpeedLog.seconds(lag))" }
+        if let shown = heardTimes[id]?.shown { note += " · chữ hiện sau \(SpeedLog.seconds(shown))" }
         log(id, note)
         let language = sentence.text.isEmpty ? sentence.language : Self.language(of: sentence.text, heard: sentence.language)
         // A Vietnamese speaker in the room is shown as they said it.
         guard sonioxUsesGPT, !sentence.text.isEmpty, !fromOthers || language != Language.vietnamese.code else {
+            heardTimes[id] = nil
             if !language.isEmpty { update(id) { $0.language = language } }
             finishCaption(id)
             guard let entry = entries.first(where: { $0.id == id }), entry.state == .done, !entry.translation.isEmpty else { return }
@@ -1574,10 +1606,11 @@ final class ConversationModel {
                 $0.translation = translation
                 $0.state = .done
             }
-            log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))")
+            log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))" + heardNote(id, mine: entry.mine))
         } catch {
             update(id) { $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done }
             log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
+            heardTimes[id] = nil
         }
         guard let done = entries.first(where: { $0.id == id }), done.state == .done else { return }
         record(id)
@@ -1591,7 +1624,18 @@ final class ConversationModel {
                   let entry = entries.first(where: { $0.id == id }), entry.state == .translating,
                   entry.translation != preview.translation else { continue }
             update(id) { $0.translation = preview.translation }
+            noteHeard(id, preview, fromOthers: fromOthers)
         }
+    }
+
+    /// For the speed log, once GPT's translation of a Soniox sentence shows: how soon after its first
+    /// word a translation (Soniox's, or else GPT's) first showed, and GPT's after its last word.
+    private func heardNote(_ id: UUID, mine: Bool) -> String {
+        guard let times = heardTimes.removeValue(forKey: id), let start = times.start else { return "" }
+        let sent = sonioxSent[!mine] ?? 0
+        var note = " · bản dịch đầu tiên sau \(SpeedLog.seconds(times.translated ?? sent - start))"
+        if let end = times.end { note += " · bản GPT sau \(SpeedLog.seconds(sent - end)) từ lúc ngừng nói" }
+        return note
     }
 
     /// A sentence Soniox ended but whose translation never came, or one it stopped sending words

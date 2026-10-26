@@ -10,15 +10,16 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (180 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (183 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
-  lại khi chậm, chủ đề cuộc họp; xem mục 1.12.0). Link IPA 1.11.0 đã gửi người dùng (run 71, lần chạy thứ 2: lần đầu
+- **Bản mới nhất:** 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng nhìn
+  thấy; xem mục 1.12.1). 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
+  lại khi chậm, chủ đề cuộc họp; run 72, đã gửi link). Link IPA 1.11.0 đã gửi người dùng (run 71, lần chạy thứ 2: lần đầu
   GitHub không có máy macOS trong 15 phút nên huỷ, không phải lỗi mã). Trước đó 1.11.0 (họp nhiều người: tách câu theo
   người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ, chữ là chính; xem mục 1.11.0). Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
   xanh), 1.9.1 (sửa bàn phím tự tắt, run 65, cả keyboard-smoke xanh), 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
@@ -252,12 +253,31 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   người nói/bản dịch/chủ đề, câu của mình là "User", GPT treo thì lần hỏi thứ hai về kịp (tắt hỏi lại thì 4 kiểm tra
   trượt), mở sẵn kết nối, Soniox nhận chủ đề, biên bản ghi chủ đề. **Chưa thử trên máy thật.**
 
+- **1.12.1: bản dịch tạm của Soniox đúng câu (26/10, khuya).** Người dùng: "tối ưu phần dịch Soniox bằng chữ, quan trọng
+  nhất". Đọc SDK chính thức của Soniox (npm `@soniox/client` 2.4.0, PyPI `soniox` 2.10.0; GitHub ngoài repo này bị chặn
+  từ máy cloud): `render_tokens` của SDK in mỗi đoạn dịch dưới chữ gốc ngay trước nó; tài liệu "Speech-to-text
+  translation": bản dịch "generated after their spoken tokens and follow the same sequence". Tức là Soniox gửi chữ gốc
+  và bản dịch thành một dòng, chốt dần từ đầu. `SonioxTranscript` (chế độ `splits`) giờ gán theo thứ tự: mảnh dịch đã
+  chốt thuộc câu có chữ gốc chốt gần nhất (`owner`, có thể là câu vừa bị cắt ở dấu chấm, giữ trong `awaiting`); mảnh
+  đoán thuộc câu có chữ đoán đứng trước nó trong cùng tin, không có thì như mảnh đã chốt; chữ gốc của câu sau vừa chốt
+  là câu trước đã đủ bản dịch (`released`, vẫn hiện mảnh cuối trong `previews`). Bỏ cách gán theo thời gian của 1.11.0
+  (`take(now:)`, cửa sổ 1,5–4 s): khi một người bị người khác chen ngang, mảnh dịch đầu tiên của người sau bị gán vào câu
+  người trước vài giây, câu người sau không có tiếng Việt và bản dịch tạm thiếu đầu (chạy mô phỏng mới trên mã cũ:
+  "Thời hạn giao hàngKhông vấn đề." dính vào câu người 1, câu người 2 trống). Không có key OpenAI (`splits` tắt): như cũ.
+  **Nhật ký tốc độ** đo đúng độ trễ người dùng thấy, theo giây âm thanh của phiên Soniox (`start_ms`/`end_ms` của token so
+  với số giây đã gửi, `HeardTime`): dòng Soniox thêm `chữ hiện sau X s` (từ chữ đầu tiên của câu), dòng GPT thêm
+  `bản dịch đầu tiên sau X s` (Soniox, hoặc GPT nếu Soniox chưa có) và `bản GPT sau X s từ lúc ngừng nói`. Chưa đổi:
+  nút `endpoint_latency_adjustment_level`/`endpoint_sensitivity` của v5 (Soniox cảnh báo câu vụn hơn, tách người nói kém
+  hơn); chữ đoán của người mới nói vẫn hiện tạm ở cuối thẻ người trước cho tới khi Soniox chốt chữ đầu của họ.
+  Test: `Tests/Conversation` 183 kiểm tra; mô phỏng gửi bản dịch đúng thứ tự Soniox, thêm cảnh người 2 chen người 1.
+
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.12.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+0. Gửi link IPA 1.12.1. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
-   đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s` (Soniox chậm),
-   `GPT Luna X s` (dịch lại chậm), `đọc sau X s` / `bỏ đọc` (giọng). **Ưu tiên của người dùng: chữ dịch đầy đủ,
+   đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`
+   (Soniox chậm), `GPT Luna X s · bản dịch đầu tiên sau X s · bản GPT sau X s từ lúc ngừng nói` (đây là độ trễ người
+   dùng thấy), `GPT chưa xong sau 2,5 s: hỏi thêm lần nữa`, `đọc sau X s` / `bỏ đọc` (giọng). **Ưu tiên của người dùng: chữ dịch đầy đủ,
    đúng nghĩa, không trễ; giọng đọc là tính năng phụ.** Hướng còn lại nếu nhật ký cho thấy cần: Dịch liền vẫn qua
    `LiveGate` (chỉ gửi khi có người nói, vì 2 USD/giờ) nên người nói nhỏ có thể bị sót; Soniox phân biệt người nói
    theo thời gian thực đôi khi nhầm (câu bị cắt giữa chừng, GPT vẫn có ngữ cảnh); người dùng đang để Tiết kiệm (Luna),

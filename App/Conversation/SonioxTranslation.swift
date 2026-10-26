@@ -15,7 +15,8 @@ struct SonioxToken: Equatable {
     var language: String
     /// Who said it (Soniox's speaker number, "1", "2"…), empty when not told.
     var speaker = ""
-    /// Where it ends in the sound sent, in milliseconds (words said, not their translation).
+    /// Where it begins and ends in the sound sent, in milliseconds (words said, not their translation).
+    var startMs: Int?
     var endMs: Int?
 
     /// `<end>`: the speaker finished a sentence. `<fin>`: what was asked to be settled now is.
@@ -50,7 +51,7 @@ enum SonioxEvent: Equatable {
             return SonioxToken(text: text, isFinal: token["is_final"] as? Bool ?? false,
                                isTranslation: token["translation_status"] as? String == "translation",
                                language: token["language"] as? String ?? "", speaker: speaker,
-                               endMs: token["end_ms"] as? Int)
+                               startMs: token["start_ms"] as? Int, endMs: token["end_ms"] as? Int)
         }
         if !tokens.isEmpty { events.append(.tokens(tokens)) }
         if object["finished"] as? Bool == true { events.append(.finished) }
@@ -122,9 +123,15 @@ enum SonioxEvent: Equatable {
 /// With `splits` (the app makes each sentence's translation itself, with GPT), a sentence also ends
 /// where another person starts speaking, where the language changes, and after a long speech's full
 /// stop, without waiting for Soniox's end of sentence: in a room where people talk on without
-/// pausing, Soniox's sentences ran into one another, several speakers and languages in one. Soniox's
-/// own translation comes in pieces and does not say which sentence a piece belongs to: pieces still
-/// coming for a sentence already finished go to it (`awaiting`), as a preview of its translation.
+/// pausing, Soniox's sentences ran into one another, several speakers and languages in one.
+///
+/// Soniox sends what was said and its translation as one stream, each piece of translation right
+/// after the words it translates (its docs; its own SDK prints a piece under the words before it), and
+/// settles the stream from its start. So a piece of translation belongs to the sentence of the words
+/// just before it in the stream: a sentence cut at its full stop still gets the translation of its
+/// last words (`awaiting`, shown as a preview), and the next sentence's words settling mean that
+/// translation is all in. It used to go by time, and the first piece of a speaker who had just
+/// begun went to the sentence of the one before for a few seconds.
 struct SonioxTranscript {
     struct Sentence: Equatable {
         var text = ""
@@ -135,6 +142,9 @@ struct SonioxTranscript {
         var speaker = ""
         /// Counts the session's sentences, so a finished one can be found again.
         var number = 0
+        /// Where its words begin and end in the session's sound (milliseconds), when told.
+        var startMs: Int?
+        var endMs: Int?
 
         var isEmpty: Bool { text.isEmpty && translation.isEmpty }
 
@@ -151,14 +161,15 @@ struct SonioxTranscript {
     private var guess = Sentence()
     /// The speaker finished the sentence; its translation may still be on its way.
     private(set) var ended = false
-    /// `splits`: finished sentences whose translation from Soniox may still be coming, oldest first.
-    private(set) var awaiting: [Sentence] = []
+    /// `splits`: finished sentences whose translation may still be coming (the one whose words
+    /// settled last), and those whose translation came in full with the last message.
+    private var awaiting: [Sentence] = []
+    private var released: [Sentence] = []
+    /// Soniox's guess at the translation of a finished sentence, and which one.
     private var awaitingGuess = ""
-    /// When each awaiting sentence finished, or last had a piece of translation.
-    private var awaitingSince: [Int: Double] = [:]
-    /// When each awaiting sentence finished.
-    private var awaitingFinished: [Int: Double] = [:]
-    private var now: Double = 0
+    private var awaitingGuessNumber = 0
+    /// The sentence of the words settled last (0: none yet): the next settled piece of translation is its.
+    private var owner = 0
     private var nextNumber = 1
     /// Where the words settled last end in the sound sent (seconds), for how far Soniox lags.
     private(set) var settledEnd: Double?
@@ -172,23 +183,26 @@ struct SonioxTranscript {
     var current: Sentence {
         Sentence(text: settled.text + guess.text, translation: settled.translation + guess.translation,
                  language: settled.language.isEmpty ? guess.language : settled.language,
-                 speaker: settled.speaker.isEmpty ? guess.speaker : settled.speaker, number: settled.number)
+                 speaker: settled.speaker.isEmpty ? guess.speaker : settled.speaker, number: settled.number,
+                 startMs: settled.startMs ?? guess.startMs, endMs: guess.endMs ?? settled.endMs)
     }
 
-    /// One message's tokens (`now`: seconds, any clock); returns the sentences it finished.
-    mutating func take(_ tokens: [SonioxToken], now: Double = 0) -> [Sentence] {
+    /// One message's tokens; returns the sentences it finished.
+    mutating func take(_ tokens: [SonioxToken]) -> [Sentence] {
         var finished: [Sentence] = []
-        self.now = now
         // The guesses come again whole in every message.
         guess = Sentence()
         awaitingGuess = ""
+        released = []
+        /// A guessed word came in this message: guessed translation after it is of the words being said.
+        var guessing = false
         for token in tokens {
             if token.endsSentence {
                 ended = true
                 continue
             }
             if token.isTranslation {
-                addTranslation(token, now: now)
+                addTranslation(token, guessing: guessing)
                 continue
             }
             // Words said after the end begin the next sentence.
@@ -197,9 +211,14 @@ struct SonioxTranscript {
                 if splits, startsAnother(token), let sentence = finish() { finished.append(sentence) }
                 Self.add(token, to: &settled)
                 if let end = token.endMs { settledEnd = Double(end) / 1000 }
+                // Settled words of this sentence: what came before them, translations too, is settled.
+                owner = settled.number
+                released += awaiting
+                awaiting = []
                 if splits, endsLongSpeech(token), let sentence = finish() { finished.append(sentence) }
             } else {
                 Self.add(token, to: &guess)
+                guessing = true
             }
         }
         // An ended sentence is done once nothing of it is guessed and, without `splits`, its
@@ -211,21 +230,15 @@ struct SonioxTranscript {
         return finished
     }
 
-    /// The finished sentences still waiting for Soniox's translation, with what has come of it.
+    /// The finished sentences still getting Soniox's translation, and those whose last piece came
+    /// with the last message, with what has come of it.
     var previews: [Sentence] {
-        awaiting.enumerated().map { index, sentence in
+        (released + awaiting).map { sentence in
             var preview = sentence
-            if index == 0 { preview.translation += awaitingGuess }
+            if sentence.number == awaitingGuessNumber { preview.translation += awaitingGuess }
             preview.translation = preview.translation.trimmingCharacters(in: .whitespacesAndNewlines)
             return preview
         }
-    }
-
-    /// No more of this sentence's translation is expected: the next pieces are another's.
-    private mutating func release(_ number: Int) {
-        awaiting.removeAll { $0.number == number }
-        awaitingSince[number] = nil
-        awaitingFinished[number] = nil
     }
 
     /// Ends the sentence being said, with what is known of it (nil when nothing is).
@@ -239,12 +252,10 @@ struct SonioxTranscript {
         sentence.text = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
         sentence.translation = sentence.translation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sentence.isEmpty else { return nil }
-        // Its translation may still be coming (unless it is in, or none is needed).
-        if splits, !sentence.text.isEmpty, sentence.language != target, !Self.endsSentence(sentence.translation) {
+        // The translation of its last words may still come (unless none is needed).
+        if splits, owner == sentence.number, !sentence.text.isEmpty, sentence.language != target {
             awaiting.append(sentence)
-            awaitingSince[sentence.number] = now
-            awaitingFinished[sentence.number] = now
-            while awaiting.count > 2 { release(awaiting[0].number) }
+            while awaiting.count > 2 { awaiting.removeFirst() }
         }
         return sentence
     }
@@ -275,29 +286,21 @@ struct SonioxTranscript {
         return ".?!。？！…".contains(last)
     }
 
-    /// A piece of translation: to the oldest finished sentence still waiting for it, while it seems
-    /// to be its (no full stop yet, a piece came for it lately, and not long since it finished: Soniox
-    /// translates a sentence moments after its words), otherwise to the one being said. A sentence cut
-    /// where another speaker began has no full stop in its translation: without the time limit, it took
-    /// the next sentence's translation for as long as the room talked on.
-    private mutating func addTranslation(_ token: SonioxToken, now: Double) {
-        if splits {
-            while let first = awaiting.first {
-                let quietFor = now - (awaitingSince[first.number] ?? now)
-                let finishedFor = now - (awaitingFinished[first.number] ?? now)
-                let window = min(4, 1.5 + 0.08 * Double(TranscriptFilter.syllableCount(first.text)))
-                if Self.endsSentence(first.translation) || (now > 0 && (quietFor > 1.5 || finishedFor > window)) {
-                    release(first.number)
-                    continue
-                }
-                if token.isFinal {
-                    awaiting[0].translation += token.text
-                } else {
-                    awaitingGuess += token.text
-                }
-                awaitingSince[first.number] = now
-                return
+    /// A piece of translation: of the words just before it. A settled piece follows the words settled
+    /// last (`owner`), which may be a sentence already cut; a guessed one, the words guessed before it
+    /// in this message, or else the settled ones. Without `splits`, the sentence being said.
+    private mutating func addTranslation(_ token: SonioxToken, guessing: Bool) {
+        let number = !splits || guessing || owner == 0 ? settled.number : owner
+        if number != settled.number {
+            // A cut sentence's: the one waiting for it (one let go of is gone, and the piece with it).
+            guard let index = awaiting.firstIndex(where: { $0.number == number }) else { return }
+            if token.isFinal {
+                awaiting[index].translation += token.text
+            } else {
+                awaitingGuess += token.text
+                awaitingGuessNumber = number
             }
+            return
         }
         if token.isFinal { Self.add(token, to: &settled) } else { Self.add(token, to: &guess) }
     }
@@ -309,6 +312,8 @@ struct SonioxTranscript {
             sentence.text += token.text
             if sentence.language.isEmpty { sentence.language = token.language }
             if sentence.speaker.isEmpty { sentence.speaker = token.speaker }
+            if sentence.startMs == nil { sentence.startMs = token.startMs }
+            if let end = token.endMs { sentence.endMs = end }
         }
     }
 }

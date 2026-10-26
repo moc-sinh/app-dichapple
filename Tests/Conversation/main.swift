@@ -494,58 +494,74 @@ do {
     check(((toldObject["context"] as? [String: Any])?["general"] as? [[String: String]])
           == [["key": "setting", "value": "Business meeting"], ["key": "topic", "value": "báo giá máy CNC"]],
           "what the meeting is about goes to Soniox's general context: \(told)")
+    // Soniox sends each piece of translation right after the words it translates, and settles the
+    // stream from its start: a piece belongs to the sentence of the words just before it.
     var room = SonioxTranscript(target: "vi")
     room.splits = true
-    check(room.take([spoken("这个价格", "1"), spoken("可以吗？", "1")], now: 1).isEmpty, "a short question goes on until its end")
-    let first = room.take([spoken("Được anh", "2", language: "vi")], now: 2)
-    check(first == [SonioxTranscript.Sentence(text: "这个价格可以吗？", language: "zh", speaker: "1")]
-          && room.current.text == "Được anh" && room.current.speaker == "2", "another speaker: the first sentence ends \(first)")
-    _ = room.take([token("Giá này", translation: true), token(" được không?", final: false, translation: true)], now: 2.3)
-    check(room.previews.first?.translation == "Giá này được không?" && room.current.translation.isEmpty,
-          "its translation goes to it, not to the next speaker's sentence: \(room.previews)")
-    _ = room.take([token(" được không?", translation: true)], now: 2.4)
-    let third = room.take([spoken("那我们", "3"), spoken("下周一", "3")], now: 3)
-    check(third == [SonioxTranscript.Sentence(text: "Được anh", language: "vi", speaker: "2")], "a third speaker")
-    _ = room.take([token("Vậy chúng ta", translation: true)], now: 3.2)
-    check(room.previews.isEmpty && room.current.translation == "Vậy chúng ta",
-          "once a sentence's translation has its full stop, the next pieces are the current one's")
-    let long = room.take([spoken("我们这个月的订单比较多所以交货时间可能要晚一点。", "3"), spoken("另外", "3", final: false)], now: 4)
-    check(long.count == 1 && long[0].text.hasPrefix("那我们下周一我们这个月") && room.current.text == "另外",
-          "a long speech is translated at its full stop: \(long)")
-    let english = room.take([spoken("我觉得没问题。", "3"), spoken("Sounds", "3", language: "en"), spoken(" good", "3", language: "en")], now: 5)
-    check(english.count == 1 && english[0].text == "我觉得没问题。" && room.current.text == "Sounds good" && room.current.language == "en",
+    check(room.take([spoken("这个价格", "1"), spoken("可以吗？", "1")]).isEmpty, "a short question goes on until its end")
+    _ = room.take([token("Giá này", translation: true), token(" được không?", final: false, translation: true)])
+    check(room.current.translation == "Giá này được không?", "Soniox's translation shows on the sentence being said, as it comes")
+    let first = room.take([token(" được không?", translation: true), spoken("Được anh", "2", language: "vi")])
+    check(first == [SonioxTranscript.Sentence(text: "这个价格可以吗？", translation: "Giá này được không?", language: "zh", speaker: "1")]
+          && room.current.text == "Được anh" && room.current.speaker == "2" && room.current.translation.isEmpty,
+          "another speaker: the first sentence ends, with its translation (it came before the next words): \(first)")
+    let long = room.take([spoken("那我们下周一确认订单", "3"), spoken("因为这个月比较忙。", "3")])
+    check(long == [SonioxTranscript.Sentence(text: "Được anh", language: "vi", speaker: "2"),
+                   SonioxTranscript.Sentence(text: "那我们下周一确认订单因为这个月比较忙。", language: "zh", speaker: "3")],
+          "a third speaker, whose long speech is cut at its full stop: \(long)")
+    _ = room.take([token("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng", translation: true)])
+    check(room.previews.map(\.translation) == ["Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng"] && room.current.translation.isEmpty,
+          "the translation after a cut at a full stop is the cut sentence's: \(room.previews)")
+    _ = room.take([token(" vì tháng này", final: false, translation: true), spoken("另外", "3", final: false),
+                   token("Ngoài ra", final: false, translation: true)])
+    check(room.previews.first?.translation == "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng vì tháng này"
+          && room.current.translation == "Ngoài ra",
+          "guessed pieces: before the next guessed words, the cut sentence's; after them, the one being said")
+    _ = room.take([token(" vì tháng này khá bận.", translation: true), spoken("另外", "3")])
+    check(room.previews.map(\.translation) == ["Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng vì tháng này khá bận."]
+          && room.current.text == "另外",
+          "its last piece still shows with the next words settling: \(room.previews)")
+    _ = room.take([token("Ngoài ra", translation: true)])
+    check(room.previews.isEmpty && room.current.translation == "Ngoài ra", "after them, every piece is the new sentence's")
+    let english = room.take([spoken("我觉得没问题。", "3"), spoken("Sounds", "3", language: "en"), spoken(" good", "3", language: "en")])
+    check(english.count == 1 && english[0].text == "另外我觉得没问题。" && room.current.text == "Sounds good" && room.current.language == "en",
           "another language after a sentence: \(english)")
-    let ok = room.take([spoken("<end>", "")], now: 6)
+    let ok = room.take([spoken("<end>", "")])
     check(ok == [SonioxTranscript.Sentence(text: "Sounds good", language: "en", speaker: "3")],
           "the end of a sentence finishes it without waiting for Soniox's translation")
-    _ = room.take([token("Tôi thấy", translation: true)], now: 9)
-    check(room.previews.isEmpty, "pieces long after are not given to an old sentence")
+    _ = room.take([token("Nghe được đấy.", translation: true)])
+    check(room.previews.first?.translation == "Nghe được đấy.", "its translation, after the end, is its own")
     var short = SonioxTranscript(target: "vi")
     short.splits = true
-    _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")], now: 1)
+    _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")])
     check(short.current.text == "好OK的", "a word of English in a short phrase stays in it")
-    // A sentence cut where another person began has no full stop in its translation: the pieces
-    // after a moment are the next sentence's, even while they keep coming.
+    // A speaker cut by another: the next speaker's first piece of translation is theirs at once. It
+    // used to go to the sentence before for a few seconds, and the new one showed no Vietnamese.
     var cutShort = SonioxTranscript(target: "vi")
     cutShort.splits = true
-    _ = cutShort.take([spoken("我们这个价格", "1")], now: 1)
-    _ = cutShort.take([spoken("好的", "2")], now: 1.2)
-    _ = cutShort.take([token("Giá", translation: true)], now: 1.5)
-    _ = cutShort.take([token(" của", translation: true)], now: 2.5)
-    check(cutShort.previews.first?.translation == "Giá của", "its translation goes to it at first")
-    _ = cutShort.take([token(" Được", translation: true)], now: 3.4)
-    check(cutShort.previews.isEmpty && cutShort.current.translation == " Được",
-          "two seconds on, the next sentence's: \(cutShort.previews) / \(cutShort.current.translation)")
+    _ = cutShort.take([spoken("我们这个价格", "1")])
+    _ = cutShort.take([token("Giá này của chúng tôi", translation: true)])
+    let cut = cutShort.take([spoken("好的", "2")])
+    _ = cutShort.take([token("Được", translation: true)])
+    check(cut.first?.translation == "Giá này của chúng tôi" && cutShort.current.translation == "Được"
+          && cutShort.previews.isEmpty, "the next speaker's translation is theirs: \(cutShort.previews) / \(cutShort.current)")
+    check(SonioxEvent.parse(#"{"tokens":[{"text":"好","is_final":true,"start_ms":1700,"end_ms":1840}]}"#)
+          == [.tokens([SonioxToken(text: "好", isFinal: true, isTranslation: false, language: "", startMs: 1700, endMs: 1840)])],
+          "where a word begins is read")
+    var timed = SonioxTranscript(target: "vi")
+    _ = timed.take([SonioxToken(text: "好", isFinal: true, isTranslation: false, language: "zh", startMs: 1700, endMs: 1840),
+                    SonioxToken(text: "的", isFinal: false, isTranslation: false, language: "zh", startMs: 1900, endMs: 2100)])
+    check(timed.current.startMs == 1700 && timed.current.endMs == 2100, "a sentence says where its words begin and end")
     // Talking on without a full stop: cut at a comma once very long.
     var monologue = SonioxTranscript(target: "vi")
     monologue.splits = true
-    let clause = monologue.take([spoken(String(repeating: "我们", count: 20) + "，", "1"), spoken("然后", "1")], now: 1)
+    let clause = monologue.take([spoken(String(repeating: "我们", count: 20) + "，", "1"), spoken("然后", "1")])
     check(clause.count == 1 && clause[0].text.hasSuffix("，") && monologue.current.text == "然后", "a very long speech is cut at a comma")
-    check(monologue.take([spoken("我们，", "1")], now: 2).isEmpty, "a short one is not")
+    check(monologue.take([spoken("我们，", "1")]).isEmpty, "a short one is not")
     var mixed = SonioxTranscript(target: "zh")
     mixed.splits = true
     let quote = mixed.take([spoken("Anh gửi giúp em cái", "", language: "vi"), spoken(" quotation", "", language: "en"),
-                            spoken(" nhé", "", language: "vi")], now: 1)
+                            spoken(" nhé", "", language: "vi")])
     check(quote.isEmpty && mixed.current.text == "Anh gửi giúp em cái quotation nhé",
           "an English word inside a Vietnamese sentence stays in it: \(quote)")
 

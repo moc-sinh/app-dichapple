@@ -12,8 +12,8 @@ func speech(_ seconds: Double) -> [Int16] {
     }
 }
 
-func w(_ text: String, _ speaker: String, _ language: String = "zh", final: Bool = true, end: Int? = nil) -> SonioxToken {
-    SonioxToken(text: text, isFinal: final, isTranslation: false, language: language, speaker: speaker, endMs: end)
+func w(_ text: String, _ speaker: String, _ language: String = "zh", final: Bool = true, start: Int? = nil, end: Int? = nil) -> SonioxToken {
+    SonioxToken(text: text, isFinal: final, isTranslation: false, language: language, speaker: speaker, startMs: start, endMs: end)
 }
 
 func t(_ text: String, final: Bool = true) -> SonioxToken {
@@ -102,24 +102,26 @@ struct Simulation {
         // Three people talk on without pausing.
         await feed(speech(2))
         check(others.sent > 1.5, "the room's sound goes to Soniox (\(others.sent) s)")
-        others.say([w("这个价格", "1", end: 1500), w("可以吗？", "1", end: 1900)])
+        // Soniox sends each piece of translation right after the words it translates.
+        others.say([w("这个价格", "1", start: 1000, end: 1500), w("可以吗？", "1", start: 1600, end: 1900)])
         check(model.entries.count == 1 && model.entries[0].speaker == "1" && model.entries[0].state == .hearing,
               "the first speaker's words show as they come")
         check(calls.warmUps >= 2, "someone starts speaking: OpenAI's connection is made ready for the end of the sentence")
-        others.say([w("Được anh", "2", "vi", end: 2400)])
-        check(model.entries.count == 2 && model.entries[0].state == .translating && model.entries[0].text == "这个价格可以吗？",
-              "another speaker starts: the first sentence goes to GPT")
         others.say([t("Giá này"), t(" được không?", final: false)])
-        check(model.entries[0].translation == "Giá này được không?" && model.entries[1].translation.isEmpty,
-              "Soniox's translation shows on its own sentence meanwhile, not on the next: \(model.entries.map(\.translation))")
+        check(model.entries[0].translation == "Giá này được không?" && model.entries[0].state == .hearing,
+              "Soniox's translation shows on the sentence as it is said")
+        others.say([t(" được không?"), w("Được anh", "2", "vi", start: 2100, end: 2400)])
+        check(model.entries.count == 2 && model.entries[0].state == .translating && model.entries[0].text == "这个价格可以吗？"
+              && model.entries[0].translation == "Giá này được không?" && model.entries[1].translation.isEmpty,
+              "another speaker starts: the first sentence goes to GPT, Soniox's translation shown meanwhile: \(model.entries.map(\.translation))")
         await sleep(0.5)
         check(model.entries[0].state == .done && model.entries[0].translation == "[vi] 这个价格可以吗？",
               "GPT's translation replaces it: \(model.entries[0].translation)")
         check(calls.translated.first?.model == .luna, "the others' words with the economy model")
-        others.say([t(" được không?"), w("那我们下周一", "3", end: 3200), w("确认订单。", "3", end: 3800), w("<end>", "")])
+        others.say([w("那我们下周一", "3", start: 2800, end: 3200), w("确认订单。", "3", end: 3800), w("<end>", "")])
         check(model.entries.count == 3, "a third speaker: \(model.entries.map(\.text))")
         check(model.entries[1].isVietnamese && model.entries[1].translation.isEmpty && model.entries[1].state == .done,
-              "a Vietnamese colleague is shown as said, and a late piece of the first sentence's translation is not on it")
+              "a Vietnamese colleague is shown as said")
         check(model.entries[2].state == .translating && model.entries[2].speaker == "3", "the third sentence ends at Soniox's end")
         await sleep(0.6)
         check(model.entries[2].translation == "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng.", "translated")
@@ -130,6 +132,18 @@ struct Simulation {
         await sleep(1.5)
         check(calls.spoken == ["[vi] 这个价格可以吗？", "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng."],
               "Đọc to reads GPT's translations, in order, once each: \(calls.spoken)")
+
+        // Someone is cut by another speaker: the new speaker's first piece of Soniox's translation shows
+        // on their sentence at once (it used to go to the sentence before for a few seconds).
+        others.say([w("交货期", "1", start: 4000, end: 4400)])
+        others.say([t("Thời hạn giao hàng")])
+        others.say([w("没问题。", "2", start: 4600, end: 5000), w("<end>", "")])
+        others.say([t("Không vấn đề.")])
+        let cutBy = Array(model.entries.suffix(2))
+        check(cutBy.count == 2 && cutBy[1].translation == "Không vấn đề." && !cutBy[0].translation.contains("Không vấn đề"),
+              "the second speaker's translation shows on their sentence: \(cutBy.map(\.translation))")
+        await sleep(0.5)
+        check(cutBy.allSatisfy { entry in model.entries.first { $0.id == entry.id }?.state == .done }, "both translated by GPT")
 
         // The phone's own voice heard again: dropped.
         others.say([w("vậy thứ hai tuần sau chúng ta xác nhận đơn hàng", "2", "vi"), w("<end>", "")])
@@ -181,7 +195,7 @@ struct Simulation {
         check(calls.translated.filter { $0.text.hasPrefix("STALL") }.count == 2, "asked twice, no more")
         check(model.speedLogText.contains("hỏi thêm lần nữa"), "noted in the speed log")
         let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
-        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 3: ") == true,
+        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 2: 没问题") == true,
               "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
 
         // A room that talks on: the voice catches up.
@@ -201,6 +215,8 @@ struct Simulation {
         let log = model.speedLogText
         check(log.contains("bỏ đọc"), "an old sentence with newer ones waiting is left unread")
         check(log.contains("nhận chậm") && log.contains("GPT Luna") && log.contains("đọc sau"), "the speed log has the timings")
+        check(log.contains("chữ hiện sau") && log.contains("bản dịch đầu tiên sau") && log.contains("từ lúc ngừng nói"),
+              "and how soon the words, the first translation and GPT's showed")
         check(!log.contains("这个价格") && !log.contains("Được anh"), "and never what was said")
 
         model.readAloud = false
