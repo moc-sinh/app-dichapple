@@ -174,3 +174,10 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 ## Sau này nếu có tài khoản Apple Developer trả phí
 
 App hết hạn sau 1 năm thay vì 7 ngày, cài được qua TestFlight, và Apple ký đúng mọi phần nên không phụ thuộc công cụ cài. Cần thêm 4 secret `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `TEAM_ID` trong Settings › Secrets and variables › Actions của repo, rồi chạy **Run workflow** với tùy chọn **Upload to TestFlight**.
+
+## Bản Android
+
+1. Trên điện thoại Android, mở `https://github.com/moc-sinh/app-dichapple/releases/latest/download/MSTrans.apk` (link này luôn là bản mới nhất). Tải xong, mở tệp `MSTrans.apk` để cài; lần đầu Android hỏi cho phép trình duyệt (hoặc trình quản lý tệp) cài ứng dụng: bật cho phép rồi quay lại cài. Bản sau cài đè lên bản trước, giữ nguyên key và cuộc họp đã lưu.
+2. Mở MSTrans › **Cài đặt**: dán key OpenAI, key Soniox (và key Google nếu dùng giọng Google), điền **Về bạn** và **Thuật ngữ** như trên iPhone.
+3. Tab **Hội thoại** dùng y như trên iPhone (xem mục "Họp, nói chuyện trực tiếp" ở trên): Soniox + Chỉ chữ cho họp 4–5 người, mỗi câu ghi Người 1, Người 2…, GPT dịch lại từng câu với ngữ cảnh, **⋯ › Chủ đề cuộc họp**, **⋯ › Sao chép nhật ký tốc độ**. Lần đầu bấm nút tròn, Android hỏi quyền micro: chọn **Cho phép**.
+4. Ở chế độ Chỉ chữ, micro nghe theo kiểu nhận giọng nói (nghe xa hơn); ở Đọc to và Dịch liền, điện thoại chuyển sang kiểu cuộc gọi có khử tiếng vọng, tiếng đọc ra loa ngoài.
