@@ -62,8 +62,11 @@ enum SonioxEvent: Equatable {
     /// second after the speaker stops (the shortest Soniox allows), so it is read aloud at once.
     /// `speakers`: each word says who said it, so a room of several people is cut sentence by
     /// sentence, speaker by speaker (one sentence of two people translated together read as nonsense).
+    /// `about`: what the talk is (its setting, topic, who the user is), for Soniox's `general` context,
+    /// which guides both the words it hears and its translation.
     static func configMessage(apiKey: String, model: String, target: String, hints: [String],
-                              terms: [String], pairs: [(source: String, target: String)], speakers: Bool) -> String {
+                              terms: [String], pairs: [(source: String, target: String)], speakers: Bool,
+                              about: [(key: String, value: String)] = []) -> String {
         var config: [String: Any] = [
             "api_key": apiKey,
             "model": model,
@@ -78,6 +81,7 @@ enum SonioxEvent: Equatable {
         ]
         if speakers { config["enable_speaker_diarization"] = true }
         var context: [String: Any] = [:]
+        if !about.isEmpty { context["general"] = about.map { ["key": $0.key, "value": $0.value] } }
         if !terms.isEmpty { context["terms"] = terms }
         if !pairs.isEmpty { context["translation_terms"] = pairs.map { ["source": $0.source, "target": $0.target] } }
         if !context.isEmpty { config["context"] = context }
@@ -326,6 +330,7 @@ final class SonioxSession {
     private let glossary: (terms: [String], pairs: [(source: String, target: String)])
     /// Tells who said each word (the room's session; the user's turn is one person).
     private let speakers: Bool
+    private let about: [(key: String, value: String)]
     private var model = 0
     private var task: URLSessionWebSocketTask?
     private var closing = false
@@ -339,11 +344,13 @@ final class SonioxSession {
         return URLSession(configuration: config)
     }()
 
-    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool) {
+    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool,
+         about: [(key: String, value: String)] = []) {
         self.apiKey = apiKey
         self.target = target
         self.hints = hints
         self.speakers = speakers
+        self.about = about
         self.glossary = SonioxEvent.glossary(glossary, intoVietnamese: target == Language.vietnamese.code)
     }
 
@@ -358,7 +365,8 @@ final class SonioxSession {
         isOpen = true
         task.resume()
         send(.string(SonioxEvent.configMessage(apiKey: apiKey, model: Self.models[model], target: target, hints: hints,
-                                               terms: glossary.terms, pairs: glossary.pairs, speakers: speakers)))
+                                               terms: glossary.terms, pairs: glossary.pairs, speakers: speakers,
+                                               about: about)))
         receive(task)
         // Soniox ends a session that hears nothing for a while: a session not spoken to is kept open.
         keepalive?.invalidate()

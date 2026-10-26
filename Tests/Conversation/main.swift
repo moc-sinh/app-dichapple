@@ -232,6 +232,31 @@ do {
     check(body.hasSuffix("\u{1}\u{2}\r\n--\(form.boundary)--\r\n"), "form closes after the file")
 }
 check(Prompt.spoken(into: "English").contains("speech recognition"), "spoken prompt")
+do {
+    // A meeting's sentence: who said it, and the sentences before it with who said them and how
+    // they were translated; the topic goes with the instructions.
+    let prompt = Prompt.spoken(into: "Vietnamese", topic: " báo giá máy CNC ")
+    check(prompt.hasSuffix("\nThe meeting is about: báo giá máy CNC") && prompt.contains("never summarise"),
+          "the meeting's topic is told, and nothing is to be left out")
+    check(!Prompt.spoken(into: "Vietnamese").contains("about:"), "no topic, none told")
+    let context = SpokenContext(speaker: SpokenContext.speaker(mine: false, number: "2"), lines: [
+        .init(speaker: SpokenContext.speaker(mine: false, number: "1"), text: "这个价格\n可以吗？", translation: "Giá này được không?"),
+        .init(speaker: SpokenContext.speaker(mine: true, number: ""), text: "Được anh", translation: "好的"),
+        .init(speaker: SpokenContext.speaker(mine: false, number: ""), text: "那我们", translation: ""),
+    ], topic: "x")
+    check(Prompt.spokenInput(text: "下周一确认。", context: context) == """
+        <context>
+        Người 1: 这个价格 可以吗？ → Giá này được không?
+        User: Được anh → 好的
+        Participant: 那我们
+        </context>
+        <message speaker="Người 2">
+        下周一确认。
+        </message>
+        """, "the meeting's sentences, who said them and their translations: \(Prompt.spokenInput(text: "下周一确认。", context: context))")
+    check(Prompt.spokenInput(text: "好", context: SpokenContext()) == "<message speaker=\"Participant\">\n好\n</message>",
+          "the first sentence: no context")
+}
 check(SpeechServices.voiceInstructions(.vietnamese).contains("Vietnamese accent"), "the voice is told the language")
 check(PCM.wav(pcm: PCM.data([1, -2, 3])) == PCM.wav([1, -2, 3]), "WAV around PCM bytes")
 check(PCM.seconds(Data(count: 48_000)) == 1, "a second of PCM")
@@ -463,6 +488,12 @@ do {
     let alone = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "zh", hints: ["vi"], terms: [], pairs: [],
                                           speakers: false)
     check(!alone.contains("diarization") && !alone.contains("context"), "the user's turn is one person, no glossary sent empty")
+    let told = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["zh", "vi"], terms: [], pairs: [],
+                                         speakers: true, about: [("setting", "Business meeting"), ("topic", "báo giá máy CNC")])
+    let toldObject = (try? JSONSerialization.jsonObject(with: Data(told.utf8))) as? [String: Any] ?? [:]
+    check(((toldObject["context"] as? [String: Any])?["general"] as? [[String: String]])
+          == [["key": "setting", "value": "Business meeting"], ["key": "topic", "value": "báo giá máy CNC"]],
+          "what the meeting is about goes to Soniox's general context: \(told)")
     var room = SonioxTranscript(target: "vi")
     room.splits = true
     check(room.take([spoken("这个价格", "1"), spoken("可以吗？", "1")], now: 1).isEmpty, "a short question goes on until its end")

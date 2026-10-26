@@ -10,17 +10,17 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (175 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (180 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** 1.11.0 (họp nhiều người: tách câu theo người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ,
-  chữ là chính; xem mục 1.11.0). Commit `e3073b6` (+ commit bàn giao này), CI run 70 đang chạy lúc bàn giao; run 69
-  (commit `d9fc451`) đã build IPA xanh trước khi bị huỷ nhường run 70. **Chưa gửi link IPA 1.11.0 cho người dùng**:
-  phiên mới lấy link từ run mới nhất xanh trên nhánh. Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
+- **Bản mới nhất:** 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
+  lại khi chậm, chủ đề cuộc họp; xem mục 1.12.0). Link IPA 1.11.0 đã gửi người dùng (run 71, lần chạy thứ 2: lần đầu
+  GitHub không có máy macOS trong 15 phút nên huỷ, không phải lỗi mã). Trước đó 1.11.0 (họp nhiều người: tách câu theo
+  người nói, GPT dịch lại, giọng đọc đuổi kịp, nhật ký tốc độ, chữ là chính; xem mục 1.11.0). Trước đó 1.10.1 (giọng đọc ngay khi có tiếng đầu tiên, xem mục 1.10.1); 1.10.0 (giọng Google, run 66, build
   xanh), 1.9.1 (sửa bàn phím tự tắt, run 65, cả keyboard-smoke xanh), 1.9.0 (Cách dịch Soniox, run 64) và 1.8.1 (run 62)
   đã gửi người dùng. Người dùng đã thử Soniox (1.9.0): chữ ổn, nhưng giọng đọc
   "chưa mượt, phản hồi chưa nhanh". Người dùng thấy 1.7.0 "khá ổn". Các mục bên dưới là lịch sử theo từng bản.
@@ -230,9 +230,31 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   gán mảnh dịch, tiếng tồn quá 6 s, câu của mình không qua GPT. **Chưa thử trên máy thật**: chờ người dùng gửi nhật
   ký tốc độ sau một cuộc họp thật.
 
+- **1.12.0: chữ không trễ, dịch đúng ngữ cảnh (26/10, tối).** Người dùng nhắc lại: tối ưu phần dịch ra chữ không trễ,
+  chất lượng bản dịch và ngữ cảnh dịch. Chưa có nhật ký tốc độ, nên chỉ sửa những chỗ đọc mã và tài liệu Soniox thấy rõ:
+  1. **Ngữ cảnh GPT** (`SpokenContext`, `Translator.translateSpoken`, `Prompt.spoken(into:topic:)`/`spokenInput`): mỗi
+     câu gửi kèm 8 câu trước dạng `Người 1: 原文 → bản dịch` (bản dịch chỉ khi câu đó đã xong), `<message speaker="Người 2">`
+     ("User" là câu của mình, "Participant" khi không tách người nói). Lời nhắc thêm: câu có thể bị cắt giữa chừng, dịch
+     đúng phần đó nối tiếp bản dịch trước, không thêm, không lặp, **không tóm tắt hay bỏ ý**; trong họp người ta nói với
+     nhau, chọn xưng hô theo ai nói với ai; tên và thuật ngữ dịch giống các câu trước. Bàn phím vẫn dùng `translate` cũ.
+  2. **Hỏi GPT lần hai** (`gptTranslation`): Luna chưa trả lời sau 2,5 s (Sol 5 s) thì gửi thêm một yêu cầu y hệt, lấy
+     câu về trước, huỷ câu kia; chỉ báo lỗi khi cả hai lỗi. Trước đây một kết nối treo giữ "Đang dịch…" tới 90 s
+     (`timeoutIntervalForRequest` của Translator). Nhật ký tốc độ ghi "GPT chưa xong sau 2,5 s: hỏi thêm lần nữa".
+  3. **Mở sẵn kết nối OpenAI** (`ConversationServices.warmUp` → `Translator.warmUp`, HEAD không key, tối đa 45 s/lần) khi
+     bắt đầu nghe và khi có người bắt đầu một câu, để GPT không chờ bắt tay mạng lúc câu vừa hết.
+  4. **Chủ đề cuộc họp** (⋯ › Chủ đề cuộc họp, `setTopic`, lưu trong UserDefaults và `Meeting.topic`, ≤ 200 ký tự): đưa
+     vào lời nhắc GPT ngay, vào `context.general` của Soniox khi bắt đầu nghe (kèm `setting` và hồ sơ Cài đặt › Về bạn:
+     tài liệu Soniox "Context" nói `general` giúp cả nhận giọng lẫn dịch), vào biên bản ("Chủ đề: …") và tóm tắt.
+  Tài liệu Soniox đọc được từ máy cloud (soniox.com/docs): `stt-rt-v4` giờ là bí danh của `stt-rt-v5`; endpoint detection và
+  finalize làm giảm độ đúng khi tách người nói; v5 có thêm `endpoint_latency_adjustment_level`, `endpoint_sensitivity`
+  (chưa dùng: `max_endpoint_delay_ms` 500 đã chặn trễ cuối câu ở 0,5 s); trường `api_key` trong tin cấu hình bị bỏ từ
+  15/01/2027 (app đã gửi key ở header Bearer). Test: `Tests/Conversation` 180 kiểm tra; mô phỏng thêm: ngữ cảnh GPT có
+  người nói/bản dịch/chủ đề, câu của mình là "User", GPT treo thì lần hỏi thứ hai về kịp (tắt hỏi lại thì 4 kiểm tra
+  trượt), mở sẵn kết nối, Soniox nhận chủ đề, biên bản ghi chủ đề. **Chưa thử trên máy thật.**
+
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.11.0. Người dùng thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+0. Gửi link IPA 1.12.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s` (Soniox chậm),
    `GPT Luna X s` (dịch lại chậm), `đọc sau X s` / `bỏ đọc` (giọng). **Ưu tiên của người dùng: chữ dịch đầy đủ,
@@ -261,8 +283,9 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 - Sau khi build xong gửi link IPA. Người dùng cài bằng AltStore (Apple ID miễn phí), dùng Windows,
   không có Mac; iPhone Pro Max, iOS 26, chat chủ yếu Zalo và WeChat.
 - Muốn biết bàn phím có khựng thì đọc nhật ký gõ người dùng gửi, đừng đoán. Hội thoại cũng vậy: đọc nhật ký tốc độ.
-- Hội thoại: người dùng dùng Soniox và Dịch liền (OpenAI), mức Dịch lời đối phương = Tiết kiệm (Luna), họp 3–5
+- Hội thoại: người dùng dùng Soniox và Dịch liền (OpenAI), mức Dịch lời đối phương = Tiết kiệm (Luna), họp 4–5
   người. Chữ dịch là chính (đủ, đúng nghĩa, không trễ); giọng đọc là tính năng phụ.
+- Build xong gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`.
 - Dùng ít trợ lý nền; nhiều trợ lý song song làm hết hạn mức rất nhanh.
 - Chỉ một phiên làm việc trên nhánh này một lúc; trước khi push luôn `git fetch` và gộp.
 

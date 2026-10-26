@@ -9,6 +9,8 @@ struct ConversationView: View {
     @State private var latched = false
     @State private var showingSaved = false
     @State private var showingSummary = false
+    @State private var editingTopic = false
+    @State private var topicDraft = ""
     @State private var enlarged: ConversationModel.Entry?
     /// The transcript keeps its last sentence in view, until the user scrolls up to read.
     @State private var following = true
@@ -32,6 +34,14 @@ struct ConversationView: View {
             .sheet(isPresented: $showingSaved) { SavedMeetingsView() }
             .sheet(isPresented: $showingSummary) { SummarySheet(model: model) }
             .fullScreenCover(item: $enlarged) { entry in EnlargedTranslation(entry: entry) }
+            .alert("Chủ đề cuộc họp", isPresented: $editingTopic) {
+                TextField("Ví dụ: báo giá máy CNC với nhà cung cấp Thâm Quyến", text: $topicDraft)
+                Button("Lưu") { model.setTopic(topicDraft) }
+                Button("Hủy", role: .cancel) {}
+            } message: {
+                Text("Vài chữ về nội dung, đối tác, sản phẩm: giúp nghe và dịch đúng thuật ngữ, đúng ngữ cảnh. "
+                     + "GPT dùng ngay; Soniox dùng từ lần bấm nghe sau. Để trống nếu không cần.")
+            }
             .onChange(of: model.talking) { _, talking in
                 // Ended by stopping: the next tap starts a new turn.
                 if !talking, !model.starting { latched = false }
@@ -311,6 +321,12 @@ struct ConversationView: View {
                 Label("Dịch lời đối phương", systemImage: "dollarsign.circle")
             }
             .pickerStyle(.menu)
+            Button {
+                topicDraft = model.topic
+                editingTopic = true
+            } label: {
+                Label(model.topic.isEmpty ? "Chủ đề cuộc họp…" : "Chủ đề: \(model.topic)", systemImage: "text.bubble")
+            }
             Picker(selection: $model.silence) {
                 ForEach(ConversationModel.silenceChoices, id: \.self) { seconds in
                     Text(String(format: "%.1f giây", seconds).replacingOccurrences(of: ".", with: ",")).tag(seconds)

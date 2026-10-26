@@ -28,6 +28,8 @@ struct Meeting: Codable, Identifiable, Equatable {
     var started = Date()
     var lines: [Line] = []
     var summary: String?
+    /// What it was about, as the user wrote it (Chủ đề cuộc họp); nil when not told.
+    var topic: String?
     /// What it cost with OpenAI, estimated (meetings saved before 1.8.0 have none).
     var cost: CostMeter?
 
@@ -46,6 +48,7 @@ struct Meeting: Codable, Identifiable, Equatable {
     /// The minutes as text: each sentence, who spoke which language, and its translation.
     var transcript: String {
         var text = "Cuộc họp \(title) (\(length))\n"
+        if let topic, !topic.isEmpty { text += "Chủ đề: \(topic)\n" }
         for line in lines {
             text += "\n[\(Self.timeFormatter.string(from: line.at))] \(line.who): \(line.text)\n"
             if !line.translation.isEmpty { text += "  → \(line.translation)\n" }

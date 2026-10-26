@@ -56,6 +56,31 @@ struct TokenUsage: Equatable {
     }
 }
 
+/// What a sentence of a meeting is translated with (Hội thoại): who said it, the sentences said
+/// before it and how they were translated, what the meeting is about.
+struct SpokenContext: Equatable {
+    /// One of the meeting's sentences before it.
+    struct Line: Equatable {
+        /// As `SpokenContext.speaker`.
+        var speaker: String
+        var text: String
+        /// Its translation as shown, empty when it has none (yet).
+        var translation = ""
+    }
+
+    /// "User" (the app's user), "Người 2" (a participant Soniox told apart by voice), or
+    /// "Participant" when the speakers are not told apart.
+    var speaker = "Participant"
+    /// Oldest first.
+    var lines: [Line] = []
+    /// What the meeting is about, in the user's words; empty when not told.
+    var topic = ""
+
+    static func speaker(mine: Bool, number: String) -> String {
+        mine ? "User" : number.isEmpty ? "Participant" : "Người \(number)"
+    }
+}
+
 /// One request per translation to the OpenAI Responses API. No SDK.
 struct Translator {
     let apiKey: String
@@ -71,17 +96,28 @@ struct Translator {
 
     /// Translates `text` into `target`. Into Vietnamese means a message from the partner;
     /// anything else means the user's own message, optionally with a back-translation.
-    /// `spoken`: the text is speech from a meeting or a talk, recognised automatically (Hội thoại).
-    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false,
-                   spoken: Bool = false) async throws -> Translation {
+    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false) async throws -> Translation {
         let outgoing = target.code != Language.vietnamese.code
-        let withMeaning = outgoing && checkMeaning
+        let instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.incoming()
+        return try await request(instructions: instructions, input: Prompt.input(text: text, context: context), target: target,
+                                 meaning: outgoing && checkMeaning)
+    }
+
+    /// Speech from a meeting or a talk, recognised automatically (Hội thoại): translated with who
+    /// said it, the meeting's latest sentences and their translations, and what the meeting is about.
+    func translateSpoken(_ text: String, to target: Language, context: SpokenContext) async throws -> Translation {
+        let outgoing = target.code != Language.vietnamese.code
         var instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.incoming()
-        if spoken { instructions += Prompt.spoken(into: outgoing ? target.englishName : "Vietnamese") }
+        instructions += Prompt.spoken(into: outgoing ? target.englishName : "Vietnamese", topic: context.topic)
+        return try await request(instructions: instructions, input: Prompt.spokenInput(text: text, context: context),
+                                 target: target, meaning: false)
+    }
+
+    private func request(instructions: String, input: String, target: Language, meaning withMeaning: Bool) async throws -> Translation {
         var body: [String: Any] = [
             "model": model.rawValue,
             "instructions": instructions,
-            "input": Prompt.input(text: text, context: context),
+            "input": input,
             "reasoning": ["effort": model.reasoningEffort],
             // Reasoning counts too. Only what is written is paid for; a long message with its
             // meaning check went over 4,000 and came back cut off.
@@ -306,17 +342,50 @@ enum Prompt {
         return s
     }
 
-    /// Added for speech (Hội thoại): what the recognizer wrote, not what someone typed.
-    static func spoken(into language: String) -> String {
-        """
+    /// Added for speech (Hội thoại): what the recognizer wrote while people talk, not what someone
+    /// typed; cut as it is said, so a message may be part of a sentence; several people, each told.
+    static func spoken(into language: String, topic: String = "") -> String {
+        var s = """
 
 
-        The message is speech from a live meeting or conversation, written down by automatic speech recognition: \
-        it may lack punctuation and contain recognition mistakes, fillers (ừ, à, thì là, kiểu như, um, 那个, えーと), \
-        repetitions and false starts. Translate what the speaker means into clear spoken \(language) that sounds \
-        natural read aloud: fix obvious recognition mistakes from the context, drop fillers and repeats, keep every \
-        fact, number, name and commitment. Several people may speak; <context> holds the meeting's latest sentences.
+        The message is speech from a live meeting or conversation, written down by automatic speech recognition \
+        while people talk: it may lack punctuation and contain recognition mistakes, fillers (ừ, à, thì là, kiểu như, \
+        um, 那个, えーと), repetitions and false starts. Translate what the speaker means into clear, natural spoken \
+        \(language): fix obvious recognition mistakes from the context, the topic and the glossary, and drop fillers \
+        and repeats, but never summarise or shorten: every point, fact, number, name, date and commitment stays.
+        Speech is cut into messages as people talk on, so a message may be only part of a sentence, or the rest of \
+        the sentence before it. Translate exactly the words it holds, so that it reads on from the translation before \
+        it when it continues that sentence; never add anything that was not said, and never repeat what an earlier \
+        translation already says.
+        Several people may take part. <context> holds the meeting's latest sentences, oldest first: who said it \
+        ("User" is the Vietnamese user of this app; "Người 1", "Người 2"… are other participants told apart by voice, \
+        now and then wrongly; "Participant" when not told), what was said and, after "→", its translation as already \
+        shown. Use it to work out who and what "he", "they", "this", "that price" refer to, and translate names and \
+        terms the same way as before. The speaker attribute of <message> says who said it. In a meeting people speak \
+        to one another, not only to the user: choose forms of address from who speaks to whom.
         """
+        let topic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !topic.isEmpty { s += "\nThe meeting is about: \(topic)" }
+        return s
+    }
+
+    /// A meeting's sentence: the latest ones before it, each with who said it and its translation,
+    /// then the sentence with who said it.
+    static func spokenInput(text: String, context: SpokenContext) -> String {
+        func oneLine(_ text: String) -> String {
+            text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        }
+        var s = ""
+        if !context.lines.isEmpty {
+            s += "<context>\n"
+            for line in context.lines {
+                s += "\(line.speaker): \(oneLine(line.text))"
+                if !line.translation.isEmpty { s += " → \(oneLine(line.translation))" }
+                s += "\n"
+            }
+            s += "</context>\n"
+        }
+        return s + "<message speaker=\"\(context.speaker)\">\n\(text)\n</message>"
     }
 
     private static let guidance: [String: String] = [

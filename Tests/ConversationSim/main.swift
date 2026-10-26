@@ -22,12 +22,18 @@ func t(_ text: String, final: Bool = true) -> SonioxToken {
 
 final class Calls: @unchecked Sendable {
     let lock = NSLock()
-    var translated: [(text: String, target: String, context: [String], model: TranslationModel)] = []
+    var translated: [(text: String, target: String, context: [String], speaker: String, topic: String, model: TranslationModel)] = []
     var spoken: [String] = []
     var translateDelay: UInt64 = 300_000_000
     var voiceBytes = 96_000
-    func add(_ text: String, _ target: String, _ context: [String], _ model: TranslationModel) {
-        lock.lock(); translated.append((text, target, context, model)); lock.unlock()
+    var warmUps = 0
+    /// Returns how many times `text` was asked before.
+    func add(_ text: String, _ target: String, _ context: SpokenContext, _ model: TranslationModel) -> Int {
+        let lines = context.lines.map { "\($0.speaker): \($0.text)" + ($0.translation.isEmpty ? "" : " → \($0.translation)") }
+        lock.lock(); defer { lock.unlock() }
+        let before = translated.filter { $0.text == text }.count
+        translated.append((text, target, lines, context.speaker, context.topic, model))
+        return before
     }
     func say(_ text: String) { lock.lock(); spoken.append(text); lock.unlock() }
 }
@@ -63,16 +69,19 @@ struct Simulation {
         model.services = ConversationServices(
             transcribe: { _, _, _ in .init(text: "", language: nil) },
             translate: { _, text, target, context, model in
-                calls.add(text, target.code, context.map(\.text), model)
-                try await Task.sleep(nanoseconds: calls.translateDelay)
+                let before = calls.add(text, target.code, context, model)
+                // The first request for a sentence marked STALL hangs, as on a stalled phone network.
+                try await Task.sleep(nanoseconds: text.contains("STALL") && before == 0 ? 30_000_000_000 : calls.translateDelay)
                 if text.contains("FAIL") { throw URLError(.timedOut) }
                 return Translation(text: fixed[text] ?? "[\(target.code)] \(text)", meaning: nil, note: nil, language: target)
             },
             speak: { _, text, _, _, _ in
                 calls.say(text)
                 return Data(count: calls.voiceBytes)
-            })
+            },
+            warmUp: { calls.warmUps += 1 })
         Sim.speed = 4
+        model.setTopic("  báo giá máy CNC ")
 
         await model.start()
         check(model.running, "listening")
@@ -82,6 +91,9 @@ struct Simulation {
             exit(1)
         }
         check(others.speakers && !partner.speakers, "the room's session tells speakers apart, the user's does not")
+        check(others.about.contains { $0 == ("topic", "báo giá máy CNC") } && others.about.contains { $0.key == "setting" },
+              "Soniox is told what the meeting is about: \(others.about)")
+        check(calls.warmUps >= 1, "OpenAI's connection is opened as listening starts")
         check(AudioIO.current?.echo == [true], "Đọc to with Soniox: echo cancelling on")
         let quietBefore = others.sent
         await feed(Array(repeating: 0, count: 24_000))
@@ -93,6 +105,7 @@ struct Simulation {
         others.say([w("这个价格", "1", end: 1500), w("可以吗？", "1", end: 1900)])
         check(model.entries.count == 1 && model.entries[0].speaker == "1" && model.entries[0].state == .hearing,
               "the first speaker's words show as they come")
+        check(calls.warmUps >= 2, "someone starts speaking: OpenAI's connection is made ready for the end of the sentence")
         others.say([w("Được anh", "2", "vi", end: 2400)])
         check(model.entries.count == 2 && model.entries[0].state == .translating && model.entries[0].text == "这个价格可以吗？",
               "another speaker starts: the first sentence goes to GPT")
@@ -111,8 +124,9 @@ struct Simulation {
         await sleep(0.6)
         check(model.entries[2].translation == "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng.", "translated")
         let third = calls.translated.first { $0.text == "那我们下周一确认订单。" }
-        check(third?.context == ["(Người 1) 这个价格可以吗？", "(Người 2) Được anh"],
-              "GPT gets the meeting so far, with who said it: \(third?.context ?? [])")
+        check(third?.context == ["Người 1: 这个价格可以吗？ → [vi] 这个价格可以吗？", "Người 2: Được anh"],
+              "GPT gets the meeting so far, with who said it and how it was translated: \(third?.context ?? [])")
+        check(third?.speaker == "Người 3" && third?.topic == "báo giá máy CNC", "and who says this one, and the topic")
         await sleep(1.5)
         check(calls.spoken == ["[vi] 这个价格可以吗？", "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng."],
               "Đọc to reads GPT's translations, in order, once each: \(calls.spoken)")
@@ -159,6 +173,17 @@ struct Simulation {
               "GPT's comes later: shown, not read again")
         calls.translateDelay = 100_000_000
 
+        // GPT's connection stalls: asked again after 2.5 s, the second answer is taken.
+        others.say([w("STALL 我们明天发货。", "1"), w("<end>", "")])
+        await sleep(3.2)
+        check(model.entries.last?.state == .done && model.entries.last?.translation == "[vi] STALL 我们明天发货。",
+              "a stalled GPT is asked again, and its second answer comes in time: \(String(describing: model.entries.last))")
+        check(calls.translated.filter { $0.text.hasPrefix("STALL") }.count == 2, "asked twice, no more")
+        check(model.speedLogText.contains("hỏi thêm lần nữa"), "noted in the speed log")
+        let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
+        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 3: ") == true,
+              "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
+
         // A room that talks on: the voice catches up.
         Sim.speed = 1
         calls.voiceBytes = 144_000   // 3 s each
@@ -187,6 +212,7 @@ struct Simulation {
         let lines = model.meeting.lines
         check(lines.contains { $0.speaker == "3" } && model.meeting.transcript.contains("Người 1 · "),
               "the minutes say who spoke")
+        check(model.meeting.transcript.contains("\nChủ đề: báo giá máy CNC\n"), "and what the meeting was about")
         check(lines.map(\.at) == lines.map(\.at).sorted(), "the minutes in order")
         check(model.entries.allSatisfy { $0.state == .done }, "every sentence finished: \(model.entries.map(\.state))")
         print(log)

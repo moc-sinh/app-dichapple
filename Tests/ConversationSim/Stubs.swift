@@ -62,13 +62,16 @@ final class SonioxSession {
     static let models = ["stt-rt-v5"]
     let target: String
     let speakers: Bool
+    let about: [(key: String, value: String)]
     var onEvent: ((SonioxEvent) -> Void)?
     private(set) var isOpen = false
     var sent = 0.0
     var finalized = 0
-    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool) {
+    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool,
+         about: [(key: String, value: String)] = []) {
         self.target = target
         self.speakers = speakers
+        self.about = about
         SonioxSession.all.append(self)
     }
     func open() { isOpen = true }

@@ -117,16 +117,19 @@ final class Listener: @unchecked Sendable {
 /// The calls to OpenAI (and the iPhone's and Google's voices), replaceable in a test.
 struct ConversationServices {
     var transcribe: (_ apiKey: String, _ wav: Data, _ prompt: String) async throws -> SpeechServices.Transcript
-    var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: [ChatLine],
+    var translate: (_ apiKey: String, _ text: String, _ target: Language, _ context: SpokenContext,
                     _ model: TranslationModel) async throws -> Translation
     /// 24 kHz mono PCM16 of `text`, in `language`. `heard` gets it as it is made (OpenAI's and the
     /// iPhone's voices; Google's comes whole), so reading begins before the end is made.
     var speak: (_ apiKey: String, _ text: String, _ voice: String, _ language: Language,
                 _ heard: @escaping @Sendable (Data) -> Void) async throws -> Data
+    /// Opens the connection to OpenAI before a sentence needs it (every 45 s at most), so no
+    /// translation waits for the network's handshakes.
+    var warmUp: () -> Void = { Translator.warmUp() }
 
     static let openAI = ConversationServices(
         transcribe: { try await SpeechServices(apiKey: $0).transcribe(wav: $1, prompt: $2) },
-        translate: { try await Translator(apiKey: $0, model: $4).translate($1, to: $2, context: $3, spoken: true) },
+        translate: { try await Translator(apiKey: $0, model: $4).translateSpoken($1, to: $2, context: $3) },
         speak: { apiKey, text, voice, language, heard in
             if let google = GoogleVoice.name(of: voice), let googleKey = SharedStore.googleKey {
                 do {
@@ -234,6 +237,7 @@ final class ConversationModel {
         static let voice = "conversation.voice"
         static let quality = "conversation.quality"
         static let textSize = "conversation.textSize"
+        static let topic = "conversation.topic"
     }
 
     // MARK: Settings, kept between launches (this app's own defaults: the keyboard never needs them)
@@ -259,6 +263,19 @@ final class ConversationModel {
     var voice: String { didSet { defaults.set(voice, forKey: Keys.voice) } }
     var quality: Quality { didSet { defaults.set(quality.rawValue, forKey: Keys.quality) } }
     var textSize: TextSize { didSet { defaults.set(textSize.rawValue, forKey: Keys.textSize) } }
+    /// What the meeting is about, in the user's words ("báo giá máy CNC với nhà cung cấp Thâm Quyến"):
+    /// GPT is told with every sentence, Soniox when listening starts, and it goes in the minutes.
+    private(set) var topic: String
+
+    func setTopic(_ text: String) {
+        let topic = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.longestTopic))
+        self.topic = topic
+        defaults.set(topic, forKey: Keys.topic)
+        meeting.topic = topic.isEmpty ? nil : topic
+        log(nil, topic.isEmpty ? "Bỏ chủ đề cuộc họp" : "Chủ đề cuộc họp: \(TranscriptFilter.syllableCount(topic)) âm tiết")
+    }
+
+    static let longestTopic = 200
 
     static let silenceChoices: [Double] = [0.4, 0.6, 0.8, 1.0, 1.2, 1.4]
     /// The iPhone's own voice: free, made on the phone, less natural than OpenAI's.
@@ -348,6 +365,12 @@ final class ConversationModel {
     /// The others' sentence whose voice is this late (seconds after its translation), with newer
     /// ones waiting, is left on the screen unread: the voice keeps up with the room.
     private static let stale = 6.0
+    /// GPT this slow to answer is asked again alongside (a phone network can stall one connection
+    /// for many seconds): the first answer is taken. Luna answers a sentence in about a second.
+    private static let lunaPatience = 2.5
+    private static let solPatience = 5.0
+    /// The meeting's latest sentences GPT gets with each one.
+    private static let contextLines = 8
 
     init() {
         let defaults = UserDefaults.standard
@@ -360,6 +383,8 @@ final class ConversationModel {
         voice = Self.voices.contains { $0.id == savedVoice } ? savedVoice : "marin"
         quality = Quality(rawValue: defaults.string(forKey: Keys.quality) ?? "") ?? .economy
         textSize = TextSize(rawValue: defaults.integer(forKey: Keys.textSize)) ?? .medium
+        topic = defaults.string(forKey: Keys.topic) ?? ""
+        if !topic.isEmpty { meeting.topic = topic }
         audio.onInterruption = { [weak self] began in self?.interrupted = began }
         if defaults.bool(forKey: "conversationDemo") { fillDemo() }
     }
@@ -404,6 +429,7 @@ final class ConversationModel {
         }
         micDenied = false
         apiKey = key
+        if !key.isEmpty { services.warmUp() }
         let listener = Listener(silence: silence, streams: engine.streams)
         listener.onUtterance = { [weak self] utterance in self?.heard(utterance) }
         listener.onMine = { [weak self] samples, first, last in self?.said(samples, first: first, last: last) }
@@ -479,6 +505,7 @@ final class ConversationModel {
         billLive()
         MeetingStore.save(meeting)
         meeting = Meeting()
+        meeting.topic = topic.isEmpty ? nil : topic
         entries = []
         unrecognised = [:]
         detectedPartner = nil
@@ -558,6 +585,7 @@ final class ConversationModel {
                           translation: "", target: mine ? partnerLanguage.code : Language.vietnamese.code,
                           state: .recognizing)
         entries.append(entry)
+        services.warmUp()
         // The user's own words go first (in the order said): the room is waiting for them.
         let place = mine ? (waiting.firstIndex(where: { !$0.mine }) ?? waiting.count) : waiting.count
         waiting.insert((entry.id, samples, mine), at: place)
@@ -629,7 +657,7 @@ final class ConversationModel {
         let model = entry.mine ? SharedStore.model : quality.model
         let began = Date()
         do {
-            let result = try await services.translate(apiKey, entry.text, target, context(before: entry.at), model)
+            let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
             charge { $0.used(result.usage, by: model) }
             log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))")
             let translation = result.text
@@ -692,13 +720,67 @@ final class ConversationModel {
         if Language.named(language.code) != nil { SharedStore.lastPartnerCode = language.code }
     }
 
-    /// The meeting's latest sentences, as the translator's context: those still being translated
-    /// too (sentences are translated several at once), with who said them when known.
-    private func context(before at: Date) -> [ChatLine] {
-        entries.filter { $0.at < at && !$0.text.isEmpty }.suffix(8).map {
-            ChatLine(side: $0.mine ? .me : .partner, text: $0.speaker.isEmpty ? $0.text : "(Người \($0.speaker)) \($0.text)",
-                     date: $0.at)
+    /// What `entry` is translated with: who said it, the meeting's latest sentences before it (those
+    /// still being translated too: several are at once) with who said them and their translations
+    /// once done (names and terms stay the same from one sentence to the next), and the topic.
+    private func spokenContext(for entry: Entry) -> SpokenContext {
+        let lines = entries.filter { $0.at < entry.at && !$0.text.isEmpty }.suffix(Self.contextLines).map {
+            SpokenContext.Line(speaker: SpokenContext.speaker(mine: $0.mine, number: $0.speaker), text: $0.text,
+                               translation: $0.state == .done ? $0.translation : "")
         }
+        return SpokenContext(speaker: SpokenContext.speaker(mine: entry.mine, number: entry.speaker), lines: Array(lines),
+                             topic: topic)
+    }
+
+    private enum GPTAnswer {
+        case translated(Translation)
+        case failed(Error)
+        case slow
+    }
+
+    /// GPT's translation of `entry`, asked a second time alongside when the first answer is slow:
+    /// whichever comes first is taken and the other cancelled. It fails only once both have.
+    private func gptTranslation(of entry: Entry, into target: Language, model: TranslationModel, key: String) async throws -> Translation {
+        let translate = services.translate
+        let text = entry.text
+        let context = spokenContext(for: entry)
+        let patience = model == .luna ? Self.lunaPatience : Self.solPatience
+        let (answers, sink) = AsyncStream.makeStream(of: GPTAnswer.self)
+        var asks: [Task<Void, Never>] = []
+        func ask() {
+            asks.append(Task {
+                do {
+                    sink.yield(.translated(try await translate(key, text, target, context, model)))
+                } catch {
+                    sink.yield(.failed(error))
+                }
+            })
+        }
+        ask()
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: UInt64(patience * 1_000_000_000))
+            sink.yield(.slow)
+        }
+        defer {
+            timer.cancel()
+            asks.forEach { $0.cancel() }
+            sink.finish()
+        }
+        var failures = 0
+        for await answer in answers {
+            switch answer {
+            case .slow:
+                guard asks.count == 1 else { continue }
+                log(entry.id, "GPT chưa xong sau \(SpeedLog.seconds(patience)): hỏi thêm lần nữa")
+                ask()
+            case .translated(let translation):
+                return translation
+            case .failed(let error):
+                failures += 1
+                if failures == asks.count { throw error }
+            }
+        }
+        throw CancellationError()
     }
 
     /// Names and terms the recognizer should spell right: the glossary only. The last sentences
@@ -1218,6 +1300,7 @@ final class ConversationModel {
                           text: text, translation: translation,
                           target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing)
         entries.append(entry)
+        services.warmUp()
         liveEntries[fromOthers, default: [:]][caption.number] = entry.id
         captions[fromOthers] = (entry.id, Date())
     }
@@ -1297,7 +1380,8 @@ final class ConversationModel {
         let room = target == Language.vietnamese.code
         let partner = SonioxEvent.code(for: partnerLanguage)
         let hints = room ? [partner, Language.vietnamese.code] : [Language.vietnamese.code]
-        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary, speakers: room)
+        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary, speakers: room,
+                                    about: sonioxAbout)
         session.onEvent = { [weak self, weak session] event in
             guard let self, let session else { return }
             self.soniox(event, from: session)
@@ -1305,6 +1389,16 @@ final class ConversationModel {
         sonioxSent[room] = 0
         session.open()
         return session
+    }
+
+    /// What Soniox is told about the talk, so it hears and translates its words right: the setting,
+    /// the meeting's topic and who the user is (Cài đặt › Về bạn).
+    private var sonioxAbout: [(key: String, value: String)] {
+        var about = [(key: "setting", value: "Business meeting or talk between a Vietnamese professional and foreign partners")]
+        if !topic.isEmpty { about.append((key: "topic", value: topic)) }
+        let profile = SharedStore.profile.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !profile.isEmpty { about.append((key: "user", value: String(profile.prefix(300)))) }
+        return about
     }
 
     /// The session for the user's words, opened again when the partners' language changes.
@@ -1407,6 +1501,8 @@ final class ConversationModel {
                           target: fromOthers ? Language.vietnamese.code : partnerLanguage.code, state: .hearing,
                           speaker: speaker)
         entries.append(entry)
+        // Someone started a sentence: by its end, GPT's connection is open.
+        if sonioxUsesGPT { services.warmUp() }
         captions[fromOthers] = (entry.id, now)
         return entry.id
     }
@@ -1471,7 +1567,7 @@ final class ConversationModel {
         let model = entry.mine ? SharedStore.model : quality.model
         let began = Date()
         do {
-            let result = try await services.translate(apiKey, entry.text, target, context(before: entry.at), model)
+            let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
             charge { $0.used(result.usage, by: model) }
             let translation = result.text
             update(id) {
