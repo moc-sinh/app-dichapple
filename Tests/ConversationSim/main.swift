@@ -40,6 +40,7 @@ final class Calls: @unchecked Sendable {
 
 let fixed: [String: String] = [
     "那我们下周一确认订单。": "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng.",
+    "Anh gửi giúp em báo giá nhé": "请把报价发给我。",
 ]
 
 @main
@@ -145,10 +146,18 @@ struct Simulation {
         await sleep(0.5)
         check(cutBy.allSatisfy { entry in model.entries.first { $0.id == entry.id }?.state == .done }, "both translated by GPT")
 
-        // The phone's own voice heard again: dropped.
-        others.say([w("vậy thứ hai tuần sau chúng ta xác nhận đơn hàng", "2", "vi"), w("<end>", "")])
-        check(!model.entries.contains { $0.text.hasPrefix("vậy thứ hai") }, "the phone's voice heard back is not someone speaking")
+        // The phone's own voice heard back while it reads (echo cancelling leaves some): dropped.
+        await sleep(1.5)
+        calls.voiceBytes = 480_000   // 10 s of voice: 2.5 s at this speed
+        others.say([w("那我们下周一确认订单。", "3"), w("<end>", "")])
+        await sleep(0.7)
+        check(model.speaking, "the phone reads it")
+        let echoAt = Int(others.sent * 1000)
+        others.say([w("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng.", "4", "vi", start: echoAt - 900, end: echoAt), w("<end>", "")])
+        check(!model.entries.contains { $0.text.hasPrefix("Vậy thứ Hai") }, "the phone's voice heard back is not someone speaking")
         check(model.entries.allSatisfy { $0.state != .hearing }, "nothing left half-heard")
+        await sleep(2.5)
+        calls.voiceBytes = 96_000
 
         // The user speaks.
         model.talk(true)
@@ -161,13 +170,20 @@ struct Simulation {
         let mine = model.entries.last
         check(mine?.mine == true && mine?.state == .translating && mine?.speaker == "", "the user's sentence goes to GPT")
         await sleep(0.6)
-        check(model.entries.last?.translation == "[zh] Anh gửi giúp em báo giá nhé", "into the partners' Chinese")
+        check(model.entries.last?.translation == "请把报价发给我。", "into the partners' Chinese")
         check(calls.translated.last?.model == .sol, "the user's words with the app's model")
         await sleep(1)
-        check(calls.spoken.last == "[zh] Anh gửi giúp em báo giá nhé", "read aloud to the partners")
+        check(calls.spoken.last == "请把报价发给我。", "read aloud to the partners")
+        // A partner confirming it in the words the phone read it in is someone speaking: the room's
+        // session was not even sent the phone's voice reading the user's words.
+        let confirmAt = Int(others.sent * 1000)
+        others.say([w("好的，我把报价发给你。", "1", start: confirmAt - 1500, end: confirmAt), w("<end>", "")])
+        check(model.entries.last?.text == "好的，我把报价发给你。" && model.entries.last?.state == .translating,
+              "a partner confirming what the phone read is kept, not taken for its echo")
+        await sleep(0.6)
 
         // GPT fails: Soniox's translation stays, and is read.
-        others.say([w("FAIL 这个", "1"), w("<end>", "")])
+        others.say([w("FAIL 这个。", "1"), w("<end>", "")])
         others.say([t("Cái này.")])
         await sleep(0.6)
         let failedEntry = model.entries.last
@@ -194,8 +210,24 @@ struct Simulation {
               "a stalled GPT is asked again, and its second answer comes in time: \(String(describing: model.entries.last))")
         check(calls.translated.filter { $0.text.hasPrefix("STALL") }.count == 2, "asked twice, no more")
         check(model.speedLogText.contains("hỏi thêm lần nữa"), "noted in the speed log")
+
+        // A thought said in two breaths is one sentence: Soniox's end after a comma is a pause.
+        others.say([w("如果你们订五百台，", "2"), w("<end>", "")])
+        await feed(Array(repeating: 0, count: 2_400 * 6))
+        check(model.entries.last?.text == "如果你们订五百台，" && model.entries.last?.state == .hearing,
+              "a pause after a comma: the sentence waits for the rest")
+        others.say([w("我们可以便宜百分之五。", "2"), w("<end>", "")])
+        check(model.entries.last?.text == "如果你们订五百台，我们可以便宜百分之五。" && model.entries.last?.state == .translating,
+              "the speaker goes on: one sentence, translated whole: \(model.entries.suffix(2).map(\.text))")
+        // Nothing more said: it ends after a quiet moment, full stop or not.
+        others.say([w("那个", "1"), w("<end>", "")])
+        await feed(Array(repeating: 0, count: 2_400 * 6))
+        check(model.entries.last?.text == "那个" && model.entries.last?.state == .hearing, "still waiting after 0.6 s")
+        await feed(Array(repeating: 0, count: 2_400 * 9))
+        check(model.entries.last?.text == "那个" && model.entries.last?.state != .hearing, "ended after a quiet moment")
+        await sleep(0.5)
         let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
-        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 2: 没问题") == true,
+        check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 3: 那我们下周一确认订单") == true,
               "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
 
         // A room that talks on: the voice catches up.

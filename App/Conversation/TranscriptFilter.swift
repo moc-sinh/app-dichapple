@@ -101,35 +101,46 @@ enum TranscriptFilter {
 }
 
 /// The phone's own voice heard again. When a translation is read aloud through the speaker, the
-/// microphone hears it: a sentence made of what the phone said a moment ago is that echo, not
+/// microphone hears it: a sentence said while the phone was saying the same words is that echo, not
 /// someone speaking (from the VietNote worker's transcript echo check).
 ///
-/// Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: the phone
-/// reads a lot in a busy meeting, and a colleague's sentence made of common words ("của chúng tôi",
-/// "我们的") was taken for its echo and lost.
+/// Only while the phone speaks, and a moment after: a partner repeating what the phone said a few
+/// seconds before ("好的，下周一确认订单" after it said "我们下周一确认订单") is confirming it, and
+/// was lost. Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: a
+/// colleague's sentence of common words ("của chúng tôi", "我们的") was taken for its echo.
 struct EchoGuard {
-    private static let window = 15.0
-    private static let shortWindow = 5.0
-    private var recent: [(at: Double, words: Set<String>, pairs: Set<String>)] = []
+    /// The phone's voice is heard while it plays and a moment after (the room's echo, and how far a
+    /// recognizer's times are off).
+    static let tail = 1.5
+    private static let kept = 60.0
+    private var spoken: [(from: Double, to: Double, words: Set<String>, pairs: Set<String>)] = []
 
-    /// The phone said `text` at `at` (seconds, any clock).
+    /// The phone begins saying `text` at `at` (seconds, the clock heard sentences are timed by), until
+    /// `stopped`.
     mutating func spoke(_ text: String, at: Double) {
         let words = Self.words(text)
         guard !words.isEmpty else { return }
-        recent.append((at, Set(words), Set(Self.pairs(words))))
-        recent.removeAll { at - $0.at > Self.window }
+        spoken.append((at, .infinity, Set(words), Set(Self.pairs(words))))
+        spoken.removeAll { at - $0.to > Self.kept }
     }
 
-    func isEcho(_ text: String, at: Double) -> Bool {
+    /// The phone stopped speaking.
+    mutating func stopped(at: Double) {
+        for index in spoken.indices where spoken[index].to == .infinity { spoken[index].to = at }
+    }
+
+    /// A sentence said from `from` to `to` (seconds): the phone's voice heard back, when said while the
+    /// phone said the same words.
+    func isEcho(_ text: String, from: Double, to: Double) -> Bool {
         let heard = Self.words(text)
-        guard !heard.isEmpty else { return false }
-        // A word or two: all of them said by the phone just before.
+        let during = spoken.filter { from <= $0.to + Self.tail && to >= $0.from }
+        guard !heard.isEmpty, !during.isEmpty else { return false }
+        // A word or two: all of them said by the phone.
         if heard.count < 3 {
-            let said = recent.filter { at - $0.at <= Self.shortWindow }.reduce(into: Set<String>()) { $0.formUnion($1.words) }
+            let said = during.reduce(into: Set<String>()) { $0.formUnion($1.words) }
             return heard.allSatisfy(said.contains)
         }
-        let said = recent.filter { at - $0.at <= Self.window }.reduce(into: Set<String>()) { $0.formUnion($1.pairs) }
-        guard !said.isEmpty else { return false }
+        let said = during.reduce(into: Set<String>()) { $0.formUnion($1.pairs) }
         let pairs = Self.pairs(heard)
         let matched = pairs.filter(said.contains).count
         // Half of a long sentence (what the recognizer heard of the phone's voice has a mistake here

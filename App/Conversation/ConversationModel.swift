@@ -383,6 +383,10 @@ final class ConversationModel {
     private static let solPatience = 5.0
     /// The meeting's latest sentences GPT gets with each one.
     private static let contextLines = 8
+    /// A Soniox sentence paused without a full stop ends once its speaker has said nothing more for
+    /// this long: a thought said in two breaths ("if you order five hundred, … we give five percent")
+    /// is translated as one.
+    private static let pauseEnds = 1.2
 
     init() {
         let defaults = UserDefaults.standard
@@ -637,7 +641,9 @@ final class ConversationModel {
         guard let entry = entries.first(where: { $0.id == id }) else { return }
         let text = transcript.text
         // Noise the recognizer wrote words for, or the phone's own voice heard again.
-        if TranscriptFilter.isNoise(text, seconds: seconds) || (!entry.mine && echo.isEcho(text, at: Self.now)) {
+        let said = entry.at.timeIntervalSinceReferenceDate
+        if TranscriptFilter.isNoise(text, seconds: seconds)
+            || (!entry.mine && echo.isEcho(text, from: said, to: said + seconds)) {
             if entry.mine { problem = "Chưa nghe rõ bạn nói. Thử lại, nói gần điện thoại hơn." }
             return remove(id)
         }
@@ -1010,7 +1016,10 @@ final class ConversationModel {
                 + (newer > 0 ? " · \(newer) câu chờ" : ""))
         }
         beginAloud(mine: mine)
-        echo.spoke(text, at: Self.now)
+        // What the room's recognizer can hear of it: with Soniox, the room is sent silence while the
+        // user's words are read, and while anything is read without echo cancelling.
+        let heard = engine != .soniox || (!mine && echoCancelling)
+        if heard { echo.spoke(text, at: Self.now) }
         var played = 0
         var playing = 0
         while running, generation == speechGeneration {
@@ -1028,6 +1037,7 @@ final class ConversationModel {
         // Until the last part has been heard (or playback was stopped).
         let heardBy = Date().addingTimeInterval(PCM.seconds(Data(count: played)) + 2)
         while playing > 0, Date() < heardBy { try? await Task.sleep(nanoseconds: 20_000_000) }
+        if heard { echo.stopped(at: Self.now) }
         endAloud(mine: mine)
         if let error = next.failure, !(error is CancellationError), generation == speechGeneration {
             problem = Self.voiceProblem(error)
@@ -1498,14 +1508,15 @@ final class ConversationModel {
     private func showSentence(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) -> UUID {
         let now = Date()
         let speaker = fromOthers ? sentence.speaker : ""
-        if let current = captions[fromOthers], entries.contains(where: { $0.id == current.id }) {
+        if let current = captions[fromOthers], let shown = entries.first(where: { $0.id == current.id }) {
             update(current.id) {
                 $0.text = sentence.text
                 $0.translation = sentence.translation
                 if !sentence.language.isEmpty { $0.language = sentence.language }
                 if !speaker.isEmpty { $0.speaker = speaker }
             }
-            captions[fromOthers] = (current.id, now)
+            // When its words last changed: how long the speaker has said nothing more.
+            captions[fromOthers] = (current.id, shown.text == sentence.text ? current.last : now)
             noteHeard(current.id, sentence, fromOthers: fromOthers)
             return current.id
         }
@@ -1520,6 +1531,16 @@ final class ConversationModel {
         captions[fromOthers] = (entry.id, now)
         noteHeard(entry.id, sentence, fromOthers: fromOthers)
         return entry.id
+    }
+
+    /// When a Soniox sentence was said (`Self.now`'s clock), from where its words are in the sound
+    /// sent: the sound goes as it is heard, so the end of what was sent is now.
+    private func saidTime(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) -> (from: Double, to: Double) {
+        let now = Self.now
+        let sent = sonioxSent[fromOthers] ?? 0
+        let to = sentence.endMs.map { now - (sent - Double($0) / 1000) } ?? now
+        let from = sentence.startMs.map { now - (sent - Double($0) / 1000) } ?? to - 3
+        return (min(from, to), to)
     }
 
     /// When a Soniox sentence was said, and how soon after its first word its words and its first
@@ -1543,7 +1564,8 @@ final class ConversationModel {
         let id = showSentence(sentence, fromOthers: fromOthers)
         captions[fromOthers] = nil
         // The phone's Vietnamese voice heard again through the microphone.
-        if fromOthers, echo.isEcho(sentence.text, at: Self.now) {
+        let said = saidTime(sentence, fromOthers: fromOthers)
+        if fromOthers, echo.isEcho(sentence.text, from: said.from, to: said.to) {
             log(id, "Soniox: tiếng của máy nghe lại, bỏ")
             heardTimes[id] = nil
             return remove(id)
@@ -1638,12 +1660,15 @@ final class ConversationModel {
         return note
     }
 
-    /// A sentence Soniox ended but whose translation never came, or one it stopped sending words
-    /// for (the connection hung): finished with what is known, after a moment.
+    /// A sentence Soniox ended but whose translation never came, one paused without a full stop
+    /// whose speaker says nothing more, or one Soniox stopped sending words for (the connection
+    /// hung): finished with what is known, after a moment.
     private func expireSentences() {
         for (fromOthers, current) in captions {
             let quiet = Date().timeIntervalSince(current.last)
-            guard quiet >= 2, transcripts[fromOthers]?.ended == true || quiet >= 8 else { continue }
+            let transcript = transcripts[fromOthers]
+            let wait: Double = transcript?.ended != true ? 8 : transcript?.splits == true ? Self.pauseEnds : 2
+            guard quiet >= wait else { continue }
             if let sentence = transcripts[fromOthers]?.finish() {
                 finishSentence(sentence, fromOthers: fromOthers)
             } else {

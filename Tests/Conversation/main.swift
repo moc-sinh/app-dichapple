@@ -152,21 +152,32 @@ check(TranscriptFilter.syllableCount("这个型号 OK") == 5, "Chinese counts ch
 do {
     var guardEcho = EchoGuard()
     guardEcho.spoke("We will send the quotation before Friday.", at: 10)
-    check(guardEcho.isEcho("we will send the quotation before friday", at: 13), "the phone's sentence heard back")
-    check(!guardEcho.isEcho("Can you lower the price a little?", at: 13), "someone else speaking")
-    check(!guardEcho.isEcho("we will send the quotation before friday", at: 30), "long after, it is someone saying it")
+    guardEcho.stopped(at: 13)
+    check(guardEcho.isEcho("we will send the quotation before friday", from: 10.3, to: 13.2), "the phone's sentence heard back")
+    check(!guardEcho.isEcho("Can you lower the price a little?", from: 11, to: 13), "someone else speaking over it")
+    check(!guardEcho.isEcho("OK, so you send the quotation before Friday?", from: 15, to: 17),
+          "said after the phone stopped: someone repeating it, to confirm")
     guardEcho.spoke("我们周五之前发报价", at: 40)
-    check(guardEcho.isEcho("我们周五前发报价。", at: 42), "Chinese echo by characters")
-    check(!guardEcho.isEcho("价格太高了", at: 42), "Chinese reply is not echo")
+    check(guardEcho.isEcho("我们周五前发报价。", from: 40.2, to: 41.5), "Chinese echo by characters, the phone still speaking")
+    check(!guardEcho.isEcho("价格太高了", from: 40.5, to: 41.5), "Chinese reply is not echo")
+    guardEcho.stopped(at: 42)
+    check(guardEcho.isEcho("周五前发报价", from: 42.5, to: 43.4), "a moment after the phone stopped: still its echo")
+    check(!guardEcho.isEcho("好的，周五之前发报价。", from: 44, to: 46), "a partner confirming it afterwards is kept")
     guardEcho.spoke("Chúng tôi sẽ gửi báo giá cho anh trước thứ Sáu và giao hàng trong hai tuần.", at: 50)
+    guardEcho.stopped(at: 54)
     guardEcho.spoke("Giá này là giá tốt nhất của chúng tôi rồi.", at: 54)
-    check(guardEcho.isEcho("giá này là giá tốt nhất của chúng tôi", at: 57), "the phone's Vietnamese heard back")
-    check(guardEcho.isEcho("chúng tôi sẽ gửi báo giá cho anh trước thứ bảy và giao hàng trong hai tuần", at: 57),
-          "heard back with a word misheard")
-    check(!guardEcho.isEcho("Anh ơi giá của chúng tôi là tốt rồi", at: 57), "a colleague's sentence of common words is not echo")
-    check(guardEcho.isEcho("Cảm ơn", at: 58) == false && guardEcho.isEcho("giá tốt", at: 58), "a word or two: all said just before")
+    guardEcho.stopped(at: 57)
+    check(guardEcho.isEcho("giá này là giá tốt nhất của chúng tôi", from: 54.5, to: 57), "the phone's Vietnamese heard back")
+    check(guardEcho.isEcho("chúng tôi sẽ gửi báo giá cho anh trước thứ bảy và giao hàng trong hai tuần", from: 50.2, to: 54),
+          "heard back with a mistake")
+    check(!guardEcho.isEcho("Anh ơi giá của chúng tôi là tốt rồi", from: 55, to: 57), "a colleague's sentence of common words is not echo")
+    check(guardEcho.isEcho("Cảm ơn", from: 56, to: 56.5) == false && guardEcho.isEcho("giá tốt", from: 56, to: 56.5),
+          "a word or two: all said by the phone")
+    check(!guardEcho.isEcho("giá tốt", from: 60, to: 60.5), "but not after it")
     guardEcho.spoke("这个价格可以吗？", at: 60)
-    check(!guardEcho.isEcho("这个呢", at: 61) && guardEcho.isEcho("这个价格", at: 61), "a short sentence: all of it said by the phone")
+    guardEcho.stopped(at: 61)
+    check(!guardEcho.isEcho("这个呢", from: 60.2, to: 61) && guardEcho.isEcho("这个价格", from: 60.2, to: 61),
+          "a short sentence: all of it said by the phone")
 }
 
 // MARK: Live translation events
@@ -526,11 +537,62 @@ do {
     let english = room.take([spoken("我觉得没问题。", "3"), spoken("Sounds", "3", language: "en"), spoken(" good", "3", language: "en")])
     check(english.count == 1 && english[0].text == "另外我觉得没问题。" && room.current.text == "Sounds good" && room.current.language == "en",
           "another language after a sentence: \(english)")
-    let ok = room.take([spoken("<end>", "")])
-    check(ok == [SonioxTranscript.Sentence(text: "Sounds good", language: "en", speaker: "3")],
-          "the end of a sentence finishes it without waiting for Soniox's translation")
+    // Soniox's end of sentence without a full stop is a pause: the sentence waits (the model ends it
+    // after a quiet moment), and its translation is still its own.
+    check(room.take([spoken("<end>", "")]).isEmpty && room.ended, "an end without a full stop is a pause")
     _ = room.take([token("Nghe được đấy.", translation: true)])
-    check(room.previews.first?.translation == "Nghe được đấy.", "its translation, after the end, is its own")
+    check(room.current.translation == "Nghe được đấy." && room.previews.isEmpty, "its translation, after the pause, is its own")
+    check(room.finish() == SonioxTranscript.Sentence(text: "Sounds good", translation: "Nghe được đấy.", language: "en", speaker: "3"),
+          "ended after a quiet moment, translation and all")
+    // After a full stop, Soniox's end finishes it at once, without waiting for its translation.
+    let done = room.take([spoken("好的。", "1"), spoken("<end>", "")])
+    check(done == [SonioxTranscript.Sentence(text: "好的。", language: "zh", speaker: "1")], "a full stop, then the end: finished at once")
+    _ = room.take([token("Được.", translation: true)])
+    check(room.previews.first?.translation == "Được." && room.current.isEmpty, "its translation, after the end, is its own")
+    // A thought said in two breaths ("if you order five hundred, … we can give five percent") is one
+    // sentence: the condition is not translated apart from what it is the condition of.
+    var pause = SonioxTranscript(target: "vi")
+    pause.splits = true
+    check(pause.take([spoken("如果订五百台，", "1"), spoken("<end>", "")]).isEmpty && pause.ended, "a pause after a comma waits")
+    check(pause.take([spoken("便宜一点吗？", "1")]).isEmpty && !pause.ended && pause.current.text == "如果订五百台，便宜一点吗？",
+          "the speaker goes on: the same sentence")
+    check(pause.take([spoken("<end>", "")]).map(\.text) == ["如果订五百台，便宜一点吗？"], "and ends at its question mark")
+    _ = pause.take([spoken("那个", "1"), spoken("<end>", "")])
+    let other = pause.take([spoken("好", "2"), spoken("的", "2")])
+    check(other.map(\.text) == ["那个"] && pause.current.text == "好的" && pause.current.speaker == "2",
+          "someone else after a pause: the paused sentence ends at once")
+    _ = pause.take([spoken("<end>", "")])
+    check(pause.ended && pause.take([spoken("<fin>", "")]).map(\.text) == ["好的"], "a turn ended on purpose ends it, full stop or not")
+    // A word or two of another speaker in the middle of a sentence (one Soniox gave to the wrong
+    // person, or said over the speaker) does not cut it: when the speaker goes on, they stay in it.
+    var over = SonioxTranscript(target: "vi")
+    over.splits = true
+    check(over.take([spoken("这个价格", "1"), spoken("可以", "2")]).isEmpty && over.current.text == "这个价格可以",
+          "another speaker's word in the middle of a sentence is held")
+    check(over.take([spoken("便宜吗？", "1")]).isEmpty, "the speaker goes on")
+    check(over.take([spoken("<end>", "")]) == [SonioxTranscript.Sentence(text: "这个价格可以便宜吗？", language: "zh", speaker: "1")],
+          "one sentence, the speaker's")
+    // Theirs once they say three syllables: the sentence before ends without them.
+    _ = over.take([spoken("这个型号", "1"), spoken("好的", "2")])
+    let theirs = over.take([spoken("没问题", "2")])
+    check(theirs == [SonioxTranscript.Sentence(text: "这个型号", language: "zh", speaker: "1")]
+          && over.current.text == "好的没问题" && over.current.speaker == "2", "three syllables: theirs, a sentence of their own")
+    _ = over.take([spoken("<end>", "")])
+    // A sentence's language is the one most of it is said in, not its first word's.
+    var lead = SonioxTranscript(target: "vi")
+    lead.splits = true
+    let mostly = lead.take([spoken("Dạ, ", "1", language: "vi"), spoken("王总，我们下周一确认订单。", "1"), spoken("<end>", "")])
+    check(mostly.first?.language == "zh", "a Vietnamese word, then Chinese: Chinese: \(mostly)")
+    check(lead.take([spoken("OK，", "2", language: "en"), spoken("那我们下周一确认", "2")]).isEmpty && lead.current.language == "zh",
+          "an English word, then Chinese: Chinese")
+    // Soniox's guess at the translation, in the message that ends the sentence, is not kept twice
+    // when it settles in the next.
+    var twice = SonioxTranscript(target: "vi")
+    twice.splits = true
+    let ended = twice.take([spoken("好的。", "1"), spoken("<end>", ""), token("Được", final: false, translation: true)])
+    check(ended.map(\.text) == ["好的。"] && twice.previews.map(\.translation) == ["Được"], "its guessed translation shows")
+    _ = twice.take([token("Được rồi.", translation: true)])
+    check(twice.previews.map(\.translation) == ["Được rồi."], "settled, it replaces the guess: \(twice.previews)")
     var short = SonioxTranscript(target: "vi")
     short.splits = true
     _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")])
@@ -541,9 +603,11 @@ do {
     cutShort.splits = true
     _ = cutShort.take([spoken("我们这个价格", "1")])
     _ = cutShort.take([token("Giá này của chúng tôi", translation: true)])
-    let cut = cutShort.take([spoken("好的", "2")])
+    check(cutShort.take([spoken("好的", "2")]).isEmpty, "two syllables of another speaker: held")
     _ = cutShort.take([token("Được", translation: true)])
-    check(cut.first?.translation == "Giá này của chúng tôi" && cutShort.current.translation == "Được"
+    let cut = cutShort.take([spoken("没问题", "2")])
+    _ = cutShort.take([token(", không vấn đề", translation: true)])
+    check(cut.first?.translation == "Giá này của chúng tôi" && cutShort.current.translation == "Được, không vấn đề"
           && cutShort.previews.isEmpty, "the next speaker's translation is theirs: \(cutShort.previews) / \(cutShort.current)")
     check(SonioxEvent.parse(#"{"tokens":[{"text":"好","is_final":true,"start_ms":1700,"end_ms":1840}]}"#)
           == [.tokens([SonioxToken(text: "好", isFinal: true, isTranslation: false, language: "", startMs: 1700, endMs: 1840)])],
