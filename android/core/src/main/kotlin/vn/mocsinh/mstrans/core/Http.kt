@@ -12,6 +12,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.io.IOException
@@ -30,6 +31,14 @@ object Http {
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(20, TimeUnit.SECONDS)
             .build()
+    }
+
+    /**
+     * Connections of its own (Hội thoại asks GPT again while a first request hangs: on the same stalled
+     * connection, the second would hang too).
+     */
+    val spare: OkHttpClient by lazy {
+        client.newBuilder().connectionPool(ConnectionPool()).build()
     }
 
     /** For live sessions: no read timeout (a quiet room sends nothing for a while). */

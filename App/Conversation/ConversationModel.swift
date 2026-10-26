@@ -1618,7 +1618,8 @@ final class ConversationModel {
                 problem = "Tài khoản Soniox hết tiền hoặc đang bị giới hạn. Nạp thêm ở console.soniox.com."
                 stop()
             case -1:
-                problem = "Mất kết nối. Đang nối lại…"
+                // Stopped, its last words still coming in: nothing is opened again.
+                if running { problem = "Mất kết nối. Đang nối lại…" }
             default:
                 problem = message.isEmpty ? "Soniox gặp lỗi (\(code))." : "Soniox: \(message)"
             }

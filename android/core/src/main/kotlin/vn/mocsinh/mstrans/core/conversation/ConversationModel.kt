@@ -60,7 +60,9 @@ fun interface PhoneVoice {
 /** The calls to OpenAI (and the phone's and Google's voices), replaceable in a test. */
 class ConversationServices(
     val transcribe: suspend (apiKey: String, wav: ByteArray, prompt: String) -> SpeechServices.Transcript,
-    val translate: suspend (apiKey: String, text: String, target: Language, context: SpokenContext, model: TranslationModel) -> Translation,
+    /** `spare`: asked again while the first request hangs, on a connection of its own. */
+    val translate: suspend (apiKey: String, text: String, target: Language, context: SpokenContext, model: TranslationModel,
+                            spare: Boolean) -> Translation,
     /** 24 kHz mono PCM16 of `text`; `heard` gets it as it is made (OpenAI's and the phone's voices). */
     val speak: suspend (apiKey: String, text: String, voice: String, language: Language, heard: (ByteArray) -> Unit) -> ByteArray,
     /** Opens the connection to OpenAI before a sentence needs it (every 45 s at most), so no translation waits for it. */
@@ -69,8 +71,8 @@ class ConversationServices(
     companion object {
         fun live(settings: Settings, phone: PhoneVoice) = ConversationServices(
             transcribe = { key, wav, prompt -> SpeechServices(key).transcribe(wav, prompt) },
-            translate = { key, text, target, context, model ->
-                Translator(key, model, settings).translateSpoken(text, target, context)
+            translate = { key, text, target, context, model, spare ->
+                Translator(key, model, settings, spare = spare).translateSpoken(text, target, context)
             },
             speak = { key, text, voice, language, heard ->
                 val google = GoogleVoice.nameOf(voice)
@@ -132,7 +134,7 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
         if (recent.size > RECENT_SAMPLES) recent.removeFirst(recent.size - RECENT_SAMPLES)
         if (streams) {
             chunk.append(samples)
-            val speech = mine != null || segmenter.speaking
+            val speech = mine != null || segmenter.speaking || segmenter.audible
             val tenth = PCM.RATE / 10
             while (chunk.size >= tenth) {
                 val data = PCM.data(chunk.array, 0, tenth)
@@ -185,6 +187,11 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
     fun flush() {
         endMine()
         segmenter.flush()?.let { deliver(it) }
+        // The last moment of sound goes too: it may end the last word.
+        if (streams && chunk.size > 0) {
+            val data = PCM.data(chunk.array, 0, chunk.size)
+            post { onChunk?.invoke(data, false) }
+        }
         chunk.clear()
     }
 
@@ -308,6 +315,16 @@ class ConversationModel(
         private const val SOL_PATIENCE = 5.0
         /** The meeting's latest sentences GPT gets with each one. */
         private const val CONTEXT_LINES = 8
+        /** How long the sound after the button goes up is still the user's turn (ms). */
+        private const val MINE_TAIL = 350L
+        /**
+         * A Soniox sentence paused without a full stop ends once its speaker has said nothing more for this
+         * long (ms): a thought said in two breaths ("if you order five hundred, … we give five percent") is
+         * translated as one.
+         */
+        private const val PAUSE_ENDS = 1200L
+        /** Seconds before each try to open a dropped Soniox session again. */
+        private val RECONNECT_DELAYS = listOf(0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 5.0, 5.0)
         const val LONGEST_TOPIC = 200
 
         /** Sound enough to begin reading without running dry while the rest is made: 0.4 s. */
@@ -494,9 +511,34 @@ class ConversationModel(
     private val liveCaptions = HashMap<Boolean, LiveCaptions>()
     private val liveEntries = HashMap<Boolean, HashMap<Int, String>>()
     private var partnerTailUntil = 0L
+    /**
+     * The button just went up: the sound said just before is still on its way, and goes to the user's
+     * session until then (it went to the room's, and the user's last syllable was lost: "…được không"
+     * read as "…được", a question as a yes).
+     */
+    private var mineTailUntil = 0L
+    /** The user's voice taken out of what the room's Soniox session hears in their turns. */
+    private var myVoice = MyVoiceFilter()
     private var liveRetries = 0
     private var sonioxToVietnamese: SonioxSession? = null
     private var sonioxToPartner: SonioxSession? = null
+    /**
+     * The sound lately sent to each side's Soniox session (true: the others'), and where in it each
+     * session's sound begins: a session that drops is followed by one sent again what the first had not
+     * settled, and what was said meanwhile (it was lost).
+     */
+    private val trails = HashMap<Boolean, SoundTrail>()
+    private val origins = HashMap<Boolean, Double>()
+    private val replayFrom = HashMap<Boolean, Double>()
+    /**
+     * Listening stopped with Soniox: its sessions settle what they heard, and their last words and
+     * translations still come in, two seconds at most (they were lost when the sessions closed at once).
+     * The sides whose sessions have answered.
+     */
+    private var draining = false
+    private val settledAll = HashSet<Boolean>()
+    private val drained = HashSet<Boolean>()
+    private var drainJob: Job? = null
     /** What each Soniox session has heard (true: the others'), cut into sentences. */
     private val transcripts = HashMap<Boolean, SonioxTranscript>()
     /** Dịch liền: the others' sound is sent while someone speaks, not while the room is quiet. */
@@ -524,6 +566,33 @@ class ConversationModel(
     private class HeardTime(var start: Double? = null, var end: Double? = null, var shown: Double? = null, var translated: Double? = null)
     private val heardTimes = HashMap<String, HeardTime>()
 
+    /**
+     * The sound sent to one side's Soniox sessions lately, a tenth of a second at a time, each with where
+     * it begins in all the sound that side was sent.
+     */
+    private class SoundTrail {
+        class Chunk(val at: Double, val data: ByteArray)
+
+        val chunks = ArrayDeque<Chunk>()
+        /** Seconds of sound that side was sent, all its sessions together. */
+        var end = 0.0
+            private set
+
+        fun add(data: ByteArray) {
+            chunks.addLast(Chunk(end, data))
+            end += PCM.seconds(data)
+            while (chunks.isNotEmpty() && end - chunks.first().at > KEPT) chunks.removeFirst()
+        }
+
+        /** The sound from `position` on, from the tenth of a second it falls in. */
+        fun since(position: Double): List<Chunk> = chunks.filter { it.at + PCM.seconds(it.data) > position }
+
+        companion object {
+            /** Long enough for a session to be opened again a few times. */
+            const val KEPT = 15.0
+        }
+    }
+
     init {
         audio.onInterruption = { began ->
             interrupted = began
@@ -545,6 +614,7 @@ class ConversationModel(
 
     suspend fun start() {
         if (running || starting) return
+        endDrain()
         problem = null
         // Soniox hears and translates by itself: the OpenAI key is only for its voices and summaries.
         val key: String
@@ -624,14 +694,25 @@ class ConversationModel(
         hearsSpeech = false
         stopSpeaking()
         audio.stop()
+        // Soniox is sent the last of the sound, then asked to settle all it heard.
+        draining = engine == Engine.SONIOX && (sonioxToVietnamese != null || sonioxToPartner != null)
+        val soniox = draining
         // After the sound already queued: the sentence being said still goes in.
-        listener?.let { l -> audio.onAudioThread { l.flush() } }
-        // The sentences being said are translated as they are.
-        for (fromOthers in listOf(true, false)) transcripts[fromOthers]?.finish()?.let { finishSentence(it, fromOthers) }
+        val l = listener
+        if (l != null) {
+            audio.onAudioThread {
+                l.flush()
+                if (soniox) scope.launch { drainSoniox() }
+            }
+        } else if (soniox) {
+            drainSoniox()
+        }
         closeLive()
         endLiveCaptions(all = true)
-        for (current in captions.values.toList()) finishCaption(current.id)
-        captions.clear()
+        if (!draining) {
+            for (current in captions.values.toList()) finishCaption(current.id)
+            captions.clear()
+        }
         billLive()
         keepScreenOn?.invoke(false)
         meetings.save(meeting)
@@ -643,11 +724,11 @@ class ConversationModel(
     private val settling: Boolean get() = entries.any { it.state == State.Recognizing || it.state == State.Translating }
 
     /** A new meeting can start once listening has stopped and the last sentences are in this one. */
-    val canStartNewMeeting: Boolean get() = !running && !summarizing && !settling && entries.isNotEmpty()
+    val canStartNewMeeting: Boolean get() = !running && !draining && !summarizing && !settling && entries.isNotEmpty()
 
     /** The meeting so far goes to the saved ones; the next starts empty. */
     fun newMeeting() {
-        if (running || summarizing || settling) return
+        if (running || draining || summarizing || settling) return
         billLive()
         meetings.save(meeting)
         meeting = Meeting(topic = topic.ifEmpty { null })
@@ -690,13 +771,25 @@ class ConversationModel(
                     return
                 }
             }
-            if (engine == Engine.SONIOX) openSonioxPartner()
+            if (engine == Engine.SONIOX) {
+                openSonioxPartner()
+                myVoice.began(trails[true]?.end ?: 0.0)
+            }
         } else if (engine == Engine.LIVE) {
-            // A moment of silence lets the last words through.
+            // The sound said just before the button went up, then a moment of silence lets the last words through.
+            mineTailUntil = millis() + MINE_TAIL
             partnerTailUntil = millis() + 1500
         } else if (engine == Engine.SONIOX) {
-            // The user's last words are settled and translated now, not after a pause.
-            sonioxToPartner?.finalize()
+            // The sound said just before the button went up, then the user's last words are settled and
+            // translated at once, not after a pause.
+            mineTailUntil = millis() + MINE_TAIL
+            val session = sonioxToPartner
+            scope.launch {
+                delay(MINE_TAIL + 50)
+                if (!running || talking) return@launch
+                myVoice.ended(trails[true]?.end ?: 0.0)
+                if (sonioxToPartner === session) session?.finalize()
+            }
         }
         talking = down
         val l = listener
@@ -784,7 +877,8 @@ class ConversationModel(
         val entry = entries.firstOrNull { it.id == id } ?: return
         val text = transcript.text
         // Noise the recognizer wrote words for, or the phone's own voice heard again.
-        if (TranscriptFilter.isNoise(text, seconds) || (!entry.mine && echo.isEcho(text, now()))) {
+        val said = entry.at / 1000.0
+        if (TranscriptFilter.isNoise(text, seconds) || (!entry.mine && echo.isEcho(text, said, said + seconds))) {
             if (entry.mine) problem = "Chưa nghe rõ bạn nói. Thử lại, nói gần điện thoại hơn."
             remove(id)
             return
@@ -890,9 +984,11 @@ class ConversationModel(
         val answers = Channel<Result<Translation>>(Channel.UNLIMITED)
         val asks = ArrayList<Job>()
         fun ask() {
+            // The second on a connection of its own: a stalled one would hold it too.
+            val spare = asks.isNotEmpty()
             asks.add(launch {
                 try {
-                    answers.trySend(Result.success(translate(key, text, target, context, model)))
+                    answers.trySend(Result.success(translate(key, text, target, context, model, spare)))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -1132,7 +1228,10 @@ class ConversationModel(
             log(entry, "đọc sau ${SpeedLog.seconds(behind)}" + (if (rate > 1) faster else "") + (if (newer > 0) " · $newer câu chờ" else ""))
         }
         beginAloud(mine)
-        echo.spoke(text, now())
+        // What the room's recognizer can hear of it: with Soniox, the room is sent silence while the user's
+        // words are read, and while anything is read without echo cancelling.
+        val heard = engine != Engine.SONIOX || (!mine && echoCancelling)
+        if (heard) echo.spoke(text, now())
         var played = 0
         var playing = 0
         while (running && generation == speechGeneration) {
@@ -1150,6 +1249,7 @@ class ConversationModel(
         // Until the last part has been heard (or playback was stopped).
         val heardBy = millis() + (PCM.seconds(played) * 1000).toLong() + 2000
         while (playing > 0 && millis() < heardBy) delay(20)
+        if (heard) echo.stopped(now())
         endAloud(mine)
         val error = next.failure
         if (error != null && error !is CancellationException && generation == speechGeneration) problem = voiceProblem(error)
@@ -1229,11 +1329,52 @@ class ConversationModel(
         liveToPartner?.close()
         liveToVietnamese = null
         liveToPartner = null
+        if (!draining) closeSoniox()
+    }
+
+    private fun closeSoniox() {
         sonioxToVietnamese?.close()
         sonioxToPartner?.close()
         sonioxToVietnamese = null
         sonioxToPartner = null
         transcripts.clear()
+        trails.clear()
+        origins.clear()
+        replayFrom.clear()
+    }
+
+    /**
+     * Listening stopped: Soniox settles now what it heard (its last words and their translation come in),
+     * and the sessions are closed once both have answered, or after two seconds.
+     */
+    private fun drainSoniox() {
+        if (!draining) return
+        drained.clear()
+        settledAll.clear()
+        for ((fromOthers, session) in listOf(true to sonioxToVietnamese, false to sonioxToPartner)) {
+            if (session != null && session.isOpen) session.finalize() else drained.add(fromOthers)
+        }
+        drainJob?.cancel()
+        drainJob = scope.launch {
+            delay(2000)
+            endDrain()
+        }
+        if (drained.size == 2) endDrain()
+    }
+
+    /** What is left is finished as it is known, and the sessions closed. */
+    private fun endDrain() {
+        if (!draining) return
+        draining = false
+        drainJob?.cancel()
+        drainJob = null
+        for (fromOthers in listOf(true, false)) transcripts[fromOthers]?.finish()?.let { finishSentence(it, fromOthers) }
+        for (current in captions.values.toList()) finishCaption(current.id)
+        captions.clear()
+        closeSoniox()
+        billLive()
+        meetings.save(meeting)
+        changed()
     }
 
     /**
@@ -1256,37 +1397,38 @@ class ConversationModel(
     }
 
     /**
-     * The microphone's sound goes to the session for whoever speaks: the user's while the button is
-     * down, everyone else's otherwise. The other session gets silence for a moment, so it finishes what
-     * it was saying. Dịch liền is not sent a quiet room (paid by the minute sent, 2 USD an hour); Soniox
-     * is sent all of it (0.18 USD an hour): a quiet or far voice the level meter took for the room, or
-     * the first syllable after a pause, is never lost, and Soniox hears for itself where a sentence ends.
+     * The microphone's sound goes to the session for whoever speaks: the user's while the button is down
+     * (and a moment after, for the sound still on its way), everyone else's otherwise. Dịch liền's room
+     * session gets silence meanwhile, so it finishes what it was saying, and is not sent a quiet room (paid
+     * by the minute sent, 2 USD an hour). Soniox's room session hears everything (0.18 USD an hour), the
+     * user's turns too, without the user's voice (`myVoice`): a quiet or far voice the level meter took for
+     * the room, the first syllable after a pause, a partner answering while the user speaks, are never
+     * lost, and Soniox hears for itself where a sentence ends.
      */
     private fun stream(data: ByteArray, speech: Boolean) {
-        if (!running || !engine.streams) return
+        if (!(running || draining) || !engine.streams) return
         val silent = ByteArray(data.size)
-        if (talking) {
+        val mine = talking || millis() < mineTailUntil
+        if (mine) {
             sendMine(data)
-            if (engine == Engine.SONIOX) {
-                sendOthers(silent)
-            } else {
-                for (chunk in othersGate.feed(silent, false)) sendOthers(chunk)
-            }
+        } else if (engine == Engine.LIVE && millis() < partnerTailUntil) {
+            sendMine(silent)
+        }
+        // The phone speaking the partners' language is not someone in the room to translate; nor is its
+        // Vietnamese (Đọc lại) when no echo cancelling takes it out.
+        val phoneSpeaks = playingMine > 0 || (playingAloud > 0 && !echoCancelling)
+        if (engine == Engine.SONIOX) {
+            sendOthers(if (phoneSpeaks) silent else data)
         } else {
-            // The phone speaking the partners' language is not someone in the room to translate; nor is
-            // its Vietnamese (Đọc lại) when no echo cancelling takes it out.
-            val phoneSpeaks = playingMine > 0 || (playingAloud > 0 && !echoCancelling)
-            if (engine == Engine.SONIOX) {
-                sendOthers(if (phoneSpeaks) silent else data)
-            } else {
-                for (chunk in othersGate.feed(if (phoneSpeaks) silent else data, speech && !phoneSpeaks)) sendOthers(chunk)
-            }
-            if (millis() < partnerTailUntil) sendMine(silent)
+            val quiet = mine || phoneSpeaks
+            for (chunk in othersGate.feed(if (quiet) silent else data, speech && !quiet)) sendOthers(chunk)
         }
     }
 
     private fun sendOthers(chunk: ByteArray) {
         if (engine == Engine.SONIOX) {
+            trails.getOrPut(true) { SoundTrail() }.add(chunk)
+            // While it is opened again, the sound waits in the trail.
             (sonioxToVietnamese ?: return).send(chunk)
             sonioxSent[true] = (sonioxSent[true] ?: 0.0) + PCM.seconds(chunk)
         } else {
@@ -1297,6 +1439,7 @@ class ConversationModel(
 
     private fun sendMine(chunk: ByteArray) {
         if (engine == Engine.SONIOX) {
+            trails.getOrPut(false) { SoundTrail() }.add(chunk)
             (sonioxToPartner ?: return).send(chunk)
             sonioxSent[false] = (sonioxSent[false] ?: 0.0) + PCM.seconds(chunk)
         } else {
@@ -1529,6 +1672,10 @@ class ConversationModel(
         othersGate.reset()
         transcripts.clear()
         sonioxEntries.clear()
+        trails.clear()
+        origins.clear()
+        replayFrom.clear()
+        myVoice = MyVoiceFilter()
         sonioxToVietnamese = makeSoniox(Language.vietnamese.code)
         openSonioxPartner()
     }
@@ -1547,6 +1694,21 @@ class ConversationModel(
         session.onEvent = { soniox(it, session) }
         sonioxSent[room] = 0.0
         session.open()
+        // Opened again after a drop: sent at once what the one before had not settled, and what was said meanwhile.
+        val trail = trails[room]
+        val from = replayFrom.remove(room)
+        if (from != null && trail != null) {
+            val missed = trail.since(from)
+            origins[room] = missed.firstOrNull()?.at ?: trail.end
+            for (chunk in missed) {
+                session.send(chunk.data)
+                sonioxSent[room] = (sonioxSent[room] ?: 0.0) + PCM.seconds(chunk.data)
+                unbilledLive += PCM.seconds(chunk.data)
+            }
+            if (missed.isNotEmpty()) log(null, "Soniox nối lại: gửi lại ${SpeedLog.seconds(trail.end - (origins[room] ?: 0.0))} tiếng chưa chốt")
+        } else {
+            origins[room] = trail?.end ?: 0.0
+        }
         return session
     }
 
@@ -1590,7 +1752,8 @@ class ConversationModel(
                 liveRetries = 0
                 if (problem?.startsWith("Mất kết nối") == true) problem = null
                 val transcript = transcripts.getOrPut(fromOthers) { newTranscript(session.target) }
-                val finished = transcript.take(event.tokens)
+                val heard = if (fromOthers) myVoice.filter(event.tokens, origins[true] ?: 0.0) else event.tokens
+                val finished = transcript.take(heard)
                 // How far the words Soniox settled are behind the sound sent to it.
                 val lag = transcript.settledEnd?.let { (sonioxSent[fromOthers] ?: 0.0) - it }
                 for (sentence in finished) finishSentence(sentence, fromOthers, lag)
@@ -1598,6 +1761,14 @@ class ConversationModel(
                 val current = transcript.current
                 // Cut by GPT's sentences, a piece of translation no sentence took is not shown on its own.
                 if (if (transcript.splits) current.text.isNotEmpty() else !current.isEmpty) showSentence(current, fromOthers)
+                // Stopped: this side has answered once all it heard is settled and nothing of it is left.
+                if (draining) {
+                    if (event.tokens.any { it.isFin }) settledAll.add(fromOthers)
+                    if (fromOthers in settledAll && transcript.current.text.isEmpty()) {
+                        drained.add(fromOthers)
+                        if (drained.size == 2) endDrain()
+                    }
+                }
             }
             SonioxEvent.Finished -> Unit
             is SonioxEvent.Failed -> when (event.code) {
@@ -1609,27 +1780,36 @@ class ConversationModel(
                     problem = "Tài khoản Soniox hết tiền hoặc đang bị giới hạn. Nạp thêm ở console.soniox.com."
                     stop()
                 }
-                -1 -> problem = "Mất kết nối. Đang nối lại…"
+                // Stopped, its last words still coming in: nothing is opened again.
+                -1 -> if (running) problem = "Mất kết nối. Đang nối lại…"
                 else -> problem = if (event.message.isEmpty()) "Soniox gặp lỗi (${event.code})." else "Soniox: ${event.message}"
             }
             SonioxEvent.Closed -> {
+                if (draining) {
+                    drained.add(fromOthers)
+                    if (drained.size == 2) endDrain()
+                    return
+                }
                 if (!running || engine != Engine.SONIOX) return
-                // Dropped (network, a time limit): what was heard stays, and it is opened again, a few
-                // times. Let go of at once, so a second word of it closing opens nothing more.
+                // Dropped (network, a time limit): what it settled stays, and it is opened again at once (then a
+                // few more times, waiting longer), sent again what it had not settled. Let go of at once, so a
+                // second word of it closing opens nothing more.
                 session.close()
-                transcripts[fromOthers]?.finish()?.let { finishSentence(it, fromOthers) }
+                replayFrom[fromOthers] = (origins[fromOthers] ?: 0.0) + (transcripts[fromOthers]?.settledEnd ?: 0.0)
+                transcripts[fromOthers]?.finishSettled()?.let { finishSentence(it, fromOthers) }
                 transcripts.remove(fromOthers)
                 sonioxEntries.remove(fromOthers)
                 if (fromOthers) sonioxToVietnamese = null else sonioxToPartner = null
                 log(null, "Soniox mất kết nối, nối lại")
                 liveRetries += 1
-                if (liveRetries > 5) {
+                if (liveRetries > RECONNECT_DELAYS.size) {
                     problem = "Không nối lại được Soniox. Kiểm tra mạng rồi bấm nút tròn để nghe lại."
                     stop()
                     return
                 }
+                val wait = (RECONNECT_DELAYS[liveRetries - 1] * 1000).toLong()
                 scope.launch {
-                    delay(1000)
+                    if (wait > 0) delay(wait)
                     if (!running || engine != Engine.SONIOX) return@launch
                     if (fromOthers) {
                         if (sonioxToVietnamese == null) sonioxToVietnamese = makeSoniox(Language.vietnamese.code)
@@ -1646,14 +1826,17 @@ class ConversationModel(
         val now = millis()
         val speaker = if (fromOthers) sentence.speaker else ""
         val current = captions[fromOthers]
-        if (current != null && entries.any { it.id == current.id }) {
+        val shown = current?.let { c -> entries.firstOrNull { it.id == c.id } }
+        if (current != null && shown != null) {
+            val grew = shown.text != sentence.text
             update(current.id) {
                 it.text = sentence.text
                 it.translation = sentence.translation
                 if (sentence.language.isNotEmpty()) it.language = sentence.language
                 if (speaker.isNotEmpty()) it.speaker = speaker
             }
-            captions[fromOthers] = Caption(current.id, now)
+            // When its words last changed: how long the speaker has said nothing more.
+            captions[fromOthers] = Caption(current.id, if (grew) now else current.last)
             noteHeard(current.id, sentence, fromOthers)
             return current.id
         }
@@ -1670,6 +1853,18 @@ class ConversationModel(
         noteHeard(entry.id, sentence, fromOthers)
         changed()
         return entry.id
+    }
+
+    /**
+     * When a Soniox sentence was said (`now()`'s clock), from where its words are in the sound sent: the
+     * sound goes as it is heard, so the end of what was sent is now.
+     */
+    private fun saidTime(sentence: SonioxTranscript.Sentence, fromOthers: Boolean): Pair<Double, Double> {
+        val now = now()
+        val sent = sonioxSent[fromOthers] ?: 0.0
+        val to = sentence.endMs?.let { now - (sent - it / 1000.0) } ?: now
+        val from = sentence.startMs?.let { now - (sent - it / 1000.0) } ?: (to - 3)
+        return minOf(from, to) to to
     }
 
     /**
@@ -1695,7 +1890,8 @@ class ConversationModel(
         val id = showSentence(sentence, fromOthers)
         captions.remove(fromOthers)
         // The phone's Vietnamese voice heard again through the microphone.
-        if (fromOthers && echo.isEcho(sentence.text, now())) {
+        val (saidFrom, saidTo) = saidTime(sentence, fromOthers)
+        if (fromOthers && echo.isEcho(sentence.text, saidFrom, saidTo)) {
             log(id, "Soniox: tiếng của máy nghe lại, bỏ")
             heardTimes.remove(id)
             remove(id)
@@ -1755,20 +1951,30 @@ class ConversationModel(
         // What the partners hear is the user's own words: the app's translation model.
         val model = if (entry.mine) settings.model else quality.model
         val began = millis()
-        try {
-            val result = gptTranslation(entry, target, model, apiKey)
-            charge { it.used(result.usage, model) }
-            update(id) {
-                it.translation = result.text
-                it.state = State.Done
+        for (attempt in 1..2) {
+            try {
+                val result = gptTranslation(entry, target, model, apiKey)
+                charge { it.used(result.usage, model) }
+                update(id) {
+                    it.translation = result.text
+                    it.state = State.Done
+                }
+                log(id, "GPT ${name(model)} ${SpeedLog.seconds((millis() - began) / 1000.0)}" + heardNote(id, entry.mine))
+                break
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the live
+                // translation goes on coming in: it was kept as it was when GPT failed, cut short.
+                if (attempt == 1) {
+                    log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: hỏi lại sau 1,5 s")
+                    delay(1500)
+                    continue
+                }
+                update(id) { it.state = if (it.translation.isEmpty()) State.Failed(e.message ?: "Lỗi không rõ.") else State.Done }
+                log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: giữ bản dịch trực tiếp")
+                heardTimes.remove(id)
             }
-            log(id, "GPT ${name(model)} ${SpeedLog.seconds((millis() - began) / 1000.0)}" + heardNote(id, entry.mine))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            update(id) { it.state = if (it.translation.isEmpty()) State.Failed(e.message ?: "Lỗi không rõ.") else State.Done }
-            log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: giữ bản dịch trực tiếp")
-            heardTimes.remove(id)
         }
         val done = entries.firstOrNull { it.id == id } ?: return
         if (done.state != State.Done) return
@@ -1802,13 +2008,16 @@ class ConversationModel(
     }
 
     /**
-     * A sentence Soniox ended but whose translation never came, or one it stopped sending words for (the
-     * connection hung): finished with what is known, after a moment.
+     * A sentence Soniox ended but whose translation never came, one paused without a full stop whose
+     * speaker says nothing more, or one Soniox stopped sending words for (the connection hung): finished
+     * with what is known, after a moment.
      */
     private fun expireSentences() {
         for ((fromOthers, current) in captions.entries.toList()) {
             val quiet = millis() - current.last
-            if (quiet < 2000 || !(transcripts[fromOthers]?.ended == true || quiet >= 8000)) continue
+            val transcript = transcripts[fromOthers]
+            val wait = if (transcript?.ended != true) 8000L else if (transcript.splits) PAUSE_ENDS else 2000L
+            if (quiet < wait) continue
             val sentence = transcripts[fromOthers]?.finish()
             if (sentence != null) {
                 finishSentence(sentence, fromOthers)

@@ -21,6 +21,16 @@ class SpeechSegmenter(
     /** Someone is speaking now. */
     var speaking = false
         private set
+    /**
+     * Sound some way above the room's noise, if not as loud as an utterance must begin: a far or quiet
+     * voice. Dịch liền sends it on (the echo cancelling it needs makes far voices weaker, and one heard
+     * only this loud was never sent, nor translated).
+     */
+    var audible = false
+        private set
+    private var audibleFrames = 0
+    /** Frames it stays audible after the last loud ones: between syllables too. */
+    private var audibleHold = 0
     /** The microphone is not listened to while the phone speaks a translation aloud. */
     var muted = false
         private set
@@ -120,6 +130,10 @@ class SpeechSegmenter(
         if (muted) return null
         val db = PCM.dbfs(frame, from, from + FRAME)
         remember(db)
+        // Three frames in a row (a click is one), and a moment after.
+        audibleFrames = if (db >= maxOf(MINIMUM_SPEECH_DB - 6, floorDb + 6)) audibleFrames + 1 else 0
+        audibleHold = if (audibleFrames >= 3) 15 else maxOf(0, audibleHold - 1)
+        audible = audibleHold > 0
         val onset = maxOf(MINIMUM_SPEECH_DB, floorDb + 10)
         val release = maxOf(MINIMUM_SPEECH_DB - 6, floorDb + 5)
 

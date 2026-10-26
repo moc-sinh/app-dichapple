@@ -217,8 +217,9 @@ class LiveCaptions {
     )
 
     companion object {
-        /** Nothing heard this long: the caption ends. */
+        /** Nothing heard this long: the caption ends; after a full stop, sooner (it waited 2.5 s for GPT). */
         const val QUIET = 2.5
+        const val QUIET_AFTER_FULL_STOP = 0.8
         /** A caption is cut after a full stop once it is this long; after a comma, and anywhere. */
         const val SHORTEST = 3.0
         const val LONG = 10.0
@@ -292,7 +293,9 @@ class LiveCaptions {
         for (caption in waiting.toList()) {
             if (now - (lastPiece[caption.number] ?: now) > TRANSLATION_QUIET) release(caption.number)
         }
-        if (current == null || now - last < QUIET) return null
+        val caption = current ?: return null
+        val ended = caption.text.trim().lastOrNull()?.let { it in SENTENCE_ENDS } == true
+        if (now - last < (if (ended) QUIET_AFTER_FULL_STOP else QUIET)) return null
         return finishCurrent(now)
     }
 

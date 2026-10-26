@@ -59,7 +59,7 @@ class ConversationModelTest {
                 if (translated.isEmpty()) SpeechServices.Transcript("这个价格是多少？", "zh")
                 else SpeechServices.Transcript("Nếu anh đặt năm trăm chiếc, bên em giảm năm phần trăm", "vi")
             },
-            translate = { _, text, target, _, _ ->
+            translate = { _, text, target, _, _, _ ->
                 translated.add(text)
                 Translation(if (target.code == "vi") "Giá này bao nhiêu?" else "如果您订五百台，我们优惠百分之五", null, target)
             },

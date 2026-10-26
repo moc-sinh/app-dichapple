@@ -108,21 +108,24 @@ object TranscriptFilter {
 }
 
 /**
- * The phone's own voice heard again: a sentence made of what the phone said a moment ago is that
- * echo, not someone speaking.
+ * The phone's own voice heard again. When a translation is read aloud through the speaker, the
+ * microphone hears it: a sentence said while the phone was saying the same words is that echo, not
+ * someone speaking.
  *
- * Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: the phone
- * reads a lot in a busy meeting, and a colleague's sentence made of common words ("của chúng tôi",
- * "我们的") was taken for its echo and lost.
+ * Only while the phone speaks, and a moment after: a partner repeating what the phone said a few
+ * seconds before ("好的，下周一确认订单" after it said "我们下周一确认订单") is confirming it, and was
+ * lost. Compared by pairs of words (of characters, in Chinese and Japanese), not single ones: a
+ * colleague's sentence of common words ("của chúng tôi", "我们的") was taken for its echo.
  */
 class EchoGuard {
-    private class Said(val at: Double, val words: Set<String>, val pairs: Set<String>)
+    private class Said(val from: Double, var to: Double, val words: Set<String>, val pairs: Set<String>)
 
-    private val recent = ArrayList<Said>()
+    private val spoken = ArrayList<Said>()
 
     companion object {
-        private const val WINDOW = 15.0
-        private const val SHORT_WINDOW = 5.0
+        /** The phone's voice is heard while it plays and a moment after (the room's echo, and how far a recognizer's times are off). */
+        const val TAIL = 1.5
+        private const val KEPT = 60.0
 
         /** Lower-case words; in Chinese and Japanese, each character. */
         fun words(text: String): List<String> {
@@ -150,30 +153,36 @@ class EchoGuard {
         fun pairs(words: List<String>): List<String> = words.zipWithNext { a, b -> "$a $b" }
     }
 
-    /** The phone said `text` at `at` (seconds, any clock). */
+    /** The phone begins saying `text` at `at` (seconds, the clock heard sentences are timed by), until `stopped`. */
     fun spoke(text: String, at: Double) {
         val words = words(text)
         if (words.isEmpty()) return
-        recent.add(Said(at, words.toSet(), pairs(words).toSet()))
-        recent.removeAll { at - it.at > WINDOW }
+        spoken.add(Said(at, Double.POSITIVE_INFINITY, words.toSet(), pairs(words).toSet()))
+        spoken.removeAll { at - it.to > KEPT }
     }
 
-    fun isEcho(text: String, at: Double): Boolean {
+    /** The phone stopped speaking. */
+    fun stopped(at: Double) {
+        for (said in spoken) if (said.to == Double.POSITIVE_INFINITY) said.to = at
+    }
+
+    /** A sentence said from `from` to `to` (seconds): the phone's voice heard back, when said while the phone said the same words. */
+    fun isEcho(text: String, from: Double, to: Double): Boolean {
         val heard = words(text)
-        if (heard.isEmpty()) return false
-        // A word or two: all of them said by the phone just before.
+        val during = spoken.filter { from <= it.to + TAIL && to >= it.from }
+        if (heard.isEmpty() || during.isEmpty()) return false
+        // A word or two: all of them said by the phone.
         if (heard.size < 3) {
             val said = HashSet<String>()
-            for (s in recent) if (at - s.at <= SHORT_WINDOW) said.addAll(s.words)
+            for (s in during) said.addAll(s.words)
             return heard.all { it in said }
         }
         val said = HashSet<String>()
-        for (s in recent) if (at - s.at <= WINDOW) said.addAll(s.pairs)
-        if (said.isEmpty()) return false
+        for (s in during) said.addAll(s.pairs)
         val pairs = pairs(heard)
         val matched = pairs.count { it in said }
-        // Half of a long sentence (what the recognizer heard of the phone's voice has a mistake here
-        // and there), all of a short one: "这个呢" after the phone said "这个价格" is someone asking.
+        // Half of a long sentence (what the recognizer heard of the phone's voice has a mistake here and
+        // there), all of a short one: "这个呢" after the phone said "这个价格" is someone asking.
         return matched * 2 >= pairs.size && matched >= minOf(pairs.size, 3)
     }
 }
