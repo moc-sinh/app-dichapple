@@ -295,6 +295,26 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
     từ link release của repo này.
   - Chưa thử trên máy Android thật.
 
+- **Android 1.1.0 (26/10, khuya): Hội thoại bằng iPhone 1.12.1.** Người dùng: "chỉ làm phần nghe dịch, tối ưu tốc độ
+  dịch ra chữ và chất lượng bản dịch, rồi xuất cả IPA lẫn Android". Nhánh `claude/android-apk` đã được **gộp vào
+  `claude/funny-gates-s6pl2c`** (merge f564a08), mọi việc Android từ đây làm trên nhánh này. Chuyển sang Kotlin
+  (`android/core/.../conversation`): `SonioxTranscript` (splits, gán bản dịch theo thứ tự `owner`/`awaiting`/`released`,
+  người nói, `start_ms`/`end_ms`), `configMessage` (diarization, `context.general`), `LiveCaptions`, `EchoGuard` theo cặp
+  từ, `SpeechSegmenter.pause(said)` và câu dài nhất 10 s, `TranscriptFilter` 11 âm tiết/giây, `Meeting` (speaker, topic,
+  `who`), `CostMeter.perHour(translatesAgain)`, `SpeedLog`, `Translator.translateSpoken`/`SpokenContext`/`Prompt.spoken`/
+  `spokenInput`/`warmUp`, và `ConversationModel` viết lại theo bản Swift (GPT dịch lại câu Soniox và Dịch liền, hỏi GPT lần
+  hai sau 2,5 s bằng `Channel` + `withTimeoutOrNull`, mở sẵn kết nối, chủ đề, giọng đọc nhanh/bỏ câu cũ, khử vọng chỉ khi
+  máy vừa nghe vừa nói). `AudioPort` thêm `setEchoCancelling`, `backlog`, `setRate`; `AndroidAudio`: đổi nguồn micro khi
+  đang nghe (VOICE_COMMUNICATION + AEC ↔ VOICE_RECOGNITION), tốc độ đọc bằng `PlaybackParams` (giữ cao độ). Màn
+  `ConversationScreen`: "Người N · …", ⋯ › Chủ đề cuộc họp (hộp nhập), ⋯ › Sao chép nhật ký tốc độ, Dịch lời đối phương cho
+  mọi Cách dịch, lời hướng dẫn và chi phí như iPhone, biên bản ghi `line.who`. Test: `ConversationPartsTest` (các kiểm tra
+  của iPhone), `ConversationSonioxTest` (máy chủ Soniox giả bằng MockWebServer + model thật: 3 người, chen ngang, GPT treo,
+  Tôi nói, nhật ký; đưa cách gán theo thời gian cũ vào thì trượt). **Chạy được trên máy cloud**: JDK 21, Gradle
+  `/opt/gradle-8.14.3`, init script trỏ Maven Central qua `maven-central.storage-download.googleapis.com` (thêm cả cho
+  `buildscript`), Android SDK tải từ dl.google.com (cmdline-tools → `platforms;android-35`, `build-tools;35.0.0`) nên
+  build được cả `:app:assembleRelease` tại chỗ (không có KVM nên không chạy máy ảo). CI Android run 4 xanh, phát hành
+  `android-1.1.0-4`.
+
 ## Việc tiếp theo (theo thứ tự)
 
 0. Gửi link IPA 1.12.1. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
@@ -314,7 +334,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 3. Gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`
    (job `build` xong là có artifact `MSTrans-ipa`; `keyboard-smoke` chạy sau, chụp màn Hội thoại để xem).
 4. Nếu người dùng muốn: soát nốt các phần "chưa soát kỹ" ở mục 1.5.0 (ngoài Hội thoại).
-5. Android: người dùng cài APK và thử bàn phím (bật trong Cài đặt › Bàn phím ảo), Dịch, tin đã sao chép, Hội thoại.
+5. Android: người dùng cài APK (link release mới nhất) và thử Hội thoại (Soniox + Chỉ chữ, họp 4–5 người), gửi nhật ký
+   tốc độ như trên iPhone; rồi bàn phím (bật trong Cài đặt › Bàn phím ảo), Dịch, tin đã sao chép.
 
 ## Quy tắc đã thống nhất với người dùng
 
