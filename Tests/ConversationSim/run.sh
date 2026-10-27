@@ -19,7 +19,7 @@ C="$R/App/Conversation"
 swiftc -O "$R/Shared/Config.swift" "$R/Shared/SharedStore.swift" "$R/Shared/History.swift" "$D/LanguageDetectorStub.swift" \
   "$W/Translator.swift" "$C/PCM.swift" "$C/SpeechSegmenter.swift" "$C/TranscriptFilter.swift" "$C/LiveTranslation.swift" \
   "$C/SonioxTranslation.swift" "$C/SpeechServices.swift" "$C/GoogleVoice.swift" "$C/ConversationCost.swift" \
-  "$R/Tests/Conversation/main.swift" -o "$W/conversation-tests" > "$W/tests.log" 2>&1 || { grep error "$W/tests.log"; exit 1; }
+  "$C/Trade.swift" "$R/Tests/Conversation/main.swift" -o "$W/conversation-tests" > "$W/tests.log" 2>&1 || { grep error "$W/tests.log"; exit 1; }
 "$W/conversation-tests" | tail -3
 
 # The model without UIKit, and Soniox's and OpenAI's sessions replaced by the stubs.
@@ -29,6 +29,6 @@ python3 "$D/cut.py" "$C/LiveTranslation.swift" "$W/LiveTranslation.swift" "final
 swiftc -O -parse-as-library "$R/Shared/Config.swift" "$R/Shared/SharedStore.swift" "$R/Shared/History.swift" \
   "$D/LanguageDetectorStub.swift" "$W/Translator.swift" "$C/PCM.swift" "$C/SpeechSegmenter.swift" "$C/TranscriptFilter.swift" \
   "$W/LiveTranslation.swift" "$W/SonioxTranslation.swift" "$C/SpeechServices.swift" "$C/GoogleVoice.swift" \
-  "$C/ConversationCost.swift" "$C/SpeedLog.swift" "$C/MeetingStore.swift" "$W/ConversationModel.swift" \
+  "$C/ConversationCost.swift" "$C/SpeedLog.swift" "$C/MeetingStore.swift" "$C/Trade.swift" "$W/ConversationModel.swift" \
   "$D/Stubs.swift" "$D/main.swift" -o "$W/simulation" > "$W/sim.log" 2>&1 || { grep error "$W/sim.log"; exit 1; }
 "$W/simulation" | grep -E "FAIL|SIMULATION"

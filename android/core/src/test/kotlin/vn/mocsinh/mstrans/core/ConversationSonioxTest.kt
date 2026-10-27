@@ -182,6 +182,10 @@ class ConversationSonioxTest {
         assertTrue(config["enable_speaker_diarization"]!!.jsonPrimitive.boolean, "the room's session tells speakers apart")
         assertTrue(config["context"].toString().contains("\"topic\"") && config["context"].toString().contains("báo giá máy CNC") &&
             config["context"].toString().contains("Minh, mua hàng máy CNC"), "Soniox is told the topic and who the user is: ${config["context"]}")
+        assertTrue(config["context"].toString().contains("""{"source":"冻品","target":"hàng đông lạnh"}""") &&
+            config["context"].toString().contains("\"domain\"") &&
+            stand.configs["zh"]!!["context"].toString().contains("""{"source":"sầu riêng","target":"榴莲"}"""),
+            "the trade's terms go to both sessions, in the partners' Chinese")
         assertFalse(stand.configs["zh"]!!.containsKey("enable_speaker_diarization"), "the user's turn is one person")
 
         // Three seconds of the room's sound go to Soniox (all of it, quiet too).
@@ -215,6 +219,7 @@ class ConversationSonioxTest {
         val third = asked.first { it.first == "那我们下周一确认订单。" }.second
         assertEquals("Người 3", third.speaker)
         assertEquals("báo giá máy CNC", third.topic)
+        assertEquals(vn.mocsinh.mstrans.core.conversation.Trade.prompt, third.domain, "and the trade's terms")
         assertEquals(listOf("Người 1: 这个价格可以吗？ → [vi] 这个价格可以吗？", "Người 2: 好的"),
             third.lines.map { "${it.speaker}: ${it.text}" + if (it.translation.isEmpty()) "" else " → ${it.translation}" })
         waitFor("speaker 3 translated") { model.entries.size == 3 && model.entries[2].state == State.Done }

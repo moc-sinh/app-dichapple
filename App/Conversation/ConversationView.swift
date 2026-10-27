@@ -174,6 +174,9 @@ struct ConversationView: View {
                     + Text(" Muốn nghe đọc to, bật **Đọc to lời đối phương** trong menu ⋯.")
             }
             Text("Câu liền nhau của một người gộp vào một khung. **Giữ ngón tay** trên một câu để đọc lại, hiện to hoặc chép.")
+            if model.trade {
+                Text("**Thuật ngữ đông lạnh, hoa quả** đang bật (menu ⋯): Soniox và GPT dùng sẵn khoảng 80 thuật ngữ xuất nhập khẩu thủy sản, thịt đông lạnh và hoa quả bằng tiếng Trung, tiếng Anh.")
+            }
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
             if model.engine == .soniox {
                 Text(SharedStore.apiKey == nil
@@ -329,6 +332,9 @@ struct ConversationView: View {
                 editingTopic = true
             } label: {
                 Label(model.topic.isEmpty ? "Chủ đề cuộc họp…" : "Chủ đề: \(model.topic)", systemImage: "text.bubble")
+            }
+            Toggle(isOn: $model.trade) {
+                Label("Thuật ngữ đông lạnh, hoa quả", systemImage: "snowflake")
             }
             Picker(selection: $model.silence) {
                 ForEach(ConversationModel.silenceChoices, id: \.self) { seconds in

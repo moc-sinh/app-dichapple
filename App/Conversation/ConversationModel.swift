@@ -272,6 +272,7 @@ final class ConversationModel {
         /// want the text, and their voice held up the user's).
         static let readAloud = "conversation.readOthersAloud"
         static let showsOriginal = "conversation.showsOriginal"
+        static let trade = "conversation.trade"
         static let engine = "conversation.engine"
         static let partner = "conversation.partner"
         static let silence = "conversation.silence"
@@ -306,6 +307,9 @@ final class ConversationModel {
     var textSize: TextSize { didSet { defaults.set(textSize.rawValue, forKey: Keys.textSize) } }
     /// The words as said, under their translation.
     var showsOriginal: Bool { didSet { defaults.set(showsOriginal, forKey: Keys.showsOriginal) } }
+    /// The user's trade (frozen seafood, meat and fruit, `Trade`): its terms go to GPT at once, to
+    /// Soniox from the next time listening starts.
+    var trade: Bool { didSet { defaults.set(trade, forKey: Keys.trade) } }
     /// What the meeting is about, in the user's words ("báo giá máy CNC với nhà cung cấp Thâm Quyến"):
     /// GPT is told with every sentence, Soniox when listening starts, and it goes in the minutes.
     private(set) var topic: String
@@ -548,6 +552,7 @@ final class ConversationModel {
         quality = Quality(rawValue: defaults.string(forKey: Keys.quality) ?? "") ?? .economy
         textSize = TextSize(rawValue: defaults.integer(forKey: Keys.textSize)) ?? .medium
         showsOriginal = defaults.object(forKey: Keys.showsOriginal) as? Bool ?? true
+        trade = defaults.object(forKey: Keys.trade) as? Bool ?? true
         topic = defaults.string(forKey: Keys.topic) ?? ""
         if !topic.isEmpty { meeting.topic = topic }
         audio.onInterruption = { [weak self] began in self?.interrupted = began }
@@ -620,7 +625,7 @@ final class ConversationModel {
         if wantsToTalk { talk(true) }
         warmUpGoogle()
         log(nil, "Bắt đầu · \(engine.rawValue) · \(readAloud ? "đọc to" : "chỉ chữ") · dịch đối phương \(Self.name(of: quality.model))"
-            + " · lời tôi \(Self.name(of: SharedStore.model)) · giọng \(voice)")
+            + " · lời tôi \(Self.name(of: SharedStore.model)) · giọng \(voice)" + (trade ? " · thuật ngữ đông lạnh, hoa quả" : ""))
     }
 
     /// With a Google voice, the connection is opened before the first sentence needs it, and a key
@@ -931,7 +936,7 @@ final class ConversationModel {
                                translation: $0.state == .done ? $0.translation : "")
         }
         return SpokenContext(speaker: SpokenContext.speaker(mine: entry.mine, number: entry.speaker), lines: Array(lines),
-                             topic: topic)
+                             topic: topic, domain: trade ? Trade.prompt : "")
     }
 
     private enum GPTAnswer {
@@ -1669,7 +1674,9 @@ final class ConversationModel {
         let room = target == Language.vietnamese.code
         let partner = SonioxEvent.code(for: partnerLanguage)
         let hints = room ? [partner, Language.vietnamese.code] : [Language.vietnamese.code]
-        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary, speakers: room,
+        // The trade's terms in the partners' language: theirs to hear in the room, the user's Vietnamese in theirs.
+        let session = SonioxSession(apiKey: key, target: target, hints: hints, glossary: SharedStore.glossary,
+                                    extra: trade ? Trade.pairs(for: room ? partner : target) : [], speakers: room,
                                     about: sonioxAbout)
         session.onEvent = { [weak self, weak session] event in
             guard let self, let session else { return }
@@ -1705,6 +1712,7 @@ final class ConversationModel {
     /// the meeting's topic and who the user is (Cài đặt › Về bạn).
     private var sonioxAbout: [(key: String, value: String)] {
         var about = [(key: "setting", value: "Business meeting or talk between a Vietnamese professional and foreign partners")]
+        if trade { about.append(Trade.about) }
         if !topic.isEmpty { about.append((key: "topic", value: topic)) }
         let profile = SharedStore.profile.trimmingCharacters(in: .whitespacesAndNewlines)
         if !profile.isEmpty { about.append((key: "user", value: String(profile.prefix(300)))) }

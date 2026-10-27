@@ -64,6 +64,8 @@ data class SpokenContext(
     val lines: List<Line> = emptyList(),
     /** What the meeting is about, in the user's words; empty when not told. */
     val topic: String = "",
+    /** The trade's terms and ways (Hội thoại's `Trade.prompt`), after the instructions; empty when not used. */
+    val domain: String = "",
 ) {
     /** One of the meeting's sentences before it; `translation` empty when it has none (yet). */
     data class Line(val speaker: String, val text: String, val translation: String = "")
@@ -106,6 +108,7 @@ class Translator(
         val outgoing = target.code != Language.vietnamese.code
         var instructions = if (outgoing) Prompt.outgoing(target, settings) else Prompt.meeting(settings)
         instructions += Prompt.spoken(if (outgoing) target.englishName else "Vietnamese", context.topic)
+        if (context.domain.isNotEmpty()) instructions += "\n\n" + context.domain
         return request(instructions, Prompt.spokenInput(text, context), target, false)
     }
 

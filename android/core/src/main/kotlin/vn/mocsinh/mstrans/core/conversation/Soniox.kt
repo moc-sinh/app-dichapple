@@ -144,21 +144,51 @@ sealed class SonioxEvent {
         fun code(language: Language): String = if (language.code == "zh-Hant") "zh" else language.code
 
         /**
-         * The glossary's lines ("báo giá = 报价"): every term is a word to hear right, and each pair
-         * with one Vietnamese side says how it is translated, from Vietnamese or into it.
+         * How much of Soniox's context the glossary takes at most (characters, with the JSON around each): Soniox
+         * refuses a context over about 10,000 (8,000 tokens), and the setting, the topic and who the user is go in it too.
          */
-        fun glossary(text: String, intoVietnamese: Boolean): Pair<List<String>, List<Pair<String, String>>> {
+        const val TERMS_ROOM = 2_000
+        const val PAIRS_ROOM = 4_500
+
+        /**
+         * The glossary's lines ("báo giá = 报价"): every term is a word to hear right, and each pair
+         * with one Vietnamese side says how it is translated, from Vietnamese or into it. Then `extra`
+         * (the trade's terms, Vietnamese first) while there is room: the partners' word to hear for the
+         * room's session (into Vietnamese), the Vietnamese for the user's.
+         */
+        fun glossary(
+            text: String, intoVietnamese: Boolean, extra: List<Pair<String, String>> = emptyList(),
+        ): Pair<List<String>, List<Pair<String, String>>> {
             val terms = ArrayList<String>()
             val pairs = ArrayList<Pair<String, String>>()
+            var termsLeft = TERMS_ROOM
+            var pairsLeft = PAIRS_ROOM
+            fun term(word: String) {
+                val cost = word.length + 3
+                if (word.isEmpty() || word.length > 40 || cost > termsLeft || word in terms) return
+                terms.add(word)
+                termsLeft -= cost
+            }
+            fun pair(vietnamese: String, other: String) {
+                val pair = if (intoVietnamese) other to vietnamese else vietnamese to other
+                val cost = vietnamese.length + other.length + 25
+                if (cost > pairsLeft || pairs.any { it.first == pair.first }) return
+                pairs.add(pair)
+                pairsLeft -= cost
+            }
             for (line in text.lines()) {
                 if (line.isBlank()) continue
                 val sides = line.split("=").map { it.trim() }
-                for (side in sides) if (side.isNotEmpty() && side.length <= 40 && terms.size < 60) terms.add(side)
+                sides.forEach { term(it) }
                 if (sides.size != 2 || sides[0].isEmpty() || sides[1].isEmpty()) continue
                 val marked = sides.map { LanguageDetector.hasVietnameseMarks(it) }
                 if (marked[0] == marked[1]) continue
                 val (vietnamese, other) = if (marked[0]) sides[0] to sides[1] else sides[1] to sides[0]
-                pairs.add(if (intoVietnamese) other to vietnamese else vietnamese to other)
+                pair(vietnamese, other)
+            }
+            for ((vietnamese, other) in extra) {
+                term(if (intoVietnamese) other else vietnamese)
+                pair(vietnamese, other)
             }
             return terms to pairs
         }
@@ -740,6 +770,8 @@ class SonioxSession(
     /** What the talk is about, for Soniox's `general` context. */
     private val about: List<Pair<String, String>> = emptyList(),
     private val url: String = URL,
+    /** The trade's terms, after the glossary's (see `SonioxEvent.glossary`). */
+    extra: List<Pair<String, String>> = emptyList(),
 ) {
     companion object {
         const val URL = "wss://stt-rt.soniox.com/transcribe-websocket"
@@ -752,7 +784,7 @@ class SonioxSession(
     var isOpen = false
         private set
     private val terms: Pair<List<String>, List<Pair<String, String>>> =
-        SonioxEvent.glossary(glossary, intoVietnamese = target == Language.vietnamese.code)
+        SonioxEvent.glossary(glossary, intoVietnamese = target == Language.vietnamese.code, extra = extra)
     private var model = 0
     private var socket: WebSocket? = null
     private var closing = false

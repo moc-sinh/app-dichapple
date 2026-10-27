@@ -55,7 +55,7 @@ jobs:
             Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
             App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift \
             App/Conversation/SpeechServices.swift App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift \
-            Tests/Conversation/main.swift -o conversation-tests
+            App/Conversation/Trade.swift Tests/Conversation/main.swift -o conversation-tests
           ./conversation-tests
 
       - name: Generate project

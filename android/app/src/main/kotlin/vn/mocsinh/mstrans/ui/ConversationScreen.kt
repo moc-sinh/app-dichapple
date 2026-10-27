@@ -402,6 +402,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
                 },
             )))
             addView(activity.label(rich("Câu liền nhau của một người gộp vào một khung. **Giữ ngón tay** trên một câu để đọc lại, hiện to hoặc chép.")))
+            if (model.trade) addView(activity.label(rich(
+                "**Thuật ngữ đông lạnh, hoa quả** đang bật (menu ⋯): Soniox và GPT dùng sẵn khoảng 80 thuật ngữ xuất nhập khẩu " +
+                    "thủy sản, thịt đông lạnh và hoa quả bằng tiếng Trung, tiếng Anh.",
+            )))
             addView(activity.label(rich(
                 "Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang " +
                     "${model.partnerLanguage.name} và đọc to qua loa cho mọi người nghe.",
@@ -569,6 +573,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             isChecked = model.readAloud
         }
         menu.add(2, 250, 1, if (model.topic.isEmpty()) "Chủ đề cuộc họp…" else "Chủ đề: ${model.topic}")
+        menu.add(Menu.NONE, 280, 1, "Thuật ngữ đông lạnh, hoa quả").apply {
+            isCheckable = true
+            isChecked = model.trade
+        }
 
         val silences = menu.addSubMenu(Menu.NONE, Menu.NONE, 2, "Ngừng bao lâu là hết câu")
         ConversationModel.silenceChoices.forEachIndexed { i, seconds ->
@@ -607,6 +615,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
                 250 -> editTopic()
                 260 -> model.readAloud = !model.readAloud
                 270 -> model.showsOriginal = !model.showsOriginal
+                280 -> model.trade = !model.trade
                 in 200..249 -> model.quality = ConversationModel.Quality.entries[id - 200]
                 in 300..399 -> model.silence = ConversationModel.silenceChoices[id - 300]
                 in 400..499 -> model.voice = ConversationModel.voices[id - 400].first

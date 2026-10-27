@@ -22,6 +22,7 @@ import vn.mocsinh.mstrans.core.conversation.SonioxToken
 import vn.mocsinh.mstrans.core.conversation.SonioxTranscript
 import vn.mocsinh.mstrans.core.conversation.SpeechSegmenter
 import vn.mocsinh.mstrans.core.conversation.SpeechServices
+import vn.mocsinh.mstrans.core.conversation.Trade
 import vn.mocsinh.mstrans.core.conversation.TranscriptFilter
 import vn.mocsinh.mstrans.core.conversation.VoiceCache
 import vn.mocsinh.mstrans.core.conversation.VoiceStream
@@ -498,6 +499,38 @@ class ConversationPartsTest {
         c.check(into.first.contains("报价") && into.first.contains("FOB"), "every term is a word to hear right")
         c.check(into.second.map { "${it.first}>${it.second}" } == listOf("报价>báo giá", "FOB>giá FOB"), "into Vietnamese: ${into.second}")
         c.check(from.second.map { "${it.first}>${it.second}" } == listOf("báo giá>报价", "giá FOB>FOB"), "from Vietnamese: ${from.second}")
+
+        // The trade's terms (frozen seafood, meat and fruit): all of them for GPT; for Soniox, those of the partners'
+        // language, after the user's own glossary, while its context has room.
+        c.check(Trade.terms.map { it.vietnamese }.toSet().size == Trade.terms.size && Trade.terms.map { it.chinese }.toSet().size == Trade.terms.size &&
+            Trade.terms.all { it.vietnamese.isNotEmpty() && it.chinese.isNotEmpty() }, "each term once, in Vietnamese and Chinese")
+        c.check(Trade.prompt.contains("\n冻品 / frozen goods = hàng đông lạnh") && Trade.prompt.contains("\n浦寨 = Pò Chài (đối diện Tân Thanh)") &&
+            Trade.prompt.split("\n").size == Trade.terms.size + 4, "GPT gets every term, one a line")
+        c.check(Trade.pairs("zh").size == Trade.terms.size && Trade.pairs("en").all { it.second.isNotEmpty() } &&
+            Trade.pairs("en").size < Trade.terms.size && Trade.pairs("ja").isEmpty(), "Soniox gets the terms of the partners' language, Chinese or English")
+        val roomTerms = SonioxEvent.glossary(glossary, intoVietnamese = true, extra = Trade.pairs("zh"))
+        c.check(roomTerms.second.first() == ("报价" to "báo giá") && roomTerms.second.count { it.first == "报价" } == 1 &&
+            ("冻品" to "hàng đông lạnh") in roomTerms.second && roomTerms.second.size == Trade.terms.size + 1,
+            "the room's session: the user's glossary first, then every trade term not in it: ${roomTerms.second.size}")
+        c.check("榴莲" in roomTerms.first && "sầu riêng" !in roomTerms.first, "the partners' words to hear in the room")
+        val mineTerms = SonioxEvent.glossary(glossary, intoVietnamese = false, extra = Trade.pairs("zh"))
+        c.check(("sầu riêng" to "榴莲") in mineTerms.second && "sầu riêng" in mineTerms.first, "the user's session: their Vietnamese to hear, and into Chinese")
+        // Soniox refuses a context over about 10,000 characters: however long the user's glossary, it stays well under.
+        val about = listOf("setting" to "x".repeat(90), Trade.about, "topic" to "chủ đề ".repeat(28), "user" to "u".repeat(300))
+        for (extra in listOf(Trade.pairs("zh"), Trade.pairs("en"))) {
+            for (intoVietnamese in listOf(true, false)) {
+                val full = SonioxEvent.glossary(glossary, intoVietnamese, extra)
+                val config = SonioxEvent.configMessage("k", "stt-rt-v5", "vi", listOf("zh", "vi"), full.first, full.second, true, about)
+                val sources = full.second.map { it.first }.toSet()
+                c.check(config.length < 8_000 && extra.all { (if (intoVietnamese) it.second else it.first) in sources },
+                    "the whole trade fits: ${config.length} characters")
+            }
+        }
+        val longGlossary = (1..400).joinToString("\n") { "thuật ngữ số $it = 术语$it" }
+        val crowded = SonioxEvent.glossary(longGlossary, intoVietnamese = true, extra = Trade.pairs("en"))
+        val crowdedConfig = SonioxEvent.configMessage("k", "stt-rt-v5", "vi", listOf("en", "vi"), crowded.first, crowded.second, true, about)
+        c.check(crowdedConfig.length < 8_500 && crowded.second.first().first == "术语1" && crowded.first.first() == "thuật ngữ số 1",
+            "a very long glossary: its first lines kept, the context under Soniox's limit: ${crowdedConfig.length} characters")
 
         val transcript = SonioxTranscript("vi")
         c.check(transcript.take(listOf(token("这个", final = false))).isEmpty() && transcript.current.text == "这个", "the guess shows at once")

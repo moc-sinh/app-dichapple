@@ -110,19 +110,47 @@ enum SonioxEvent: Equatable {
         language.code == "zh-Hant" ? "zh" : language.code
     }
 
+    /// How much of Soniox's context the glossary takes at most (characters, with the JSON around each):
+    /// Soniox refuses a context over about 10,000 (8,000 tokens), and the setting, the topic and who
+    /// the user is go in it too.
+    static let termsRoom = 2_000
+    static let pairsRoom = 4_500
+
     /// The glossary's lines ("báo giá = 报价"): every term is a word to hear right, and each pair with
     /// one Vietnamese side says how it is translated, from Vietnamese (`intoVietnamese` false) or into it.
-    static func glossary(_ text: String, intoVietnamese: Bool) -> (terms: [String], pairs: [(source: String, target: String)]) {
+    /// Then `extra` (the trade's terms) while there is room: the partners' word to hear for the room's
+    /// session (into Vietnamese), the Vietnamese for the user's.
+    static func glossary(_ text: String, intoVietnamese: Bool, extra: [(vietnamese: String, other: String)] = [])
+        -> (terms: [String], pairs: [(source: String, target: String)]) {
         var terms: [String] = []
         var pairs: [(source: String, target: String)] = []
+        var termsLeft = termsRoom
+        var pairsLeft = pairsRoom
+        func term(_ word: String) {
+            let cost = word.count + 3
+            guard !word.isEmpty, word.count <= 40, cost <= termsLeft, !terms.contains(word) else { return }
+            terms.append(word)
+            termsLeft -= cost
+        }
+        func pair(vietnamese: String, other: String) {
+            let pair = intoVietnamese ? (source: other, target: vietnamese) : (source: vietnamese, target: other)
+            let cost = vietnamese.count + other.count + 25
+            guard cost <= pairsLeft, !pairs.contains(where: { $0.source == pair.source }) else { return }
+            pairs.append(pair)
+            pairsLeft -= cost
+        }
         for line in text.split(whereSeparator: \.isNewline) {
             let sides = line.split(separator: "=").map { $0.trimmingCharacters(in: .whitespaces) }
-            for side in sides where !side.isEmpty && side.count <= 40 && terms.count < 60 { terms.append(side) }
+            sides.forEach(term)
             guard sides.count == 2, !sides[0].isEmpty, !sides[1].isEmpty else { continue }
             let marked = sides.map(LanguageDetector.hasVietnameseMarks)
             guard marked[0] != marked[1] else { continue }
             let (vietnamese, other) = marked[0] ? (sides[0], sides[1]) : (sides[1], sides[0])
-            pairs.append(intoVietnamese ? (other, vietnamese) : (vietnamese, other))
+            pair(vietnamese: vietnamese, other: other)
+        }
+        for (vietnamese, other) in extra {
+            term(intoVietnamese ? other : vietnamese)
+            pair(vietnamese: vietnamese, other: other)
         }
         return (terms, pairs)
     }
@@ -653,14 +681,15 @@ final class SonioxSession {
         return URLSession(configuration: config)
     }()
 
-    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool,
-         about: [(key: String, value: String)] = []) {
+    /// `extra`: the trade's terms, after the glossary's (see `SonioxEvent.glossary`).
+    init(apiKey: String, target: String, hints: [String], glossary: String, extra: [(vietnamese: String, other: String)] = [],
+         speakers: Bool, about: [(key: String, value: String)] = []) {
         self.apiKey = apiKey
         self.target = target
         self.hints = hints
         self.speakers = speakers
         self.about = about
-        self.glossary = SonioxEvent.glossary(glossary, intoVietnamese: target == Language.vietnamese.code)
+        self.glossary = SonioxEvent.glossary(glossary, intoVietnamese: target == Language.vietnamese.code, extra: extra)
     }
 
     func open() {

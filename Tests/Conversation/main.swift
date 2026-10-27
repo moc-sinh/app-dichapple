@@ -2,7 +2,7 @@
 // swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/LanguageDetector.swift \
 //   Shared/Translator.swift App/Conversation/PCM.swift App/Conversation/SpeechSegmenter.swift \
 //   App/Conversation/TranscriptFilter.swift App/Conversation/LiveTranslation.swift App/Conversation/SonioxTranslation.swift App/Conversation/SpeechServices.swift \
-//   App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift Tests/Conversation/main.swift \
+//   App/Conversation/GoogleVoice.swift App/Conversation/ConversationCost.swift App/Conversation/Trade.swift Tests/Conversation/main.swift \
 //   -o conversation-tests && ./conversation-tests
 import Foundation
 
@@ -507,6 +507,43 @@ do {
     check(into.terms.contains("报价") && into.terms.contains("FOB"), "every term is a word to hear right")
     check(into.pairs.map { "\($0.source)>\($0.target)" } == ["报价>báo giá", "FOB>giá FOB"], "into Vietnamese: \(into.pairs)")
     check(from.pairs.map { "\($0.source)>\($0.target)" } == ["báo giá>报价", "giá FOB>FOB"], "from Vietnamese: \(from.pairs)")
+
+    // The trade's terms (frozen seafood, meat and fruit): all of them for GPT; for Soniox, those of the
+    // partners' language, after the user's own glossary, while its context has room.
+    check(Set(Trade.terms.map(\.vietnamese)).count == Trade.terms.count && Set(Trade.terms.map(\.chinese)).count == Trade.terms.count
+          && Trade.terms.allSatisfy { !$0.vietnamese.isEmpty && !$0.chinese.isEmpty }, "each term once, in Vietnamese and Chinese")
+    check(Trade.prompt.contains("\n冻品 / frozen goods = hàng đông lạnh") && Trade.prompt.contains("\n浦寨 = Pò Chài (đối diện Tân Thanh)")
+          && Trade.prompt.components(separatedBy: "\n").count == Trade.terms.count + 4, "GPT gets every term, one a line")
+    check(Trade.pairs(for: "zh").count == Trade.terms.count && Trade.pairs(for: "en").allSatisfy { !$0.other.isEmpty }
+          && Trade.pairs(for: "en").count < Trade.terms.count && Trade.pairs(for: "ja").isEmpty,
+          "Soniox gets the terms of the partners' language, Chinese or English")
+    let roomTerms = SonioxEvent.glossary(glossary, intoVietnamese: true, extra: Trade.pairs(for: "zh"))
+    check(roomTerms.pairs.first.map { "\($0.source)>\($0.target)" } == "报价>báo giá" && roomTerms.pairs.filter { $0.source == "报价" }.count == 1
+          && roomTerms.pairs.contains { $0.source == "冻品" && $0.target == "hàng đông lạnh" } && roomTerms.pairs.count == Trade.terms.count + 1,
+          "the room's session: the user's glossary first, then every trade term not in it: \(roomTerms.pairs.count)")
+    check(roomTerms.terms.contains("榴莲") && !roomTerms.terms.contains("sầu riêng"), "the partners' words to hear in the room")
+    let mineTerms = SonioxEvent.glossary(glossary, intoVietnamese: false, extra: Trade.pairs(for: "zh"))
+    check(mineTerms.pairs.contains { $0.source == "sầu riêng" && $0.target == "榴莲" } && mineTerms.terms.contains("sầu riêng"),
+          "the user's session: their Vietnamese to hear, and into Chinese")
+    // Soniox refuses a context over about 10,000 characters: however long the user's glossary, it stays well under.
+    let about = [(key: "setting", value: String(repeating: "x", count: 90)), Trade.about,
+                 (key: "topic", value: String(repeating: "chủ đề ", count: 28)), (key: "user", value: String(repeating: "u", count: 300))]
+    for extra in [Trade.pairs(for: "zh"), Trade.pairs(for: "en")] {
+        for intoVietnamese in [true, false] {
+            let full = SonioxEvent.glossary(glossary, intoVietnamese: intoVietnamese, extra: extra)
+            let config = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["zh", "vi"], terms: full.terms,
+                                                   pairs: full.pairs, speakers: true, about: about)
+            let sources = Set(full.pairs.map { $0.source })
+            check(config.count < 8_000 && extra.allSatisfy { sources.contains(intoVietnamese ? $0.other : $0.vietnamese) },
+                  "the whole trade fits: \(config.count) characters")
+        }
+    }
+    let longGlossary = (1...400).map { "thuật ngữ số \($0) = 术语\($0)" }.joined(separator: "\n")
+    let crowded = SonioxEvent.glossary(longGlossary, intoVietnamese: true, extra: Trade.pairs(for: "en"))
+    let crowdedConfig = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["en", "vi"], terms: crowded.terms,
+                                                  pairs: crowded.pairs, speakers: true, about: about)
+    check(crowdedConfig.count < 8_500 && crowded.pairs.first?.source == "术语1" && crowded.terms.first == "thuật ngữ số 1",
+          "a very long glossary: its first lines kept, the context under Soniox's limit: \(crowdedConfig.count) characters")
 
     // A sentence shown word by word as it is said, then finished at its end, translation and all.
     var transcript = SonioxTranscript(target: "vi")

@@ -10,14 +10,15 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (239 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (250 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
+- **Bản mới nhất:** iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
+  1.16.0). Trước đó iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
   nói, lời đối phương mặc định chỉ hiện chữ, GPT được dặn đổi số 万/亿 và tên Hán Việt; xem mục 1.15.0). Trước đó iPhone 1.14.0
   và Android 1.3.0 (bản dịch chữ theo kịp người nói: GPT dịch trước khi bản dịch của
   Soniox chậm, tiếng gửi đi không bị giữ lại, nhật ký tốc độ tách được Soniox nghe/chốt/dịch chậm; xem mục 1.14.0). Trước đó
@@ -442,10 +443,36 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   của bạn (giọng 2,5 s). Android 30 test (`HttpTest`, `ConversationSonioxTest.userWordsGoFirst` với âm phát 1,5 s, gộp câu, lời
   dặn; `ConversationModelTest` giờ bật Đọc to rõ ràng); bỏ ưu tiên câu của bạn thì `userWordsGoFirst` trượt. `:app:compileDebugKotlin`
   qua. Giao diện iPhone chỉ biên dịch được trên CI. **Chưa thử trên máy thật.**
+  Commit 40359bd: Android run 8 xanh (release `android-1.4.0-8`, đã gửi link APK). iOS run 79 bị huỷ 3 lần: GitHub báo "Due to
+  capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times" / "The job was not acquired by
+  Runner of type hosted even after multiple attempts" (không có máy macOS trong 15 phút, chưa chạy bước nào; không phải lỗi mã).
+
+- **1.16.0 + Android 1.5.0: thuật ngữ đông lạnh, hoa quả (27/10).** Người dùng: tối ưu tốc độ và chất lượng chữ dịch **trên Luna
+  và Soniox** (không dùng Sol), nhất là nói chuyện kinh doanh **xuất nhập khẩu đồ đông lạnh và hoa quả**, tiếng Anh và tiếng Trung.
+  1. `Trade` (`App/Conversation/Trade.swift`, `core/conversation/Trade.kt`, cùng một danh sách): 81 thuật ngữ Việt / Trung / Anh
+     (hàng đông lạnh, IQF, mạ băng, cont lạnh, tôm thẻ/sú, HOSO/HLSO/PD, cá tra, mực, chân gà; sầu riêng Monthong/Musang King,
+     thanh long, chanh leo, mít ≠ dứa, măng cụt…; vận đơn, kiểm dịch thực vật, C/O, mã số vùng trồng, GACC; chính ngạch 正关,
+     tiểu ngạch 边贸, 压车, Hữu Nghị, Bằng Tường, Pò Chài 浦寨, Đông Hưng, Hà Khẩu; cọc, L/C, CIF/FOB, MOQ…), xếp theo mức cần.
+     Danh sách sinh từ một bảng Python trong scratchpad, không vào repo: sửa thì sửa cả hai tệp.
+  2. GPT: `SpokenContext.domain` = `Trade.prompt` (mô tả ngành, 柜/件/箱/一票, giá theo kg/tấn, giữ mã CIF/IQF/16/20…, rồi mỗi
+     thuật ngữ một dòng "冻品 / frozen goods = hàng đông lạnh") nối sau instructions của `translateSpoken` (cả dịch trước, dịch
+     cuối, Tôi nói). Instructions vượt 1.024 token nên OpenAI cache phần đầu giống nhau của mọi câu: nhanh hơn, rẻ hơn độ dài.
+  3. Soniox: `general` thêm `domain`; `SonioxEvent.glossary(text, intoVietnamese, extra:)` thêm thuật ngữ của tiếng đối tác (zh
+     hoặc en; tiếng khác không có) sau Thuật ngữ của người dùng: phòng (vào tiếng Việt) nghe từ tiếng đối tác, phiên Tôi nói nghe
+     từ tiếng Việt; cặp dịch bỏ trùng (của người dùng thắng). Bỏ giới hạn 60 từ, thay bằng ngân sách ký tự (`termsRoom` 2.000,
+     `pairsRoom` 4.500, đã tính phần JSON): cả bộ vừa (cấu hình ~5–6 nghìn ký tự, Soniox giới hạn ~10.000 ký tự / 8.000 token);
+     Thuật ngữ rất dài thì giữ dòng đầu, không bao giờ quá giới hạn (trước đây cặp dịch không giới hạn).
+  4. Menu ⋯ › **Thuật ngữ đông lạnh, hoa quả** (khoá `conversation.trade`, mặc định bật; Soniox áp dụng từ lần bấm nghe sau).
+  Test: `Tests/Conversation` 250 kiểm tra (Trade.swift vào lệnh CI và `run.sh`), mô phỏng (phiên Soniox nhận thuật ngữ, GPT nhận
+  `domain`); Android 30 test (`ConversationPartsTest`, `ConversationSonioxTest` kiểm cấu hình gửi Soniox giả). **Chưa thử trên máy
+  thật**; chưa đo được thuật ngữ giúp bao nhiêu: cần biên bản có đánh dấu câu sai.
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
+0. Gửi link IPA 1.16.0 và APK 1.5.0 (IPA 1.15.0 chưa từng build được vì GitHub thiếu máy macOS; nếu vẫn bị huỷ thì chạy lại
+   run, hoặc tạm đổi `runs-on` của job build sang máy Intel `macos-15-intel`: job `keyboard-smoke` dựng simulator arm64 nên
+   không chạy được trên Intel). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
+   Trước đó: gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
    "bỏ đọc: câu của bạn đọc trước"), chữ gọn có dễ đọc không. Nếu Tôi nói vẫn chậm: câu của bạn dịch bằng model của Cài đặt
    (mặc định Sol, suy luận "low", 2–4 s); có thể cho Tôi nói dùng Luna hoặc dịch trước trong lúc giữ nút — hỏi người dùng trước
    (đổi chất lượng câu đối tác nghe). Phương án chưa làm, đã đề xuất: Sol chỉ cho câu có số/giá/ngày/cam kết, Luna cho phần còn lại.
@@ -483,7 +510,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   không có Mac; iPhone Pro Max, iOS 26, chat chủ yếu Zalo và WeChat.
 - Muốn biết bàn phím có khựng thì đọc nhật ký gõ người dùng gửi, đừng đoán. Hội thoại cũng vậy: đọc nhật ký tốc độ.
 - Hội thoại: người dùng dùng Soniox và Dịch liền (OpenAI), mức Dịch lời đối phương = Tiết kiệm (Luna), họp 4–5
-  người. Chữ dịch là chính (đủ, đúng nghĩa, không trễ); giọng đọc là tính năng phụ.
+  người. Chữ dịch là chính (đủ, đúng nghĩa, không trễ); giọng đọc là tính năng phụ. Ngành: xuất nhập khẩu đồ đông lạnh
+  (thủy sản, thịt) và hoa quả, đối tác nói tiếng Trung và tiếng Anh. Muốn tối ưu trên Soniox + Luna, không dùng Sol.
 - Build xong gửi link IPA dạng `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>`.
 - Dùng ít trợ lý nền; nhiều trợ lý song song làm hết hạn mức rất nhanh.
 - Chỉ một phiên làm việc trên nhánh này một lúc; trước khi push luôn `git fetch` và gộp.

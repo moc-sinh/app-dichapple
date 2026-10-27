@@ -75,6 +75,8 @@ struct SpokenContext: Equatable {
     var lines: [Line] = []
     /// What the meeting is about, in the user's words; empty when not told.
     var topic = ""
+    /// The trade's terms and ways (Hội thoại's `Trade.prompt`), after the instructions; empty when not used.
+    var domain = ""
 
     static func speaker(mine: Bool, number: String) -> String {
         mine ? "User" : number.isEmpty ? "Participant" : "Người \(number)"
@@ -115,6 +117,7 @@ struct Translator {
         let outgoing = target.code != Language.vietnamese.code
         var instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.meeting()
         instructions += Prompt.spoken(into: outgoing ? target.englishName : "Vietnamese", topic: context.topic)
+        if !context.domain.isEmpty { instructions += "\n\n" + context.domain }
         return try await request(instructions: instructions, input: Prompt.spokenInput(text: text, context: context),
                                  target: target, meaning: false)
     }

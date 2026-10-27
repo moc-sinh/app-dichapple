@@ -292,6 +292,7 @@ class ConversationModel(
          */
         const val READ_ALOUD = "conversation.readOthersAloud"
         const val SHOWS_ORIGINAL = "conversation.showsOriginal"
+        const val TRADE = "conversation.trade"
         const val ENGINE = "conversation.engine"
         const val PARTNER = "conversation.partner"
         const val SILENCE = "conversation.silence"
@@ -489,6 +490,16 @@ class ConversationModel(
         set(value) {
             field = value
             defaults.set(Keys.SHOWS_ORIGINAL, value.toString())
+            changed()
+        }
+    /**
+     * The user's trade (frozen seafood, meat and fruit, `Trade`): its terms go to GPT at once, to Soniox from the
+     * next time listening starts.
+     */
+    var trade: Boolean = defaults.get(Keys.TRADE)?.toBooleanStrictOrNull() ?: true
+        set(value) {
+            field = value
+            defaults.set(Keys.TRADE, value.toString())
             changed()
         }
     /**
@@ -781,7 +792,7 @@ class ConversationModel(
             if (wantsToTalk) talk(true)
             warmUpGoogle()
             log(null, "Bắt đầu · ${engine.id} · ${if (readAloud) "đọc to" else "chỉ chữ"} · dịch đối phương ${name(quality.model)}" +
-                " · lời tôi ${name(settings.model)} · giọng $voice")
+                " · lời tôi ${name(settings.model)} · giọng $voice" + (if (trade) " · thuật ngữ đông lạnh, hoa quả" else ""))
         } finally {
             starting = false
             changed()
@@ -1090,7 +1101,7 @@ class ConversationModel(
         val lines = entries.filter { it.at < entry.at && it.text.isNotEmpty() }.takeLast(CONTEXT_LINES).map {
             SpokenContext.Line(SpokenContext.speaker(it.mine, it.speaker), it.text, if (it.state == State.Done) it.translation else "")
         }
-        return SpokenContext(SpokenContext.speaker(entry.mine, entry.speaker), lines, topic)
+        return SpokenContext(SpokenContext.speaker(entry.mine, entry.speaker), lines, topic, if (trade) Trade.prompt else "")
     }
 
     /**
@@ -1844,7 +1855,9 @@ class ConversationModel(
         val room = target == Language.vietnamese.code
         val partner = SonioxEvent.code(partnerLanguage)
         val hints = if (room) listOf(partner, Language.vietnamese.code) else listOf(Language.vietnamese.code)
-        val session = SonioxSession(key, target, hints, settings.glossary, scope, speakers = room, about = sonioxAbout, url = sonioxUrl)
+        // The trade's terms in the partners' language: theirs to hear in the room, the user's Vietnamese in theirs.
+        val session = SonioxSession(key, target, hints, settings.glossary, scope, speakers = room, about = sonioxAbout, url = sonioxUrl,
+            extra = if (trade) Trade.pairs(if (room) partner else target) else emptyList())
         session.onEvent = { soniox(it, session) }
         sonioxSent[room] = 0.0
         sonioxSentAt.remove(room)
@@ -1879,6 +1892,7 @@ class ConversationModel(
     private val sonioxAbout: List<Pair<String, String>>
         get() {
             val about = arrayListOf("setting" to "Business meeting or talk between a Vietnamese professional and foreign partners")
+            if (trade) about.add(Trade.about)
             if (topic.isNotEmpty()) about.add("topic" to topic)
             val profile = settings.profile.trim()
             if (profile.isNotEmpty()) about.add("user" to profile.take(300))

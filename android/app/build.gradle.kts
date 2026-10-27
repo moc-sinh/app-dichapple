@@ -15,7 +15,7 @@ android {
         targetSdk = 34
         // CI numbers each build (the run number), so a new APK installs over the one before.
         versionCode = (System.getenv("MSTRANS_BUILD") ?: "1").toInt()
-        versionName = "1.4.0"
+        versionName = "1.5.0"
     }
 
     // One key for every build: Android installs an update only when it is signed like the app on the

@@ -67,11 +67,13 @@ final class SonioxSession {
     private(set) var isOpen = false
     var sent = 0.0
     var finalized = 0
-    init(apiKey: String, target: String, hints: [String], glossary: String, speakers: Bool,
-         about: [(key: String, value: String)] = []) {
+    let extra: [(vietnamese: String, other: String)]
+    init(apiKey: String, target: String, hints: [String], glossary: String, extra: [(vietnamese: String, other: String)] = [],
+         speakers: Bool, about: [(key: String, value: String)] = []) {
         self.target = target
         self.speakers = speakers
         self.about = about
+        self.extra = extra
         SonioxSession.all.append(self)
     }
     func open() { isOpen = true }

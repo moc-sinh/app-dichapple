@@ -22,7 +22,7 @@ func t(_ text: String, final: Bool = true) -> SonioxToken {
 
 final class Calls: @unchecked Sendable {
     let lock = NSLock()
-    var translated: [(text: String, target: String, context: [String], speaker: String, topic: String, model: TranslationModel)] = []
+    var translated: [(text: String, target: String, context: [String], speaker: String, topic: String, model: TranslationModel, domain: String)] = []
     var spares: [String] = []
     var spoken: [String] = []
     var translateDelay: UInt64 = 300_000_000
@@ -34,7 +34,7 @@ final class Calls: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if spare { spares.append(text) }
         let before = translated.filter { $0.text == text }.count
-        translated.append((text, target, lines, context.speaker, context.topic, model))
+        translated.append((text, target, lines, context.speaker, context.topic, model, context.domain))
         return before
     }
     func say(_ text: String) { lock.lock(); spoken.append(text); lock.unlock() }
@@ -112,6 +112,8 @@ struct Simulation {
             exit(1)
         }
         check(others.speakers && !partner.speakers, "the room's session tells speakers apart, the user's does not")
+        check(others.extra.first.map { "\($0.vietnamese)=\($0.other)" } == "hàng đông lạnh=冻品" && partner.extra.count == Trade.terms.count
+              && others.about.contains { $0.key == "domain" }, "the trade's terms go to both sessions, in the partners' Chinese")
         check(others.about.contains { $0 == ("topic", "báo giá máy CNC") } && others.about.contains { $0.key == "setting" },
               "Soniox is told what the meeting is about: \(others.about)")
         check(calls.warmUps >= 1, "OpenAI's connection is opened as listening starts")
@@ -157,6 +159,7 @@ struct Simulation {
         check(third?.context == ["Người 1: 这个价格可以吗？ → [vi] 这个价格可以吗？", "Người 2: Được anh"],
               "GPT gets the meeting so far, with who said it and how it was translated: \(third?.context ?? [])")
         check(third?.speaker == "Người 3" && third?.topic == "báo giá máy CNC", "and who says this one, and the topic")
+        check(third?.domain == Trade.prompt, "and the trade's terms")
         await sleep(1.5)
         check(calls.spoken == ["[vi] 这个价格可以吗？", "Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng."],
               "Đọc to reads GPT's translations, in order, once each: \(calls.spoken)")
