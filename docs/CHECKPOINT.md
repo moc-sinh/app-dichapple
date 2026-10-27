@@ -409,10 +409,12 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   0,1 s, không dịch trước, không dùng lại, không bỏ câu treo, không giữ bản GPT, không hỏi lúc ngừng) đều làm mô phỏng trượt.
   Android: cùng kiểm tra trong `ConversationPartsTest`, `ConversationSonioxTest.translatesAhead` (máy chủ Soniox giả), 27 test qua.
   **Chưa thử trên máy thật.** Không đổi gì cho Dịch liền ngoài `LiveGate` (chữ của nó đã hiện ngay khi OpenAI gửi).
+  Commit 0700047: iOS run 78 xanh (IPA `https://github.com/moc-sinh/app-dichapple/actions/runs/40477337976/artifacts/12720529179`),
+  Android run 7 xanh (release `android-1.3.0-7`); đã gửi người dùng cả hai link.
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.14.0 và APK 1.3.0. Người dùng thử họp thật rồi gửi nhật ký tốc độ: đọc dòng "Soniox nửa phút" và các dòng câu
+0. Đã gửi link IPA 1.14.0 và APK 1.3.0. Người dùng thử họp thật rồi gửi nhật ký tốc độ: đọc dòng "Soniox nửa phút" và các dòng câu
    (xem cách đọc ở mục 1.14.0) trước khi sửa tiếp. Trước đó đã gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`
