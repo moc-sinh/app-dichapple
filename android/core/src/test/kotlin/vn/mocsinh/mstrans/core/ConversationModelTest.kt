@@ -70,6 +70,9 @@ class ConversationModelTest {
             },
         )
         val model = ConversationModel(settings, MemoryStore(), audio, MeetingStore(folder), this, services)
+        assertTrue(!model.readAloud && model.showsOriginal && model.textSize == ConversationModel.TextSize.MEDIUM,
+            "by default the others' words are only shown, with what was said under them")
+        model.readAloud = true
         model.voice = "marin"
         model.start()
         assertTrue(model.running && audio.started)

@@ -179,21 +179,25 @@ fun <T : View> T.margins(left: Int = 0, top: Int = 0, right: Int = 0, bottom: In
 
 fun <T : View> T.onTap(action: () -> Unit): T = apply { setOnClickListener { action() } }
 
-/** A rounded panel on the grouped background; `accent` draws a side bar in that colour. */
-fun Context.card(accent: Int? = null, spacing: Int = 12): LinearLayout = vertical(spacing).apply {
-    val radius = dpf(20)
+/**
+ * A rounded panel on the grouped background; `accent` draws a side bar in that colour. `compact`: less
+ * room around what it holds (Hội thoại's transcript, to show more of it).
+ */
+fun Context.card(accent: Int? = null, spacing: Int = 12, compact: Boolean = false): LinearLayout = vertical(spacing).apply {
+    val radius = dpf(if (compact) 14 else 20)
+    val edge = if (compact) 10 else 16
     val base = rounded(colors.card, radius)
     if (accent == null) {
         background = base
-        setPadding(dp(16), dp(16), dp(16), dp(16))
+        setPadding(dp(edge), dp(edge), dp(edge), dp(edge))
     } else {
         val bar = rounded(accent, dpf(2))
         background = LayerDrawable(arrayOf(base, bar)).apply {
             setLayerGravity(1, Gravity.START or Gravity.FILL_VERTICAL)
-            setLayerWidth(1, dp(4))
-            setLayerInset(1, dp(8), dp(16), 0, dp(16))
+            setLayerWidth(1, dp(if (compact) 3 else 4))
+            setLayerInset(1, dp(if (compact) 7 else 8), dp(edge), 0, dp(edge))
         }
-        setPadding(dp(22), dp(16), dp(16), dp(16))
+        setPadding(dp(if (compact) 18 else 22), dp(edge), dp(if (compact) 12 else 16), dp(edge))
     }
 }
 

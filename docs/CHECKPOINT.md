@@ -10,14 +10,16 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (234 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (239 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.14.0 và Android 1.3.0 (bản dịch chữ theo kịp người nói: GPT dịch trước khi bản dịch của
+- **Bản mới nhất:** iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
+  nói, lời đối phương mặc định chỉ hiện chữ, GPT được dặn đổi số 万/亿 và tên Hán Việt; xem mục 1.15.0). Trước đó iPhone 1.14.0
+  và Android 1.3.0 (bản dịch chữ theo kịp người nói: GPT dịch trước khi bản dịch của
   Soniox chậm, tiếng gửi đi không bị giữ lại, nhật ký tốc độ tách được Soniox nghe/chốt/dịch chậm; xem mục 1.14.0). Trước đó
   iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, rồi rà soát lần hai trên
   chính các sửa: 5 phát hiện; sửa trên cả hai bản; xem mục 1.13.0). Commit 4b70f13: iOS run 77 xanh (IPA
@@ -412,9 +414,42 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   Commit 0700047: iOS run 78 xanh (IPA `https://github.com/moc-sinh/app-dichapple/actions/runs/40477337976/artifacts/12720529179`),
   Android run 7 xanh (release `android-1.3.0-7`); đã gửi người dùng cả hai link.
 
+- **1.15.0 + Android 1.4.0: Tôi nói không chờ phòng, chữ gọn hơn (27/10).** Người dùng (dùng Android 1.3.0, "khá ổn"): bấm Tôi nói
+  "hay bị trễ do app chạy dịch tiếng của mọi người"; không cần phần đọc lại trong văn bản dịch (nghĩ tới Chỉ chữ); muốn chữ dịch
+  "thông minh hơn", nhỏ hơn, đọc được nhiều nội dung; tối ưu tốc độ và chất lượng, nhất là tiếng Anh và tiếng Trung. Chưa có nhật ký
+  tốc độ mới, nên chỉ sửa những gì đọc mã thấy chắc chắn:
+  1. **Android xếp hàng yêu cầu**: OkHttp mặc định chỉ chạy 5 yêu cầu cùng lúc tới một máy chủ (`Dispatcher.maxRequestsPerHost`),
+     phần còn lại chờ. Họp đông: GPT dịch lại câu của phòng, hỏi thêm khi chậm, dịch trước, giọng đọc (Đọc to) chiếm đủ 5, câu
+     Tôi nói (GPT rồi giọng) phải chờ. Giờ 32 (`Http.MAX_REQUESTS_PER_HOST`; chung một kết nối HTTP/2). `HttpTest`: 8 yêu cầu chậm
+     đang chạy, yêu cầu thứ 9 về ngay (mã cũ: chờ 1,3 s). iPhone (URLSession, HTTP/2) không bị.
+  2. **Câu của bạn đọc trước** (cả hai app, khi bật Đọc to lời đối phương): câu của phòng chờ đọc trong lúc câu của bạn còn đang
+     nghe/nhận/dịch (`mineSettling`), và bị bỏ (chỉ hiện chữ) nếu có câu của bạn được giao đọc sau nó (`mineQueued`, đếm ngay lúc
+     `say`, không phải lúc vào hàng: đếm lúc vào hàng thì câu phòng có thể chen lên trước, mô phỏng đã bắt được). Nhật ký: "bỏ đọc:
+     câu của bạn đọc trước". Trước đây câu phòng dịch xong trong lúc bạn nói được đọc trước, câu của bạn chờ sau.
+  3. **Lời đối phương mặc định chỉ hiện chữ**: khoá mới `conversation.readOthersAloud` (mặc định tắt, bỏ lựa chọn cũ); nút chọn
+     Đọc to + chữ / Chỉ chữ ở đầu màn hình chuyển vào **⋯ › Đọc to lời đối phương** (dành chỗ cho chữ).
+  4. **Chữ gọn**: `ConversationModel.blocks` gộp câu liền nhau của một người (cùng `mine`, cùng người nói Soniox, cùng tiếng, cách
+     < 60 s, tối đa 6 câu; câu phòng không có người nói — Chính xác, Dịch liền — đứng riêng). Khung gọn (lề 10, bo 14), tên và giờ
+     chữ nhỏ một lần; bỏ hàng nút Đọc lại / Hiện to trên từng câu: **giữ ngón tay** trên câu để Đọc lại, Hiện to, Chép bản dịch,
+     Chép câu gốc; chạm câu của bạn vẫn Hiện to. Bản dịch tạm (chưa xong) mờ 70%, xong thì đậm; không còn dòng "Đang dịch…" khi đã có
+     chữ. Cỡ chữ: thêm **Nhỏ** (15), Vừa thành 17 (trước 20), Lớn 20, Rất lớn 22; câu gốc 13. **⋯ › Hiện câu gốc** bật/tắt.
+     `TextSize` lưu theo số cũ (Android trước lưu theo thứ tự, giờ `code`; Nhỏ = 3).
+  5. **Lời dặn GPT** (`Prompt.incoming`, `Prompt.meeting`: `intoVietnamese` / `INTO_VIETNAMESE`): đổi số đúng đơn vị đếm tiếng Trung
+     (5万 = 50 nghìn, 100万 = 1 triệu, 1亿 = 100 triệu, 10亿 = 1 tỷ), k/million/billion, viết số kiểu Việt (2,5 triệu), 元/块 = tệ,
+     毛/角, 斤 = "cân (0,5 kg)"; tên người, địa danh Trung Quốc đọc Hán Việt. Sang tiếng Trung (`guidance` zh, zh-Hant): 1 triệu = 100万…;
+     sang tiếng Anh: nghìn/triệu/tỷ, viết số kiểu Anh. `Prompt.spoken`: tiếng Trung nghe nhầm thường là chữ đồng âm, chọn theo ngữ cảnh.
+  Test: `Tests/Conversation` 239 kiểm tra (lời dặn); mô phỏng thêm: gộp câu, câu của bạn đọc ngay trước câu phòng dịch trong lượt
+  của bạn (giọng 2,5 s). Android 30 test (`HttpTest`, `ConversationSonioxTest.userWordsGoFirst` với âm phát 1,5 s, gộp câu, lời
+  dặn; `ConversationModelTest` giờ bật Đọc to rõ ràng); bỏ ưu tiên câu của bạn thì `userWordsGoFirst` trượt. `:app:compileDebugKotlin`
+  qua. Giao diện iPhone chỉ biên dịch được trên CI. **Chưa thử trên máy thật.**
+
 ## Việc tiếp theo (theo thứ tự)
 
-0. Đã gửi link IPA 1.14.0 và APK 1.3.0. Người dùng thử họp thật rồi gửi nhật ký tốc độ: đọc dòng "Soniox nửa phút" và các dòng câu
+0. Gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
+   "bỏ đọc: câu của bạn đọc trước"), chữ gọn có dễ đọc không. Nếu Tôi nói vẫn chậm: câu của bạn dịch bằng model của Cài đặt
+   (mặc định Sol, suy luận "low", 2–4 s); có thể cho Tôi nói dùng Luna hoặc dịch trước trong lúc giữ nút — hỏi người dùng trước
+   (đổi chất lượng câu đối tác nghe). Phương án chưa làm, đã đề xuất: Sol chỉ cho câu có số/giá/ngày/cam kết, Luna cho phần còn lại.
+   Trước đó đã gửi link IPA 1.14.0 và APK 1.3.0. Người dùng thử họp thật rồi gửi nhật ký tốc độ: đọc dòng "Soniox nửa phút" và các dòng câu
    (xem cách đọc ở mục 1.14.0) trước khi sửa tiếp. Trước đó đã gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`

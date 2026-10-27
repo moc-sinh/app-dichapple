@@ -1,6 +1,8 @@
 package vn.mocsinh.mstrans.core
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -35,7 +37,8 @@ import kotlin.test.assertTrue
  * Soniox's server; GPT and the phone's sound faked. The same scenes as the iPhone app's simulation.
  */
 class ConversationSonioxTest {
-    private class FakeAudio : AudioPort {
+    /** `playMillis`: how long each piece takes to be heard, on `scope` (at once without one). */
+    private class FakeAudio(private val scope: CoroutineScope? = null, private val playMillis: Long = 0) : AudioPort {
         override var onSamples: ((ShortArray) -> Unit)? = null
         override var onInterruption: ((Boolean) -> Unit)? = null
         val echo = ArrayList<Boolean>()
@@ -51,7 +54,10 @@ class ConversationSonioxTest {
         override fun onAudioThread(block: () -> Unit) = block()
         override fun play(pcm: ByteArray, done: () -> Unit) {
             played += 1
-            done()
+            if (scope == null) done() else scope.launch {
+                delay(playMillis)
+                done()
+            }
         }
         override val backlog: Double = 0.0
         override fun setRate(rate: Float) = Unit
@@ -533,6 +539,75 @@ class ConversationSonioxTest {
         feed(14)
         waitFor("and that answer is its translation") { entry(stalled).state == State.Done }
         assertEquals(2, asked.count { it.first == "STALL 价格还可以" }, "not asked a third time")
+
+        model.stop()
+        room.say(mark("<fin>"))
+        partner.say(mark("<fin>"))
+        waitFor("the sessions close") { room in stand.emptied && partner in stand.emptied }
+        server.shutdown()
+        folder.deleteRecursively()
+        Unit
+    }
+
+    /**
+     * Đọc to: the room's sentences translated while the user speaks are not read before the user's own (the
+     * partners wait for it), and stay on the screen. The same scene as the iPhone app's simulation.
+     */
+    @Test
+    fun userWordsGoFirst() = runBlocking {
+        val server = MockWebServer()
+        val stand = Stand()
+        repeat(2) { server.enqueue(MockResponse().withWebSocketUpgrade(stand)) }
+        server.start()
+        val settings = Settings(MemoryStore()).apply {
+            apiKey = "sk-test"
+            sonioxKey = "soniox-test"
+        }
+        // Each sentence takes a second and a half to read.
+        val audio = FakeAudio(this, playMillis = 1_500)
+        val folder = Files.createTempDirectory("meetings").toFile()
+        val services = ConversationServices(
+            transcribe = { _, _, _ -> SpeechServices.Transcript("", null) },
+            translate = { _, text, target, _, _, _ ->
+                delay(200)
+                Translation("[${target.code}] $text", null, target)
+            },
+            speak = { _, _, _, _, _ -> ByteArray(4_800) },
+            warmUp = {},
+        )
+        val model = ConversationModel(settings, MemoryStore(), audio, MeetingStore(folder), this, services)
+        model.engine = ConversationModel.Engine.SONIOX
+        model.readAloud = true
+        model.partnerCode = "zh"
+        model.voice = ConversationModel.PHONE_VOICE
+        model.sonioxUrl = server.url("/").toString().replaceFirst("http", "ws")
+        model.start()
+        waitFor("both Soniox sessions") { stand.sockets.size == 2 }
+        val room = stand.sockets["vi"]!!
+        val partner = stand.sockets["zh"]!!
+        val tenth = ShortArray(2_400)
+
+        // A partner asks; the user answers, and the partner says something more meanwhile.
+        room.say(word("交货期多长？", "1"))
+        waitFor("the partner's question") { model.entries.lastOrNull()?.text == "交货期多长？" }
+        model.talk(true)
+        repeat(5) {
+            audio.onSamples!!.invoke(tenth)
+            delay(100)
+        }
+        room.say(word("等一下。", "1"), mark("<end>"))
+        waitFor("the room's sentences translated while the user speaks") { model.entries.count { !it.mine && it.state == State.Done } == 2 }
+        partner.say(word("Anh gửi giúp em báo giá nhé", "", "vi", start = 100, end = 900))
+        waitFor("the user's words") { model.entries.lastOrNull()?.mine == true }
+        model.talk(false)
+        waitFor("a moment after letting go") { (stand.finalized["zh"] ?: 0) >= 1 }
+        partner.say(mark("<fin>"))
+        waitFor("the user's sentence translated") { model.entries.last().mine && model.entries.last().state == State.Done }
+        // They used to be read first, the user's after them.
+        waitFor("the user's words read at once, before the room's", timeout = 600) { model.speakingMine }
+        assertTrue(model.speedLogText.contains("bỏ đọc: câu của bạn đọc trước"),
+            "the room's sentences from the user's turn stay on the screen unread:\n${model.speedLogText}")
+        assertEquals(2, model.entries.count { !it.mine && it.translation.isNotEmpty() }, "and their translations shown")
 
         model.stop()
         room.say(mark("<fin>"))

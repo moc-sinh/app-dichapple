@@ -255,7 +255,8 @@ class ConversationModel(
     }
 
     /** How large the translations are written, for a phone lying on the table. */
-    enum class TextSize(val title: String) { MEDIUM("Vừa"), LARGE("Lớn"), EXTRA_LARGE("Rất lớn") }
+    /** How large the translations are written. Kept by `code`: SMALL came after the others. */
+    enum class TextSize(val title: String, val code: Int) { SMALL("Nhỏ", 3), MEDIUM("Vừa", 0), LARGE("Lớn", 1), EXTRA_LARGE("Rất lớn", 2) }
 
     sealed class State {
         /** Live captions still coming in. */
@@ -285,7 +286,12 @@ class ConversationModel(
     }
 
     private object Keys {
-        const val READ_ALOUD = "conversation.readAloud"
+        /**
+         * A new key: the others' words are no longer read aloud unless chosen again (most meetings want
+         * the text, and their voice held up the user's).
+         */
+        const val READ_ALOUD = "conversation.readOthersAloud"
+        const val SHOWS_ORIGINAL = "conversation.showsOriginal"
         const val ENGINE = "conversation.engine"
         const val PARTNER = "conversation.partner"
         const val SILENCE = "conversation.silence"
@@ -382,6 +388,33 @@ class ConversationModel(
 
         fun name(model: TranslationModel): String = if (model == TranslationModel.LUNA) "Luna" else "Sol"
 
+        /** A block holds this many sentences at most, each said within this long of the one before (ms). */
+        const val BLOCK_SIZE = 6
+        const val BLOCK_GAP = 60_000L
+
+        /**
+         * The transcript as it is shown: sentences one person said one after another (the user's turn cut in
+         * pieces, a speaker Soniox told apart talking on) in one block, under their name once. The others'
+         * sentences with no speaker told (Chính xác, Dịch liền) each stand alone: two in a row may be two people.
+         */
+        fun blocks(entries: List<Entry>): List<List<Entry>> {
+            val blocks = ArrayList<ArrayList<Entry>>()
+            for (entry in entries) {
+                val block = blocks.lastOrNull()
+                val last = block?.lastOrNull()
+                if (block != null && last != null && block.size < BLOCK_SIZE &&
+                    last.mine == entry.mine && last.speaker == entry.speaker && (entry.mine || entry.speaker.isNotEmpty()) &&
+                    last.target == entry.target && (last.language.isEmpty() || entry.language.isEmpty() || last.language == entry.language) &&
+                    entry.at - last.at < BLOCK_GAP
+                ) {
+                    block.add(entry)
+                } else {
+                    blocks.add(arrayListOf(entry))
+                }
+            }
+            return blocks
+        }
+
         private fun now(): Double = System.currentTimeMillis() / 1000.0
         private fun millis(): Long = System.currentTimeMillis()
     }
@@ -404,7 +437,7 @@ class ConversationModel(
     // Settings, kept between launches
 
     /** Đọc to: the others' words are read aloud in Vietnamese too. Chỉ chữ: only shown. */
-    var readAloud: Boolean = defaults.get(Keys.READ_ALOUD)?.toBooleanStrictOrNull() ?: true
+    var readAloud: Boolean = defaults.get(Keys.READ_ALOUD)?.toBooleanStrictOrNull() ?: false
         set(value) {
             val switched = field != value
             field = value
@@ -445,10 +478,17 @@ class ConversationModel(
             defaults.set(Keys.QUALITY, value.id)
             changed()
         }
-    var textSize: TextSize = TextSize.entries.getOrNull(defaults.get(Keys.TEXT_SIZE)?.toIntOrNull() ?: 0) ?: TextSize.MEDIUM
+    var textSize: TextSize = TextSize.entries.firstOrNull { it.code == defaults.get(Keys.TEXT_SIZE)?.toIntOrNull() } ?: TextSize.MEDIUM
         set(value) {
             field = value
-            defaults.set(Keys.TEXT_SIZE, value.ordinal.toString())
+            defaults.set(Keys.TEXT_SIZE, value.code.toString())
+            changed()
+        }
+    /** The words as said, under their translation. */
+    var showsOriginal: Boolean = defaults.get(Keys.SHOWS_ORIGINAL)?.toBooleanStrictOrNull() ?: true
+        set(value) {
+            field = value
+            defaults.set(Keys.SHOWS_ORIGINAL, value.toString())
             changed()
         }
     /**
@@ -576,6 +616,8 @@ class ConversationModel(
     private val voiced = HashSet<String>()
     /** Counts the others' sentences queued to be read, so one can tell how many wait behind it. */
     private var theirsQueued = 0
+    /** Counts the user's sentences given to be read: an older sentence of the others' is not read before them. */
+    private var mineQueued = 0
     private var lastDropNote = 0L
     private val speedLog = SpeedLog()
 
@@ -1169,6 +1211,8 @@ class ConversationModel(
     private fun say(text: String, mine: Boolean, language: Language, requested: Boolean = false, entry: String? = null) {
         val apiKey = apiKey ?: return
         if (!running) return
+        // Counted at once, not once queued: the others' sentence that waits for it must not go first meanwhile.
+        if (mine && !requested) mineQueued += 1
         val generation = speechGeneration
         val ready = millis()
         val sound = voiceTask(text, voice, language, apiKey)
@@ -1192,6 +1236,7 @@ class ConversationModel(
     private fun queueSpeech(sound: VoiceStream, text: String, mine: Boolean, requested: Boolean, generation: Int, ready: Long, entry: String?) {
         if (generation != speechGeneration) return
         var serial = 0
+        val mineBefore = mineQueued
         if (!mine && !requested) {
             theirsQueued += 1
             serial = theirsQueued
@@ -1200,9 +1245,13 @@ class ConversationModel(
         speechChain = scope.launch {
             previous?.join()
             if (generation != speechGeneration) return@launch
-            play(sound, text, generation, mine, requested, ready, serial, entry)
+            play(sound, text, generation, mine, requested, ready, serial, mineBefore, entry)
         }
     }
+
+    /** The user's words still being heard, recognised or translated: they are read before anything of the others' that waits. */
+    private val mineSettling: Boolean
+        get() = entries.any { it.mine && (it.state == State.Hearing || it.state == State.Recognizing || it.state == State.Translating) }
 
     /** Until the sentences said shortly before `id` on its side are translated, eight seconds at most. */
     private suspend fun waitForEarlier(id: String) {
@@ -1264,12 +1313,25 @@ class ConversationModel(
         if (error is PhoneVoiceFailure) error.message ?: "" else
             "Không đọc to được: ${error.message ?: ""} Bản dịch vẫn hiện trên màn hình."
 
-    /** `serial`: the others' sentence's place in the queue (0 for the user's and Đọc lại). */
+    /**
+     * `serial`: the others' sentence's place in the queue (0 for the user's and Đọc lại). `mineBefore`: how
+     * many of the user's sentences had been queued before it.
+     */
     private suspend fun play(
-        sound: VoiceStream, text: String, generation: Int, mine: Boolean, requested: Boolean, ready: Long, serial: Int, entry: String?,
+        sound: VoiceStream, text: String, generation: Int, mine: Boolean, requested: Boolean, ready: Long, serial: Int,
+        mineBefore: Int, entry: String?,
     ) {
         // Never over the user: a translation ready while they speak waits until they let go.
         while (talking && running) delay(100)
+        // The user's words go first (the partners wait for them): the others' sentence waits while the
+        // user's are still being translated, and stays on the screen unread once one of them is queued.
+        if (serial > 0) {
+            while ((talking || mineSettling) && running && generation == speechGeneration) delay(100)
+            if (mineQueued != mineBefore && generation == speechGeneration) {
+                log(entry, "bỏ đọc: câu của bạn đọc trước")
+                return
+            }
+        }
         // Like an interpreter, the others' words are read once the room pauses (Chính xác stops
         // listening while it reads). A sentence that finds no pause within ten seconds of being
         // translated gets the text only.

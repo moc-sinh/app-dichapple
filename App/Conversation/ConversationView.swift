@@ -51,24 +51,18 @@ struct ConversationView: View {
 
     // MARK: Header
 
+    /// Only the partners' language: the transcript gets the room (Đọc to is in the menu).
     private var header: some View {
-        VStack(spacing: 10) {
-            Picker("Lời đối phương", selection: $model.readAloud) {
-                Text("Đọc to + chữ").tag(true)
-                Text("Chỉ chữ").tag(false)
-            }
-            .pickerStyle(.segmented)
-            HStack(spacing: 8) {
-                Text("Tiếng của đối tác")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                partnerMenu
-            }
+        HStack(spacing: 8) {
+            Text("Tiếng của đối tác")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            partnerMenu
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
 
     private var partnerMenu: some View {
@@ -103,15 +97,15 @@ struct ConversationView: View {
         let pending = model.entries.count - shown.count
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 8) {
                     if model.entries.isEmpty { hint }
-                    ForEach(shown) { entry in
-                        ConversationEntryRow(entry: entry,
+                    ForEach(ConversationModel.blocks(shown), id: \.first?.id) { block in
+                        ConversationBlockRow(entries: block,
                                              size: model.textSize,
-                                             retry: { model.retry(entry.id) },
-                                             repeatAloud: { model.repeatAloud(entry.id) },
-                                             enlarge: { enlarged = entry })
-                            .id(entry.id)
+                                             showsOriginal: model.showsOriginal,
+                                             retry: { model.retry($0) },
+                                             repeatAloud: { model.repeatAloud($0) },
+                                             enlarge: { enlarged = $0 })
                     }
                     if pending > 0 {
                         HStack(spacing: 8) {
@@ -172,12 +166,14 @@ struct ConversationView: View {
                 .foregroundStyle(Color.brandGreen)
             Text("Bấm **nút tròn bên trái** (sóng âm) để bắt đầu nghe, rồi đặt iPhone giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")
             if model.readAloud {
-                Text("**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Khi nhiều người nói liên tục, giọng đọc nhanh hơn và bỏ qua câu đã cũ để theo kịp; chữ vẫn hiện đủ.")
+                Text("**Đọc to lời đối phương** đang bật (menu ⋯): bản dịch tiếng Việt còn được đọc qua loa. Câu của bạn luôn được đọc trước.")
                     + Text(model.engine == .accurate ? " Lúc điện thoại đang đọc, Chính xác tạm không nghe." : "")
             } else {
-                Text("**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục.")
-                    + Text(model.engine == .soniox ? " Micro nghe người ngồi xa rõ hơn ở chế độ này." : "")
+                Text("Lời đối phương chỉ hiện chữ, không đọc: hợp cuộc họp nhiều người nói liên tục.")
+                    + Text(model.engine == .soniox ? " Micro nghe người ngồi xa rõ hơn." : "")
+                    + Text(" Muốn nghe đọc to, bật **Đọc to lời đối phương** trong menu ⋯.")
             }
+            Text("Câu liền nhau của một người gộp vào một khung. **Giữ ngón tay** trên một câu để đọc lại, hiện to hoặc chép.")
             Text("Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang \(model.partnerLanguage.name) và đọc to qua loa cho mọi người nghe.")
             if model.engine == .soniox {
                 Text(SharedStore.apiKey == nil
@@ -325,6 +321,9 @@ struct ConversationView: View {
                 Label("Dịch lời đối phương", systemImage: "dollarsign.circle")
             }
             .pickerStyle(.menu)
+            Toggle(isOn: $model.readAloud) {
+                Label("Đọc to lời đối phương", systemImage: "speaker.wave.2")
+            }
             Button {
                 topicDraft = model.topic
                 editingTopic = true
@@ -351,6 +350,9 @@ struct ConversationView: View {
                 Label("Cỡ chữ", systemImage: "textformat.size")
             }
             .pickerStyle(.menu)
+            Toggle(isOn: $model.showsOriginal) {
+                Label("Hiện câu gốc", systemImage: "text.quote")
+            }
             Divider()
             Button {
                 showingSummary = true
@@ -452,118 +454,146 @@ struct StatusLine: View {
     }
 }
 
-/// One sentence: the Vietnamese to read (or, for the user's own, what the partners heard).
-struct ConversationEntryRow: View {
-    let entry: ConversationModel.Entry
+/// One person's sentences said one after another: who and when once, then each sentence's
+/// translation (what to read; for the user's own, what the partners heard) over the words as said.
+/// Nothing else takes room: a long press on a sentence offers Đọc lại, Hiện to and copying, and a
+/// tap on the user's own shows it large.
+struct ConversationBlockRow: View {
+    let entries: [ConversationModel.Entry]
     var size: ConversationModel.TextSize = .medium
-    var retry: () -> Void
-    var repeatAloud: () -> Void
-    var enlarge: () -> Void
+    var showsOriginal = true
+    var retry: (UUID) -> Void
+    var repeatAloud: (UUID) -> Void
+    var enlarge: (ConversationModel.Entry) -> Void
+
+    private var first: ConversationModel.Entry { entries[0] }
 
     var body: some View {
-        Card(accent: accent) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Label(who, systemImage: entry.mine ? "person.wave.2.fill" : "person.2.fill")
-                    .font(.footnote.weight(.semibold))
+                Label(who, systemImage: first.mine ? "person.wave.2.fill" : "person.2.fill")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(accent)
                 Spacer()
-                Text(entry.at, style: .time)
-                    .font(.caption)
+                Text(first.at, style: .time)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            content
+            ForEach(entries) { sentence($0) }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if entry.mine, !entry.translation.isEmpty { enlarge() }
+        .padding(.vertical, 10)
+        .padding(.leading, 18)
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(accent)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 7)
+                .accessibilityHidden(true)
         }
     }
 
-    @ViewBuilder private var content: some View {
+    private func sentence(_ entry: ConversationModel.Entry) -> some View {
         let main = entry.translation.isEmpty ? entry.text : entry.translation
         let original = entry.translation.isEmpty ? "" : entry.text
-        if !main.isEmpty {
-            Text(main)
-                .font(entry.mine ? mainFont.weight(.medium) : mainFont)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 2) {
+            if !main.isEmpty {
+                Text(main)
+                    .font(entry.mine ? mainFont.weight(.medium) : mainFont)
+                    // Lighter while it may still change (Soniox's, or GPT's first, until GPT's final).
+                    .foregroundStyle(entry.state == .done ? Color.primary : Color.primary.opacity(0.7))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if showsOriginal, !original.isEmpty {
+                Text(original)
+                    .font(originalFont)
+                    .foregroundStyle(.secondary)
+            }
+            status(entry)
         }
-        if !original.isEmpty {
-            Text(original)
-                .font(originalFont)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if entry.mine, !entry.translation.isEmpty { enlarge(entry) }
         }
+        .contextMenu {
+            if entry.state == .done, !entry.translation.isEmpty {
+                Button { repeatAloud(entry.id) } label: { Label("Đọc lại", systemImage: "speaker.wave.2") }
+            }
+            if entry.mine, !entry.translation.isEmpty {
+                Button { enlarge(entry) } label: { Label("Hiện to", systemImage: "arrow.up.left.and.arrow.down.right") }
+            }
+            if !entry.translation.isEmpty {
+                Button { Clipboard.copy(entry.translation) } label: { Label("Chép bản dịch", systemImage: "doc.on.doc") }
+            }
+            if !entry.text.isEmpty {
+                Button { Clipboard.copy(entry.text) } label: { Label("Chép câu gốc", systemImage: "text.quote") }
+            }
+        }
+    }
+
+    /// A line only while there is nothing to read yet, or when it failed: a sentence with words
+    /// shows its state by its colour.
+    @ViewBuilder private func status(_ entry: ConversationModel.Entry) -> some View {
         switch entry.state {
         case .recognizing:
             progress(entry.mine ? "Đang nhận câu của bạn…" : "Đang nghe…")
-        case .translating:
+        case .translating where entry.translation.isEmpty:
             progress(entry.mine ? "Đang dịch sang \(Meeting.languageName(entry.target))…" : "Đang dịch…")
-        case .hearing:
-            EmptyView()
         case .failed(let message):
             HStack {
                 Label(message, systemImage: "exclamationmark.circle.fill")
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.red)
                 Spacer()
-                Button("Thử lại", action: retry)
-                    .font(.subheadline.weight(.semibold))
+                Button("Thử lại") { retry(entry.id) }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
             }
-        case .done:
-            if !entry.translation.isEmpty {
-                HStack {
-                    Button(action: repeatAloud) {
-                        Label("Đọc lại", systemImage: "speaker.wave.2.fill")
-                    }
-                    Spacer()
-                    if entry.mine {
-                        Button(action: enlarge) {
-                            Label("Hiện to", systemImage: "arrow.up.left.and.arrow.down.right")
-                        }
-                    }
-                }
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(.borderless)
-                .tint(entry.mine ? Color.brandGreen : Color.brandOrange)
-            }
+        default:
+            EmptyView()
         }
     }
 
     private var mainFont: Font {
         switch size {
-        case .medium: return .title3
-        case .large: return .title2
-        case .extraLarge: return .title
+        case .small: return .subheadline
+        case .medium: return .body
+        case .large: return .title3
+        case .extraLarge: return .title2
         }
     }
 
     private var originalFont: Font {
         switch size {
-        case .medium: return .subheadline
-        case .large: return .body
-        case .extraLarge: return .title3
+        case .small, .medium: return .footnote
+        case .large: return .subheadline
+        case .extraLarge: return .body
         }
     }
 
     private func progress(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            ProgressView()
-            Text(text).font(.subheadline).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(text).font(.footnote).foregroundStyle(.secondary)
         }
     }
 
+    /// What the block was said in, once known (its sentences share it).
+    private var language: String { entries.first { !$0.language.isEmpty }?.language ?? "" }
+
     private var who: String {
-        if entry.mine { return "Tôi → \(Meeting.languageName(entry.target))" }
-        let speaker = entry.speaker.isEmpty ? "" : "Người \(entry.speaker) · "
-        if entry.language.isEmpty { return speaker + "Đang nghe" }
-        return speaker + Meeting.languageName(entry.language)
+        if first.mine { return "Tôi → \(Meeting.languageName(first.target))" }
+        let speaker = first.speaker.isEmpty ? "" : "Người \(first.speaker) · "
+        return speaker + (language.isEmpty ? "Đang nghe" : Meeting.languageName(language))
     }
 
     /// Green: the user. Orange: a partner. Grey: someone speaking Vietnamese.
     private var accent: Color {
-        if entry.mine { return .brandGreen }
-        return entry.isVietnamese ? .secondary : .brandOrange
+        if first.mine { return .brandGreen }
+        return language == Language.vietnamese.code ? .secondary : .brandOrange
     }
 }
 

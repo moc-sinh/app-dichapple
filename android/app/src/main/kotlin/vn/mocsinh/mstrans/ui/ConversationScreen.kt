@@ -52,8 +52,12 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     private val scope = MainScope()
     private val main = Handler(Looper.getMainLooper())
 
-    /** The sentences on screen: the others' come up once recognised (a cough never flashes up as a card). */
-    private var shownEntries: List<ConversationModel.Entry> = emptyList()
+    /**
+     * The sentences on screen, in blocks (one person's said one after another): the others' come up once
+     * recognised (a cough never flashes up as a card).
+     */
+    private var shownBlocks: List<List<ConversationModel.Entry>> = emptyList()
+    private var shownCount = 0
     private var pending = 0
     private var signature = ""
     /** A tap (not a hold) started the user's turn: the next tap ends it. */
@@ -64,10 +68,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     /** Refreshed while the summary page is open. */
     private var summaryBody: LinearLayout? = null
 
-    // Header
-    private val readAloud = Segmented(activity, listOf("Đọc to + chữ", "Chỉ chữ"), if (model.readAloud) 0 else 1) {
-        model.readAloud = it == 0
-    }
+    // Header: only the partners' language, the transcript gets the room (Đọc to is in the menu).
     private val partnerPill = activity.label("", TextSize.SUBHEADLINE, c.text, bold = true).apply {
         gravity = Gravity.CENTER
         minHeight = activity.dp(36)
@@ -138,13 +139,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
 
     override val view: View = activity.vertical().apply {
         addView(activity.topBar("Hội thoại", null, more), matchWidth())
-        addView(activity.vertical(10).apply {
-            setPadding(activity.dp(16), 0, activity.dp(16), activity.dp(4))
-            addView(readAloud, matchWidth())
-            addView(activity.horizontal(8).apply {
-                addView(activity.label("Tiếng của đối tác", TextSize.SUBHEADLINE, c.secondary), weighted())
-                addView(partnerPill)
-            }, matchWidth())
+        addView(activity.horizontal(8).apply {
+            setPadding(activity.dp(16), 0, activity.dp(16), activity.dp(2))
+            addView(activity.label("Tiếng của đối tác", TextSize.SUBHEADLINE, c.secondary), weighted())
+            addView(partnerPill)
         }, matchWidth())
         addView(FrameLayout(activity).apply {
             addView(list, fill())
@@ -165,10 +163,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     }
 
     private val adapter = object : BaseAdapter() {
-        override fun getCount() = shownEntries.size
-        override fun getItem(position: Int) = shownEntries[position]
+        override fun getCount() = shownBlocks.size
+        override fun getItem(position: Int) = shownBlocks[position]
         override fun getItemId(position: Int) = position.toLong()
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View = entryRow(shownEntries[position])
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View = blockRow(shownBlocks[position])
         override fun isEnabled(position: Int) = false
     }
 
@@ -236,7 +234,6 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     // Header
 
     private fun renderHeader() {
-        readAloud.selected = if (model.readAloud) 0 else 1
         val title = partnerTitle()
         if (partnerPill.text != title) {
             partnerPill.text = title
@@ -263,7 +260,7 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
         val shown = entries.filter { it.mine || it.state != State.Recognizing }
         val waiting = entries.size - shown.size
         val sign = buildString {
-            append(model.textSize.ordinal).append('|').append(waiting).append('|')
+            append(model.textSize.ordinal).append(model.showsOriginal).append('|').append(waiting).append('|')
             for (e in shown) {
                 append(e.id).append(e.state.toString()).append(e.text.length).append(':').append(e.translation.length)
                     .append(e.language).append(e.target).append(e.speaker).append(';')
@@ -274,9 +271,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
         list.visibility = if (empty) View.GONE else View.VISIBLE
         if (empty) renderHint()
         if (sign == signature) return
-        val grew = shown.size > shownEntries.size || waiting > pending
+        val grew = shown.size > shownCount || waiting > pending
         signature = sign
-        shownEntries = shown
+        shownBlocks = ConversationModel.blocks(shown)
+        shownCount = shown.size
         pending = waiting
         pendingRow.removeAllViews()
         if (waiting > 0) {
@@ -289,83 +287,101 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
     }
 
     private fun mainSize(): Float = when (model.textSize) {
-        ConversationModel.TextSize.MEDIUM -> TextSize.TITLE3
-        ConversationModel.TextSize.LARGE -> TextSize.TITLE2
-        ConversationModel.TextSize.EXTRA_LARGE -> TextSize.TITLE
+        ConversationModel.TextSize.SMALL -> TextSize.SUBHEADLINE
+        ConversationModel.TextSize.MEDIUM -> TextSize.BODY
+        ConversationModel.TextSize.LARGE -> TextSize.TITLE3
+        ConversationModel.TextSize.EXTRA_LARGE -> TextSize.TITLE2
     }
 
     private fun originalSize(): Float = when (model.textSize) {
-        ConversationModel.TextSize.MEDIUM -> TextSize.SUBHEADLINE
-        ConversationModel.TextSize.LARGE -> TextSize.BODY
-        ConversationModel.TextSize.EXTRA_LARGE -> TextSize.TITLE3
+        ConversationModel.TextSize.SMALL, ConversationModel.TextSize.MEDIUM -> TextSize.FOOTNOTE
+        ConversationModel.TextSize.LARGE -> TextSize.SUBHEADLINE
+        ConversationModel.TextSize.EXTRA_LARGE -> TextSize.BODY
     }
 
+    /** What a block was said in, once known (its sentences share it). */
+    private fun language(block: List<ConversationModel.Entry>): String = block.firstOrNull { it.language.isNotEmpty() }?.language ?: ""
+
     /** Green: the user. Orange: a partner. Grey: someone speaking Vietnamese. */
-    private fun accent(entry: ConversationModel.Entry): Int = when {
-        entry.mine -> c.green
-        entry.isVietnamese -> c.secondary
+    private fun accent(block: List<ConversationModel.Entry>): Int = when {
+        block[0].mine -> c.green
+        language(block) == Language.vietnamese.code -> c.secondary
         else -> c.orange
     }
 
-    private fun who(entry: ConversationModel.Entry): String {
-        if (entry.mine) return "Tôi → ${Language.displayName(entry.target)}"
-        val speaker = if (entry.speaker.isEmpty()) "" else "Người ${entry.speaker} · "
-        return speaker + if (entry.language.isEmpty()) "Đang nghe" else Language.displayName(entry.language)
+    private fun who(block: List<ConversationModel.Entry>): String {
+        val first = block[0]
+        if (first.mine) return "Tôi → ${Language.displayName(first.target)}"
+        val speaker = if (first.speaker.isEmpty()) "" else "Người ${first.speaker} · "
+        val language = language(block)
+        return speaker + if (language.isEmpty()) "Đang nghe" else Language.displayName(language)
     }
 
-    private fun entryRow(entry: ConversationModel.Entry): View {
-        val accent = accent(entry)
-        val card = activity.card(accent, spacing = 10)
+    /**
+     * One person's sentences said one after another: who and when once, then each sentence's translation
+     * (what to read; for the user's own, what the partners heard) over the words as said. Nothing else takes
+     * room: a long press on a sentence offers Đọc lại, Hiện to and copying, a tap on the user's own shows it large.
+     */
+    private fun blockRow(block: List<ConversationModel.Entry>): View {
+        val first = block[0]
+        val accent = accent(block)
+        val card = activity.card(accent, spacing = 8, compact = true)
         card.addView(activity.horizontal(6).apply {
-            addView(activity.label(who(entry), TextSize.FOOTNOTE, accent, bold = true)
-                .leading(if (entry.mine) R.drawable.ic_person else R.drawable.ic_people, accent, 16, 6), weighted())
-            addView(activity.label(Dates.time(entry.at), TextSize.CAPTION, c.secondary))
+            addView(activity.label(who(block), TextSize.CAPTION, accent, bold = true)
+                .leading(if (first.mine) R.drawable.ic_person else R.drawable.ic_people, accent, 14, 4), weighted())
+            addView(activity.label(Dates.time(first.at), TextSize.CAPTION, c.secondary))
         }, matchWidth())
-        val main = entry.translation.ifEmpty { entry.text }
-        val original = if (entry.translation.isEmpty()) "" else entry.text
-        if (main.isNotEmpty()) card.addView(activity.label(main, mainSize(), c.text, medium = entry.mine), matchWidth())
-        if (original.isNotEmpty()) card.addView(activity.label(original, originalSize(), c.secondary), matchWidth())
-        when (val state = entry.state) {
-            State.Recognizing -> card.addView(activity.progress(if (entry.mine) "Đang nhận câu của bạn…" else "Đang nghe…"))
-            State.Translating -> card.addView(activity.progress(
-                if (entry.mine) "Đang dịch sang ${Language.displayName(entry.target)}…" else "Đang dịch…",
-            ))
-            State.Hearing -> Unit
-            is State.Failed -> card.addView(activity.horizontal(8).apply {
-                addView(activity.label(state.message, TextSize.SUBHEADLINE, c.red).leading(R.drawable.ic_error, c.red, 16, 6), weighted())
-                addView(activity.pill("Thử lại", R.drawable.ic_retry, PillStyle.TINTED, tint = c.green) { model.retry(entry.id) })
-            }, matchWidth())
-            State.Done -> if (entry.translation.isNotEmpty()) {
-                val tint = if (entry.mine) c.green else c.orange
-                card.addView(activity.horizontal(8).apply {
-                    addView(activity.pill("Đọc lại", R.drawable.ic_speaker, PillStyle.TINTED, tint = tint) { model.repeatAloud(entry.id) })
-                    addView(activity.spacer())
-                    if (entry.mine) addView(activity.pill("Hiện to", R.drawable.ic_expand, PillStyle.TINTED, tint = tint) { enlarge(entry) })
-                }, matchWidth())
-            }
-        }
-        card.setOnClickListener { if (entry.mine && entry.translation.isNotEmpty()) enlarge(entry) }
-        card.setOnLongClickListener {
-            copyChoices(entry)
-            true
-        }
+        for (entry in block) card.addView(sentenceView(entry), matchWidth())
         return FrameLayout(activity).apply {
-            setPadding(0, 0, 0, activity.dp(10))
+            setPadding(0, 0, 0, activity.dp(8))
             addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
     }
 
-    private fun copyChoices(entry: ConversationModel.Entry) {
-        val options = ArrayList<Pair<String, String>>()
-        if (entry.translation.isNotEmpty()) options.add("Chép bản dịch" to entry.translation)
-        if (entry.text.isNotEmpty()) options.add("Chép câu gốc" to entry.text)
+    private fun sentenceView(entry: ConversationModel.Entry): View = activity.vertical(2).apply {
+        val main = entry.translation.ifEmpty { entry.text }
+        val original = if (entry.translation.isEmpty()) "" else entry.text
+        if (main.isNotEmpty()) addView(activity.label(main, mainSize(), c.text, medium = entry.mine).apply {
+            // Lighter while it may still change (Soniox's, or GPT's first, until GPT's final).
+            if (entry.state != State.Done) alpha = 0.7f
+        }, matchWidth())
+        if (model.showsOriginal && original.isNotEmpty()) addView(activity.label(original, originalSize(), c.secondary), matchWidth())
+        // A line only while there is nothing to read yet, or when it failed.
+        when (val state = entry.state) {
+            State.Recognizing -> addView(activity.progress(if (entry.mine) "Đang nhận câu của bạn…" else "Đang nghe…", TextSize.FOOTNOTE))
+            State.Translating -> if (entry.translation.isEmpty()) addView(activity.progress(
+                if (entry.mine) "Đang dịch sang ${Language.displayName(entry.target)}…" else "Đang dịch…", TextSize.FOOTNOTE,
+            ))
+            is State.Failed -> addView(activity.horizontal(8).apply {
+                addView(activity.label(state.message, TextSize.FOOTNOTE, c.red).leading(R.drawable.ic_error, c.red, 14, 6), weighted())
+                addView(activity.pill("Thử lại", R.drawable.ic_retry, PillStyle.TINTED, tint = c.green, size = TextSize.FOOTNOTE) {
+                    model.retry(entry.id)
+                })
+            }, matchWidth())
+            State.Hearing, State.Done -> Unit
+        }
+        setOnClickListener { if (entry.mine && entry.translation.isNotEmpty()) enlarge(entry) }
+        setOnLongClickListener {
+            sentenceChoices(entry)
+            true
+        }
+    }
+
+    private fun sentenceChoices(entry: ConversationModel.Entry) {
+        val options = ArrayList<Pair<String, () -> Unit>>()
+        if (entry.state == State.Done && entry.translation.isNotEmpty()) options.add("Đọc lại" to { model.repeatAloud(entry.id) })
+        if (entry.mine && entry.translation.isNotEmpty()) options.add("Hiện to" to { enlarge(entry) })
+        if (entry.translation.isNotEmpty()) options.add("Chép bản dịch" to { copy(entry.translation) })
+        if (entry.text.isNotEmpty()) options.add("Chép câu gốc" to { copy(entry.text) })
         if (options.isEmpty()) return
         AlertDialog.Builder(activity)
-            .setItems(options.map { it.first }.toTypedArray()) { _, which ->
-                activity.copyText(options[which].second)
-                activity.toast("Đã chép")
-            }
+            .setItems(options.map { it.first }.toTypedArray()) { _, which -> options[which].second() }
             .show()
+    }
+
+    private fun copy(text: String) {
+        activity.copyText(text)
+        activity.toast("Đã chép")
     }
 
     private fun rich(text: String): CharSequence =
@@ -377,14 +393,15 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             addView(activity.label(rich("Bấm **nút tròn bên trái** (sóng âm) để bắt đầu nghe, rồi đặt điện thoại giữa bàn. Mọi người nói gì, bạn đọc bằng tiếng Việt ở đây.")))
             addView(activity.label(rich(
                 if (model.readAloud) {
-                    "**Đọc to + chữ**: bản dịch tiếng Việt còn được đọc to qua loa. Khi nhiều người nói liên tục, giọng đọc nhanh hơn " +
-                        "và bỏ qua câu đã cũ để theo kịp; chữ vẫn hiện đủ." +
+                    "**Đọc to lời đối phương** đang bật (menu ⋯): bản dịch tiếng Việt còn được đọc qua loa. Câu của bạn luôn được đọc trước." +
                         if (model.engine == Engine.ACCURATE) " Lúc điện thoại đang đọc, Chính xác tạm không nghe." else ""
                 } else {
-                    "**Chỉ chữ**: chỉ hiện bản dịch, không đọc. Hợp cuộc họp nhiều người nói liên tục." +
-                        if (model.engine == Engine.SONIOX) " Micro nghe người ngồi xa rõ hơn ở chế độ này." else ""
+                    "Lời đối phương chỉ hiện chữ, không đọc: hợp cuộc họp nhiều người nói liên tục." +
+                        (if (model.engine == Engine.SONIOX) " Micro nghe người ngồi xa rõ hơn." else "") +
+                        " Muốn nghe đọc to, bật **Đọc to lời đối phương** trong menu ⋯."
                 },
             )))
+            addView(activity.label(rich("Câu liền nhau của một người gộp vào một khung. **Giữ ngón tay** trên một câu để đọc lại, hiện to hoặc chép.")))
             addView(activity.label(rich(
                 "Muốn nói: **giữ nút Tôi nói** trong lúc nói (hoặc chạm một lần, nói xong chạm lần nữa). Câu của bạn được dịch sang " +
                     "${model.partnerLanguage.name} và đọc to qua loa cho mọi người nghe.",
@@ -547,6 +564,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             qualities.add(2, 200 + i, i, quality.title).isChecked = quality == model.quality
         }
         qualities.setGroupCheckable(2, true, true)
+        menu.add(Menu.NONE, 260, 1, "Đọc to lời đối phương").apply {
+            isCheckable = true
+            isChecked = model.readAloud
+        }
         menu.add(2, 250, 1, if (model.topic.isEmpty()) "Chủ đề cuộc họp…" else "Chủ đề: ${model.topic}")
 
         val silences = menu.addSubMenu(Menu.NONE, Menu.NONE, 2, "Ngừng bao lâu là hết câu")
@@ -566,6 +587,10 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             sizes.add(5, 500 + i, i, size.title).isChecked = size == model.textSize
         }
         sizes.setGroupCheckable(5, true, true)
+        menu.add(Menu.NONE, 270, 4, "Hiện câu gốc").apply {
+            isCheckable = true
+            isChecked = model.showsOriginal
+        }
 
         val hasLines = model.meeting.lines.isNotEmpty()
         menu.add(6, 600, 5, "Tóm tắt cuộc họp").isEnabled = hasLines
@@ -580,6 +605,8 @@ class ConversationScreen(private val activity: MainActivity) : Screen {
             when (id) {
                 in 100..199 -> model.engine = Engine.entries[id - 100]
                 250 -> editTopic()
+                260 -> model.readAloud = !model.readAloud
+                270 -> model.showsOriginal = !model.showsOriginal
                 in 200..249 -> model.quality = ConversationModel.Quality.entries[id - 200]
                 in 300..399 -> model.silence = ConversationModel.silenceChoices[id - 300]
                 in 400..499 -> model.voice = ConversationModel.voices[id - 400].first

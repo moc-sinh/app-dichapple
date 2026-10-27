@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.boolean
+import vn.mocsinh.mstrans.core.conversation.ConversationModel
 import vn.mocsinh.mstrans.core.conversation.CostMeter
 import vn.mocsinh.mstrans.core.conversation.EchoGuard
 import vn.mocsinh.mstrans.core.conversation.GoogleVoice
@@ -241,6 +242,17 @@ class ConversationPartsTest {
         val meeting = Prompt.meeting(Settings(MemoryStore()))
         c.check(meeting.contains("what one participant said") && !meeting.contains("written by the partner"),
             "the others' words in a meeting: said by one of several people, not a message to the user")
+        // What goes wrong most with Chinese and English partners: amounts counted by 万, names, a 斤.
+        for (into in listOf(meeting, Prompt.incoming(Settings(MemoryStore())))) {
+            c.check(into.contains("100万 = 1 triệu, 1亿 = 100 triệu") && into.contains("million, billion = nghìn, triệu, tỷ") &&
+                into.contains("(Hán Việt)") && into.contains("cân (0,5 kg)") && into.contains("\n- Chinese names"),
+                "into Vietnamese: amounts converted exactly, Chinese names in Hán Việt, as a list item of their own")
+        }
+        c.check(Prompt.outgoing(Language.named("zh")!!, Settings(MemoryStore())).contains("1 triệu = 100万") &&
+            Prompt.outgoing(Language.named("zh-Hant")!!, Settings(MemoryStore())).contains("1 tỷ = 10亿"), "into Chinese: a Vietnamese million is 100万")
+        val english = Prompt.outgoing(Language.named("en")!!, Settings(MemoryStore()))
+        c.check(english.contains("triệu = million") && !english.contains("万"), "into English: Vietnamese amounts, the English way")
+        c.check(Prompt.spoken("Vietnamese").contains("sounds the same"), "Chinese misheard: a character that sounds the same")
         // A meeting's sentence: who said it, and the sentences before it with who said them and how
         // they were translated; the topic goes with the instructions.
         val prompt = Prompt.spoken("Vietnamese", " báo giá máy CNC ")
@@ -684,6 +696,24 @@ class ConversationPartsTest {
             "over ten times cheaper than Dịch liền")
         val checked = CostMeter.perHour(true, true, TranslationModel.LUNA, true, false, translatesAgain = true)
         c.check(abs(checked - 0.18 - 2 * 0.0756) < 1e-9, "each sentence translated again by Luna, and about once ahead: about 0.15 USD more an hour")
+        c.done()
+    }
+
+    /** The transcript in blocks: one person's sentences said one after another under their name once. */
+    @Test
+    fun transcriptBlocks() {
+        val c = Checks()
+        var n = 0
+        fun e(seconds: Double, mine: Boolean = false, speaker: String = "", language: String = "zh", target: String = "vi") =
+            ConversationModel.Entry("${n++}", (seconds * 1000).toLong(), mine, language, "x", "", target, ConversationModel.State.Done, speaker)
+        val entries = listOf(e(0.0, speaker = "1"), e(2.0, speaker = "1", language = ""), e(4.0, speaker = "2"), e(5.0, speaker = "2", language = "en"),
+            e(6.0, mine = true, language = "vi", target = "zh"), e(9.0, mine = true, language = "vi", target = "zh"),
+            e(10.0), e(11.0), e(80.0, mine = true, language = "vi", target = "zh"), e(200.0, mine = true, language = "vi", target = "zh"))
+        val blocks = ConversationModel.blocks(entries).map { block -> block.map { it.id.toInt() } }
+        c.check(blocks == listOf(listOf(0, 1), listOf(2), listOf(3), listOf(4, 5), listOf(6), listOf(7), listOf(8), listOf(9)),
+            "same speaker and language in a row together; another language, a speaker not told, a long pause apart: $blocks")
+        val long = (0 until 8).map { e(it.toDouble(), speaker = "3") }
+        c.check(ConversationModel.blocks(long).map { it.size } == listOf(6, 2), "six sentences at most a block")
         c.done()
     }
 }

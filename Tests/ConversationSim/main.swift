@@ -86,6 +86,24 @@ struct Simulation {
         Sim.speed = 4
         model.setTopic("  báo giá máy CNC ")
 
+        // The transcript in blocks: one person's sentences said one after another under their name once.
+        do {
+            typealias E = ConversationModel.Entry
+            let t0 = Date()
+            func e(_ seconds: Double, mine: Bool = false, speaker: String = "", language: String = "zh", target: String = "vi") -> E {
+                E(id: UUID(), at: t0.addingTimeInterval(seconds), mine: mine, language: language, text: "x", translation: "",
+                  target: target, state: .done, speaker: speaker)
+            }
+            let entries = [e(0, speaker: "1"), e(2, speaker: "1", language: ""), e(4, speaker: "2"), e(5, speaker: "2", language: "en"),
+                           e(6, mine: true, language: "vi", target: "zh"), e(9, mine: true, language: "vi", target: "zh"),
+                           e(10), e(11), e(80, mine: true, language: "vi", target: "zh"), e(200, mine: true, language: "vi", target: "zh")]
+            let blocks = ConversationModel.blocks(entries).map { $0.map { entry in entries.firstIndex { $0.id == entry.id }! } }
+            check(blocks == [[0, 1], [2], [3], [4, 5], [6], [7], [8], [9]],
+                  "same speaker and language in a row together; another language, a speaker not told, a long pause apart: \(blocks)")
+            let long = (0..<8).map { e(Double($0), speaker: "3") }
+            check(ConversationModel.blocks(long).map(\.count) == [6, 2], "six sentences at most a block")
+        }
+
         await model.start()
         check(model.running, "listening")
         guard let others = SonioxSession.all.first(where: { $0.target == "vi" }),
@@ -171,6 +189,8 @@ struct Simulation {
 
         // A partner asks, and the user answers at once: the question ends as the button goes down (Soniox
         // sends no end of sentence while the user talks on: the room's session hears their turn too).
+        // Voices long enough that the room's would still be read when the user's translation is ready.
+        calls.voiceBytes = 480_000
         others.say([w("交货期多长？", "1")])
         // The user speaks.
         model.talk(true)
@@ -203,6 +223,12 @@ struct Simulation {
         await sleep(0.6)
         check(model.entries.last?.translation == "请把报价发给我。", "into the partners' Chinese")
         check(calls.translated.last?.model == .sol, "the user's words with the app's model")
+        await sleep(0.1)
+        // The room's sentences translated during the user's turn would have been read first (Đọc to), then theirs.
+        check(model.speakingMine, "the user's words are read as soon as they are translated, before the room's")
+        check(model.speedLogText.contains("bỏ đọc: câu của bạn đọc trước"), "the room's sentences from the user's turn stay on the screen unread")
+        calls.voiceBytes = 96_000
+        await sleep(2.5)
         await sleep(1)
         check(calls.spoken.last == "请把报价发给我。", "read aloud to the partners")
         // A partner confirming it in the words the phone read it in is someone speaking: the room's

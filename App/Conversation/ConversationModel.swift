@@ -202,12 +202,14 @@ final class ConversationModel {
         var model: TranslationModel { self == .economy ? .luna : .sol }
     }
 
-    /// How large the translations are written, for a phone lying on the table.
+    /// How large the translations are written, for a phone lying on the table. Kept by number:
+    /// `small` came after the others.
     enum TextSize: Int, CaseIterable, Identifiable {
-        case medium, large, extraLarge
+        case small = 3, medium = 0, large = 1, extraLarge = 2
         var id: Int { rawValue }
         var title: String {
             switch self {
+            case .small: return "Nhỏ"
             case .medium: return "Vừa"
             case .large: return "Lớn"
             case .extraLarge: return "Rất lớn"
@@ -242,8 +244,34 @@ final class ConversationModel {
         var isVietnamese: Bool { language == Language.vietnamese.code }
     }
 
+    /// The transcript as it is shown: sentences one person said one after another (the user's turn
+    /// cut in pieces, a speaker Soniox told apart talking on) in one block, under their name once.
+    /// The others' sentences with no speaker told (Chính xác, Dịch liền) each stand alone: two in a
+    /// row may be two people.
+    static func blocks(_ entries: [Entry]) -> [[Entry]] {
+        var blocks: [[Entry]] = []
+        for entry in entries {
+            if let block = blocks.last, let last = block.last, block.count < blockSize,
+               last.mine == entry.mine, last.speaker == entry.speaker, entry.mine || !entry.speaker.isEmpty,
+               last.target == entry.target, last.language.isEmpty || entry.language.isEmpty || last.language == entry.language,
+               entry.at.timeIntervalSince(last.at) < blockGap {
+                blocks[blocks.count - 1].append(entry)
+            } else {
+                blocks.append([entry])
+            }
+        }
+        return blocks
+    }
+
+    /// A block holds this many sentences at most, each said within this long of the one before (seconds).
+    static let blockSize = 6
+    static let blockGap = 60.0
+
     private enum Keys {
-        static let readAloud = "conversation.readAloud"
+        /// A new key: the others' words are no longer read aloud unless chosen again (most meetings
+        /// want the text, and their voice held up the user's).
+        static let readAloud = "conversation.readOthersAloud"
+        static let showsOriginal = "conversation.showsOriginal"
         static let engine = "conversation.engine"
         static let partner = "conversation.partner"
         static let silence = "conversation.silence"
@@ -276,6 +304,8 @@ final class ConversationModel {
     var voice: String { didSet { defaults.set(voice, forKey: Keys.voice) } }
     var quality: Quality { didSet { defaults.set(quality.rawValue, forKey: Keys.quality) } }
     var textSize: TextSize { didSet { defaults.set(textSize.rawValue, forKey: Keys.textSize) } }
+    /// The words as said, under their translation.
+    var showsOriginal: Bool { didSet { defaults.set(showsOriginal, forKey: Keys.showsOriginal) } }
     /// What the meeting is about, in the user's words ("báo giá máy CNC với nhà cung cấp Thâm Quyến"):
     /// GPT is told with every sentence, Soniox when listening starts, and it goes in the minutes.
     private(set) var topic: String
@@ -391,6 +421,9 @@ final class ConversationModel {
     @ObservationIgnored private var voiced: Set<UUID> = []
     /// Counts the others' sentences queued to be read, so one can tell how many wait behind it.
     @ObservationIgnored private var theirsQueued = 0
+    /// Counts the user's sentences given to be read: an older sentence of the others' is not read
+    /// before them.
+    @ObservationIgnored private var mineQueued = 0
     @ObservationIgnored private var lastDropNote = Date.distantPast
     @ObservationIgnored private var speedLog = SpeedLog()
     /// Soniox sentences being said or translated: when they were said, and how soon their words and
@@ -505,7 +538,7 @@ final class ConversationModel {
 
     init() {
         let defaults = UserDefaults.standard
-        readAloud = defaults.object(forKey: Keys.readAloud) as? Bool ?? true
+        readAloud = defaults.object(forKey: Keys.readAloud) as? Bool ?? false
         engine = Engine(rawValue: defaults.string(forKey: Keys.engine) ?? "") ?? .accurate
         partnerCode = defaults.string(forKey: Keys.partner) ?? Language.autoCode
         let savedSilence = defaults.double(forKey: Keys.silence)
@@ -514,6 +547,7 @@ final class ConversationModel {
         voice = Self.voices.contains { $0.id == savedVoice } ? savedVoice : "marin"
         quality = Quality(rawValue: defaults.string(forKey: Keys.quality) ?? "") ?? .economy
         textSize = TextSize(rawValue: defaults.integer(forKey: Keys.textSize)) ?? .medium
+        showsOriginal = defaults.object(forKey: Keys.showsOriginal) as? Bool ?? true
         topic = defaults.string(forKey: Keys.topic) ?? ""
         if !topic.isEmpty { meeting.topic = topic }
         audio.onInterruption = { [weak self] began in self?.interrupted = began }
@@ -1025,6 +1059,8 @@ final class ConversationModel {
     /// even in Chỉ chữ and without waiting for the room to pause.
     private func say(_ text: String, mine: Bool, language: Language, requested: Bool = false, entry id: UUID? = nil) {
         guard let apiKey, running else { return }
+        // Counted at once, not once queued: the others' sentence that waits for it must not go first meanwhile.
+        if mine, !requested { mineQueued += 1 }
         let generation = speechGeneration
         let ready = Date()
         let sound = voiceTask(text, voice: voice, language: language, apiKey: apiKey)
@@ -1048,6 +1084,7 @@ final class ConversationModel {
                              entry id: UUID?) {
         guard generation == speechGeneration else { return }
         var serial = 0
+        let mineBefore = mineQueued
         if !mine, !requested {
             theirsQueued += 1
             serial = theirsQueued
@@ -1057,8 +1094,14 @@ final class ConversationModel {
             await previous?.value
             guard let self, generation == self.speechGeneration else { return }
             await self.play(sound, text: text, generation: generation, mine: mine, requested: requested, ready: ready,
-                            serial: serial, entry: id)
+                            serial: serial, mineBefore: mineBefore, entry: id)
         }
+    }
+
+    /// The user's words still being heard, recognised or translated: they are read before anything
+    /// of the others' that waits.
+    private var mineSettling: Bool {
+        entries.contains { $0.mine && ($0.state == .hearing || $0.state == .recognizing || $0.state == .translating) }
     }
 
     /// Until the sentences said shortly before `id` on its side (the user's, or the others') are
@@ -1128,10 +1171,22 @@ final class ConversationModel {
     private static let startingSound = Int(Double(PCM.rate * 2) * 0.4)
 
     /// `serial`: the others' sentence's place in the queue (0 for the user's and Đọc lại).
+    /// `mineBefore`: how many of the user's sentences had been queued before it.
     private func play(_ sound: VoiceStream, text: String, generation: Int, mine: Bool, requested: Bool, ready: Date,
-                      serial: Int, entry id: UUID?) async {
+                      serial: Int, mineBefore: Int, entry id: UUID?) async {
         // Never over the user: a translation ready while they speak waits until they let go.
         while talking, running { try? await Task.sleep(nanoseconds: 100_000_000) }
+        // The user's words go first (the partners wait for them): the others' sentence waits while the
+        // user's are still being translated, and stays on the screen unread once one of them is queued.
+        if serial > 0 {
+            while talking || mineSettling, running, generation == speechGeneration {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if mineQueued != mineBefore, generation == speechGeneration {
+                log(id, "bỏ đọc: câu của bạn đọc trước")
+                return
+            }
+        }
         // Like an interpreter, the others' words are read once the room pauses: read over someone
         // still talking, Chính xác would stop listening to them. A sentence that finds no pause
         // within ten seconds of being translated gets the text only (so the voice never falls

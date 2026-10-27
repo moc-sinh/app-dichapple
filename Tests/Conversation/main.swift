@@ -270,6 +270,17 @@ check(Prompt.spoken(into: "Vietnamese").contains("repeats or confirms") && !Prom
       "a number confirmed again is translated again, not dropped as said before")
 check(Prompt.meeting().contains("what one participant said") && !Prompt.meeting().contains("written by the partner"),
       "the others' words in a meeting: said by one of several people, not a message to the user")
+// What goes wrong most with Chinese and English partners: amounts counted by 万, names, a 斤.
+for prompt in [Prompt.meeting(), Prompt.incoming()] {
+    check(prompt.contains("100万 = 1 triệu, 1亿 = 100 triệu") && prompt.contains("million, billion = nghìn, triệu, tỷ")
+          && prompt.contains("(Hán Việt)") && prompt.contains("cân (0,5 kg)") && prompt.contains("\n- Chinese names"),
+          "into Vietnamese: amounts converted exactly, Chinese names in Hán Việt, as a list item of their own")
+}
+check(Prompt.outgoing(target: Language.named("zh")!).contains("1 triệu = 100万") && Prompt.outgoing(target: Language.named("zh-Hant")!).contains("1 tỷ = 10亿"),
+      "into Chinese: a Vietnamese million is 100万")
+check(Prompt.outgoing(target: Language.named("en")!).contains("triệu = million") && !Prompt.outgoing(target: Language.named("en")!).contains("万"),
+      "into English: Vietnamese amounts, the English way")
+check(Prompt.spoken(into: "Vietnamese").contains("sounds the same"), "Chinese misheard: a character that sounds the same")
 do {
     // A meeting's sentence: who said it, and the sentences before it with who said them and how
     // they were translated; the topic goes with the instructions.

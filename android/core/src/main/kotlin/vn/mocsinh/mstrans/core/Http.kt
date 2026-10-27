@@ -13,6 +13,7 @@ import kotlinx.serialization.json.intOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.io.IOException
@@ -23,8 +24,14 @@ import kotlin.coroutines.resumeWithException
 
 /** One connection pool for every call: OpenAI, Soniox and Google. */
 object Http {
+    const val MAX_REQUESTS_PER_HOST = 32
+
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            // OkHttp runs 5 requests at once to a host and queues the rest. In a busy meeting the room's
+            // translations (their spare asks, the voices with Đọc to) took all 5, and the user's Tôi nói
+            // waited behind them. They share one HTTP/2 connection anyway.
+            .dispatcher(Dispatcher().apply { maxRequestsPerHost = MAX_REQUESTS_PER_HOST })
             .connectTimeout(15, TimeUnit.SECONDS)
             // The answer comes in one piece once it is written: a long message can take a while.
             .readTimeout(90, TimeUnit.SECONDS)
