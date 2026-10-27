@@ -17,8 +17,10 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, sửa trên cả hai bản;
-  xem mục 1.13.0). Trước đó 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng
+- **Bản mới nhất:** iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, rồi rà soát lần hai trên
+  chính các sửa: 5 phát hiện; sửa trên cả hai bản; xem mục 1.13.0). Commit 4b70f13: iOS run 77 xanh (IPA
+  `https://github.com/moc-sinh/app-dichapple/actions/runs/40424082233/artifacts/12699018370`), Android run 6 xanh (release
+  `android-1.2.0-6`); đã gửi người dùng cả hai link. Trước đó 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng
   nhìn thấy; xem mục 1.12.1). 1.12.0 (chữ không trễ và dịch đúng ngữ cảnh hơn: GPT biết ai nói và bản dịch các câu trước, hỏi
   lại khi chậm, chủ đề cuộc họp; run 72, đã gửi link). Link IPA 1.11.0 đã gửi người dùng (run 71, lần chạy thứ 2: lần đầu
   GitHub không có máy macOS trong 15 phút nên huỷ, không phải lỗi mã). Trước đó 1.11.0 (họp nhiều người: tách câu theo
@@ -374,7 +376,7 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+0. Đã gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`
    (Soniox chậm), `GPT Luna X s · bản dịch đầu tiên sau X s · bản GPT sau X s từ lúc ngừng nói` (đây là độ trễ người
