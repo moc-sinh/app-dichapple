@@ -164,14 +164,14 @@ final class LiveSession {
 /// session while someone speaks, with the half second before (the first syllable) and the three
 /// seconds after (so it finishes the sentence), and nothing while nobody speaks.
 struct LiveGate {
-    /// In chunks of a tenth of a second.
-    static let preroll = 5
-    static let hold = 30
+    /// In samples (24 kHz PCM16): half a second, and three.
+    static let preroll = PCM.rate / 2
+    static let hold = PCM.rate * 3
 
     private var buffered: [Data] = []
     private var left = 0
 
-    /// The next tenth of a second, and whether someone is speaking in it; returns what to send now.
+    /// The sound just heard (any length), and whether someone is speaking in it; returns what to send now.
     mutating func feed(_ chunk: Data, speech: Bool) -> [Data] {
         if speech {
             left = Self.hold
@@ -180,11 +180,18 @@ struct LiveGate {
             return out
         }
         if left > 0 {
-            left -= 1
+            left -= chunk.count / 2
             return [chunk]
         }
         buffered.append(chunk)
-        if buffered.count > Self.preroll { buffered.removeFirst(buffered.count - Self.preroll) }
+        // The last piece, and those before it that fit in the half second.
+        var kept = buffered[buffered.count - 1].count / 2
+        var first = buffered.count - 1
+        while first > 0, kept + buffered[first - 1].count / 2 <= Self.preroll {
+            first -= 1
+            kept += buffered[first].count / 2
+        }
+        buffered.removeFirst(first)
         return []
     }
 

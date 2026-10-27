@@ -207,7 +207,8 @@ data class CostMeter(var dollars: Double = 0.0) {
         /**
          * Per hour of people speaking, for the choices made: about 12 sentences a minute, each about 750
          * tokens in and 60 out (160 with Sol's reasoning). `translatesAgain`: each sentence of Soniox or
-         * Dịch liền is translated again by GPT, as Chính xác's are. Soniox is paid by the hour of meeting.
+         * Dịch liền is translated again by GPT, as Chính xác's are; Soniox's, about once more ahead of its end
+         * (with Luna, while Soniox's own translation lags), on average. Soniox is paid by the hour of meeting.
          */
         fun perHour(
             live: Boolean, soniox: Boolean, model: TranslationModel, readAloud: Boolean, openAIVoice: Boolean,
@@ -216,7 +217,9 @@ data class CostMeter(var dollars: Double = 0.0) {
             val (input, _, output) = model.price
             val sentence = (750 * input + (if (model == TranslationModel.LUNA) 60 else 160) * output) / 1_000_000
             val again = if (translatesAgain) 720 * sentence else 0.0
-            if (soniox) return 60 * Rate.SONIOX_PER_MINUTE + again + if (readAloud && openAIVoice) 60 * Rate.VOICE_PER_MINUTE else 0.0
+            val (lunaInput, _, lunaOutput) = TranslationModel.LUNA.price
+            val ahead = if (translatesAgain) 720 * (750 * lunaInput + 60 * lunaOutput) / 1_000_000 else 0.0
+            if (soniox) return 60 * Rate.SONIOX_PER_MINUTE + again + ahead + if (readAloud && openAIVoice) 60 * Rate.VOICE_PER_MINUTE else 0.0
             if (live) return 60 * Rate.LIVE_PER_MINUTE + again
             var hour = 60 * Rate.TRANSCRIBE_PER_MINUTE + 720 * sentence
             if (readAloud && openAIVoice) hour += 60 * Rate.VOICE_PER_MINUTE

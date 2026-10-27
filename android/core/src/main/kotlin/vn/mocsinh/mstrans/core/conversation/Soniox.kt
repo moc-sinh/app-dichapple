@@ -50,6 +50,11 @@ data class SonioxToken(
 /** What a Soniox session sends back, and what it is sent. */
 sealed class SonioxEvent {
     data class Tokens(val tokens: List<SonioxToken>) : SonioxEvent()
+    /**
+     * How much of the sound sent Soniox has turned into settled words, and into words at all (settled or
+     * guessed), in milliseconds: told with each message, before its tokens.
+     */
+    data class Processed(val finalMs: Int, val totalMs: Int) : SonioxEvent()
     /** Everything sent has been answered; the session ends. */
     data object Finished : SonioxEvent()
     /** 401 a wrong key, 402 or 429 no credit left, 400 a request it does not take; -1 the network. */
@@ -63,6 +68,9 @@ sealed class SonioxEvent {
                 return listOf(Failed(o["error_code"].int() ?: 0, o["error_message"].str() ?: ""))
             }
             val events = ArrayList<SonioxEvent>()
+            val final = o["final_audio_proc_ms"].int()
+            val total = o["total_audio_proc_ms"].int()
+            if (final != null && total != null) events.add(Processed(final, total))
             val list = o["tokens"].arr()
             val tokens = (list ?: emptyList()).mapNotNull { element ->
                 val token = element.obj() ?: return@mapNotNull null
@@ -196,11 +204,16 @@ class SonioxTranscript(
         /** Where its words begin and end in the session's sound (milliseconds), when told. */
         val startMs: Int? = null,
         val endMs: Int? = null,
+        /**
+         * Where the words its translation has come for so far end (each piece of translation follows the
+         * words it translates): the words after it are still untranslated.
+         */
+        val coveredMs: Int? = null,
     ) {
         val isEmpty: Boolean get() = text.isEmpty() && translation.isEmpty()
 
-        fun copy(text: String = this.text, translation: String = this.translation) =
-            Sentence(text, translation, language, speaker, number, startMs, endMs)
+        fun copy(text: String = this.text, translation: String = this.translation, coveredMs: Int? = this.coveredMs) =
+            Sentence(text, translation, language, speaker, number, startMs, endMs, coveredMs)
 
         /** The same words, translation, language and speaker (its number and times aside). */
         override fun equals(other: Any?): Boolean = other is Sentence && text == other.text &&
@@ -219,6 +232,7 @@ class SonioxTranscript(
         var number = 0
         var startMs: Int? = null
         var endMs: Int? = null
+        var coveredMs: Int? = null
         /** Syllables said in each language. */
         val syllables = HashMap<String, Int>()
         val isEmpty get() = text.isEmpty() && translation.isEmpty()
@@ -230,7 +244,13 @@ class SonioxTranscript(
             speaker = ""
             startMs = null
             endMs = null
+            coveredMs = null
             syllables.clear()
+        }
+
+        /** The translation has come for the words up to `end`. */
+        fun cover(end: Int?) {
+            if (end != null) coveredMs = maxOf(coveredMs ?: end, end)
         }
 
         fun copy() = Builder().also {
@@ -241,10 +261,11 @@ class SonioxTranscript(
             it.number = number
             it.startMs = startMs
             it.endMs = endMs
+            it.coveredMs = coveredMs
             it.syllables.putAll(syllables)
         }
 
-        fun sentence() = Sentence(text.toString(), translation.toString(), language, speaker, number, startMs, endMs)
+        fun sentence() = Sentence(text.toString(), translation.toString(), language, speaker, number, startMs, endMs, coveredMs)
     }
 
     /** Cut by speaker, language and sentence as it is said (see above). */
@@ -257,6 +278,7 @@ class SonioxTranscript(
      */
     private val switching = ArrayList<SonioxToken>()
     private val switchingTranslation = StringBuilder()
+    private var switchingCovered: Int? = null
     /**
      * The speaker finished the sentence (without `splits`), or paused in the middle of one (with
      * `splits`: no full stop yet); its translation may still be on its way.
@@ -269,6 +291,7 @@ class SonioxTranscript(
     /** Soniox's guess at the translation of a finished sentence, and which one. */
     private val awaitingGuess = StringBuilder()
     private var awaitingGuessNumber = 0
+    private var awaitingGuessCovered: Int? = null
     /** The sentence of the words settled last (0: none yet): the next settled piece of translation is its. */
     private var owner = 0
     private var nextNumber = 1
@@ -286,8 +309,10 @@ class SonioxTranscript(
             val sentence = settled.copy()
             for (word in switching) add(word, sentence)
             sentence.translation.append(switchingTranslation)
+            sentence.cover(switchingCovered)
             sentence.text.append(guess.text)
             sentence.translation.append(guess.translation)
+            sentence.cover(guess.coveredMs)
             for ((language, count) in guess.syllables) sentence.syllables.merge(language, count, Int::plus)
             sentence.language = majority(sentence.syllables, sentence.language.ifEmpty { guess.language })
             if (sentence.speaker.isEmpty()) sentence.speaker = guess.speaker
@@ -302,18 +327,22 @@ class SonioxTranscript(
         // The guesses come again whole in every message.
         guess.clear()
         awaitingGuess.setLength(0)
+        awaitingGuessCovered = null
         released.clear()
         // A guessed word came in this message: guessed translation after it is of the words being said.
         var guessing = false
+        // Where the last word of this message ends: a piece of translation after it has come for it.
+        var saidEnd: Int? = null
         for (token in tokens) {
             if (token.endsSentence) {
                 if (splits) endSpoken(token.isFin, finished) else ended = true
                 continue
             }
             if (token.isTranslation) {
-                addTranslation(token, guessing)
+                addTranslation(token, guessing, saidEnd)
                 continue
             }
+            token.endMs?.let { saidEnd = it }
             if (token.isFinal) token.endMs?.let { settledEnd = it / 1000.0 }
             if (splits) {
                 if (token.isFinal) {
@@ -345,8 +374,9 @@ class SonioxTranscript(
     /** The finished sentences still getting Soniox's translation, and those whose last piece just came. */
     val previews: List<Sentence>
         get() = (released + awaiting).map { sentence ->
-            val translation = if (sentence.number == awaitingGuessNumber) sentence.translation + awaitingGuess else sentence.translation
-            sentence.copy(translation = translation.trim())
+            if (sentence.number != awaitingGuessNumber) return@map sentence.copy(translation = sentence.translation.trim())
+            val covered = awaitingGuessCovered?.let { maxOf(sentence.coveredMs ?: it, it) } ?: sentence.coveredMs
+            sentence.copy(translation = (sentence.translation + awaitingGuess).trim(), coveredMs = covered)
         }
 
     /** Something shown is Soniox's guess (words or translation): a message without it takes it back. */
@@ -377,6 +407,7 @@ class SonioxTranscript(
         keepSwitching()
         val sentence = current
         val settledTranslation = settled.translation.toString()
+        val settledCovered = settled.coveredMs
         settled.clear()
         guess.clear()
         ended = false
@@ -387,7 +418,7 @@ class SonioxTranscript(
         // The translation of its last words may still come (unless none is needed). Only what Soniox
         // settled is kept: its guess at the rest comes again in its next message, settled or guessed.
         if (splits && owner == trimmed.number && trimmed.text.isNotEmpty() && trimmed.language != target) {
-            awaiting.add(trimmed.copy(translation = settledTranslation.trim()))
+            awaiting.add(trimmed.copy(translation = settledTranslation.trim(), coveredMs = settledCovered))
             while (awaiting.size > 2) awaiting.removeAt(0)
         }
         return trimmed
@@ -445,8 +476,10 @@ class SonioxTranscript(
     private fun keepSwitching() {
         for (word in switching) settle(word)
         settled.translation.append(switchingTranslation)
+        settled.cover(switchingCovered)
         switching.clear()
         switchingTranslation.setLength(0)
+        switchingCovered = null
     }
 
     /**
@@ -456,12 +489,15 @@ class SonioxTranscript(
     private fun confirmSwitch(finished: MutableList<Sentence>) {
         val words = ArrayList(switching)
         val translation = switchingTranslation.toString()
+        val covered = switchingCovered
         switching.clear()
         switchingTranslation.setLength(0)
+        switchingCovered = null
         if (words.isEmpty()) return
         finish()?.let { finished.add(it) }
         for (word in words) settle(word)
         settled.translation.append(translation)
+        settled.cover(covered)
     }
 
     /**
@@ -509,11 +545,19 @@ class SonioxTranscript(
      * A piece of translation: of the words just before it. After words held (another speaker's few, the
      * last settled): theirs, wherever they go. A settled piece follows the words settled last (`owner`),
      * which may be a sentence already cut; a guessed one, the words guessed before it in this message, or
-     * else the settled ones. Without `splits`, the sentence being said.
+     * else the settled ones. Without `splits`, the sentence being said. `saidEnd`: where the last word
+     * before it in this message ends (none: the words it translates came in an earlier message, and end
+     * where its sentence's settled words do).
      */
-    private fun addTranslation(token: SonioxToken, guessing: Boolean) {
+    private fun addTranslation(token: SonioxToken, guessing: Boolean, saidEnd: Int?) {
         if (switching.isNotEmpty()) {
-            if (token.isFinal) switchingTranslation.append(token.text) else add(token, guess)
+            if (token.isFinal) {
+                switchingTranslation.append(token.text)
+                switchingCovered = saidEnd ?: switching.last().endMs
+            } else {
+                add(token, guess)
+                guess.cover(saidEnd ?: switching.last().endMs)
+            }
             return
         }
         val number = if (!splits || guessing || owner == 0) settled.number else owner
@@ -521,15 +565,25 @@ class SonioxTranscript(
             // A cut sentence's: the one waiting for it (one let go of is gone, and the piece with it).
             val index = awaiting.indexOfFirst { it.number == number }
             if (index < 0) return
+            val waiting = awaiting[index]
+            val covered = saidEnd ?: waiting.endMs
             if (token.isFinal) {
-                awaiting[index] = awaiting[index].copy(translation = awaiting[index].translation + token.text)
+                val reached = covered?.let { maxOf(waiting.coveredMs ?: it, it) } ?: waiting.coveredMs
+                awaiting[index] = waiting.copy(translation = waiting.translation + token.text, coveredMs = reached)
             } else {
                 awaitingGuess.append(token.text)
                 awaitingGuessNumber = number
+                awaitingGuessCovered = covered
             }
             return
         }
-        add(token, if (token.isFinal) settled else guess)
+        if (token.isFinal) {
+            add(token, settled)
+            settled.cover(saidEnd ?: settled.endMs)
+        } else {
+            add(token, guess)
+            guess.cover(saidEnd ?: guess.endMs ?: settled.endMs)
+        }
     }
 
     private fun add(token: SonioxToken, sentence: Builder) {

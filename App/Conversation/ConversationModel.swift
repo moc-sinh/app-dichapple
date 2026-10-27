@@ -3,9 +3,9 @@ import Observation
 import UIKit
 
 /// Runs on the audio queue: cuts what the others say into sentences, keeps what the user says
-/// while the Tôi nói button is down, and in live mode passes the sound on a tenth of a second at a
-/// time. Everything it reports goes to the main queue. Sendable because it is only ever used on
-/// that one queue (its callbacks are set before listening starts).
+/// while the Tôi nói button is down, and in live mode passes the sound on as it comes. Everything it
+/// reports goes to the main queue. Sendable because it is only ever used on that one queue (its
+/// callbacks are set before listening starts).
 final class Listener: @unchecked Sendable {
     private var segmenter: SpeechSegmenter
     /// The last moments of sound, so the user's first syllable is kept even when the button goes
@@ -23,11 +23,14 @@ final class Listener: @unchecked Sendable {
     /// (`first` and `last` piece of the turn).
     var onMine: ((_ samples: [Int16], _ first: Bool, _ last: Bool) -> Void)?
     var onLevel: ((Double, Bool) -> Void)?
-    /// A tenth of a second of sound, whether someone is speaking in it, and whether a sound some way above
-    /// the room's noise is (a far or quiet voice, or what echo cancelling left of the phone's).
+    /// The sound just heard (about a tenth of a second, as the microphone gives it), whether someone is
+    /// speaking in it, and whether a sound some way above the room's noise is (a far or quiet voice, or
+    /// what echo cancelling left of the phone's).
     var onChunk: ((Data, Bool, Bool) -> Void)?
 
     private static let recentSamples = PCM.rate * 3 / 10
+    /// Live mode sends the sound as soon as there is this much of it (a fiftieth of a second).
+    private static let smallestChunk = PCM.rate / 50
     /// A turn longer than this goes on as it is said, a piece at a time (cut at a breath), so
     /// its translation is ready soon after the button goes up.
     private static let longestPiece = PCM.rate * 20
@@ -49,11 +52,13 @@ final class Listener: @unchecked Sendable {
         if recent.count > Self.recentSamples { recent.removeFirst(recent.count - Self.recentSamples) }
         if streams {
             chunk.append(contentsOf: samples)
-            let speech = mine != nil || segmenter.speaking
-            let audible = segmenter.audible
-            while chunk.count >= PCM.rate / 10 {
-                let data = PCM.data(chunk[..<(PCM.rate / 10)])
-                chunk.removeFirst(PCM.rate / 10)
+            // All of it at once. It went in even tenths of a second, and the end of each of the
+            // microphone's pieces waited a tenth of a second for the next.
+            if chunk.count >= Self.smallestChunk {
+                let data = PCM.data(chunk[...])
+                chunk = []
+                let speech = mine != nil || segmenter.speaking
+                let audible = segmenter.audible
                 DispatchQueue.main.async { [weak self] in self?.onChunk?(data, speech, audible) }
             }
         }
@@ -391,6 +396,16 @@ final class ConversationModel {
     /// Soniox sentences being said or translated: when they were said, and how soon their words and
     /// their first translation showed, for the speed log.
     @ObservationIgnored private var heardTimes: [UUID: HeardTime] = [:]
+    /// GPT's translation of the room's sentence while it is still being said (dịch trước). Soniox's own
+    /// translation follows the words it has settled, which in a noisy room of several people can be
+    /// seconds after they were said: the text fell behind the speaker. When words have waited on the
+    /// screen a moment for their translation, or the speaker pauses, GPT translates the sentence so far
+    /// (guessed words too); whichever translation has come further shows, and when the sentence ends as
+    /// GPT was asked it, that answer is its final translation at once.
+    @ObservationIgnored private var ahead: [UUID: Ahead] = [:]
+    /// How far behind the sound sent Soniox's room session has heard, and settled, lately (seconds), for
+    /// the speed log every half minute.
+    @ObservationIgnored private var sonioxLags = SonioxLags()
 
     /// The sound sent to one side's Soniox sessions lately, a tenth of a second at a time, each with
     /// where it begins in all the sound that side was sent.
@@ -414,12 +429,51 @@ final class ConversationModel {
     }
 
     /// Seconds into a Soniox session's sound: where a sentence's words begin and end, and how much
-    /// had been sent when its words, then its first translation, showed.
+    /// had been sent when its words, then its first translation, showed. And how late its words, and
+    /// Soniox's and GPT's translations of them, came at worst: the sound sent after a word when it, or
+    /// a translation reaching it, showed.
     private struct HeardTime {
         var start: Double?
         var end: Double?
         var shown: Double?
         var translated: Double?
+        var covered: Double?
+        var newest: Double?
+        var wordsLate = 0.0
+        var sonioxLate = 0.0
+        var gptLate: Double?
+    }
+
+    /// GPT's translation of a room sentence still being said, by its entry.
+    private struct Ahead {
+        /// The words asked, while GPT translates them.
+        var asked: String?
+        var task: Task<Void, Never>?
+        /// GPT's latest translation, of which words, and where they end in the session's sound (ms).
+        var answer: (translation: String, text: String, endMs: Int)?
+        /// Soniox's translation of the sentence as last told, and where the words it reaches end.
+        var soniox: (translation: String, coveredMs: Int?)?
+        /// GPT's is the translation shown: the next is asked as soon as this one is in.
+        var showing = false
+        var asks = 0
+        /// When the sentence's words came, by where they end (ms): how long the first word without a
+        /// translation has been on the screen.
+        var seen: [(endMs: Int, at: Double)] = []
+    }
+
+    /// The room's Soniox session, over the last half minute: how far behind the sound sent it has
+    /// heard (the network, and Soniox keeping up) and settled (its guesses waiting to be sure).
+    private struct SonioxLags {
+        var since = 0.0
+        var count = 0
+        var heard = 0.0
+        var heardMost = 0.0
+        var settled = 0.0
+        var settledMost = 0.0
+        /// GPT asked to translate ahead, and how long its answers took.
+        var asks = 0
+        var answers = 0
+        var answering = 0.0
     }
 
     /// Sentences recognised and translated at once: a busy meeting does not fall behind.
@@ -441,6 +495,13 @@ final class ConversationModel {
     private static let pauseEnds = 1.2
     /// Seconds before each try to open a dropped Soniox session again.
     private static let reconnectDelays: [Double] = [0, 0.5, 1, 2, 3, 5, 5, 5]
+    /// The room's words wait this long on the screen for Soniox's translation before GPT is asked to
+    /// translate ahead. GPT gets this long to answer, and is asked at most this many times a sentence.
+    private static let aheadWait = 1.2
+    private static let aheadPatience = 4.0
+    private static let aheadAsks = 12
+    /// Soniox's translation shows again instead of GPT's once it reaches this far past it (ms).
+    private static let aheadMargin = 1_500
 
     init() {
         let defaults = UserDefaults.standard
@@ -587,6 +648,8 @@ final class ConversationModel {
         meeting.topic = topic.isEmpty ? nil : topic
         entries = []
         heardTimes = [:]
+        for state in ahead.values { state.task?.cancel() }
+        ahead = [:]
         unrecognised = [:]
         detectedPartner = nil
         problem = nil
@@ -598,7 +661,10 @@ final class ConversationModel {
         self.level = max(0, min(1, (level + 60) / 45))
         hearsSpeech = speaking
         if engine == .live { endLiveCaptions(all: false) }
-        if engine == .soniox { expireSentences() }
+        if engine == .soniox {
+            expireSentences()
+            translateAhead()
+        }
     }
 
     // MARK: The Tôi nói button
@@ -933,14 +999,19 @@ final class ConversationModel {
         return (meeting.cost?.dollars ?? 0) + unbilledLive / 60 * rate
     }
 
+    /// Only a change is written: Soniox sends its guesses again with every message, mostly the same, and
+    /// each write draws the transcript again.
     private func update(_ id: UUID, _ change: (inout Entry) -> Void) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        change(&entries[index])
+        var entry = entries[index]
+        change(&entry)
+        if entry != entries[index] { entries[index] = entry }
     }
 
     private func remove(_ id: UUID) {
         entries.removeAll { $0.id == id }
         unrecognised[id] = nil
+        ahead.removeValue(forKey: id)?.task?.cancel()
     }
 
     private static var now: Double { Date.timeIntervalSinceReferenceDate }
@@ -1501,6 +1572,7 @@ final class ConversationModel {
     }
 
     private func finishCaption(_ id: UUID) {
+        ahead.removeValue(forKey: id)?.task?.cancel()
         guard let entry = entries.first(where: { $0.id == id }), entry.state == .hearing else { return }
         let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
         var translation = entry.translation.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1529,6 +1601,7 @@ final class ConversationModel {
         origins = [:]
         replayFrom = [:]
         myVoice = MyVoiceFilter()
+        sonioxLags = SonioxLags(since: Self.now)
         sonioxToVietnamese = makeSoniox(target: Language.vietnamese.code)
         openSonioxPartner()
     }
@@ -1641,6 +1714,9 @@ final class ConversationModel {
                 heardTimes[caption.id] = nil
                 remove(caption.id)
             }
+            if fromOthers { translateAhead() }
+        case .processed(let finalMs, let totalMs):
+            if fromOthers { noteProcessed(finalMs: finalMs, totalMs: totalMs) }
         case .finished:
             break
         case .failed(let code, let message):
@@ -1698,14 +1774,16 @@ final class ConversationModel {
         let now = Date()
         let speaker = fromOthers ? sentence.speaker : ""
         if let current = captions[fromOthers], let shown = entries.first(where: { $0.id == current.id }) {
+            let translation = fromOthers ? shownTranslation(current.id, of: sentence) : sentence.translation
             update(current.id) {
                 $0.text = sentence.text
-                $0.translation = sentence.translation
+                $0.translation = translation
                 if !sentence.language.isEmpty { $0.language = sentence.language }
                 if !speaker.isEmpty { $0.speaker = speaker }
             }
             // When its words last changed: how long the speaker has said nothing more.
             captions[fromOthers] = (current.id, shown.text == sentence.text ? current.last : now)
+            if fromOthers { noteSeen(current.id, sentence) }
             noteHeard(current.id, sentence, fromOthers: fromOthers)
             return current.id
         }
@@ -1718,8 +1796,110 @@ final class ConversationModel {
         // Someone started a sentence: by its end, GPT's connection is open.
         if sonioxUsesGPT { services.warmUp() }
         captions[fromOthers] = (entry.id, now)
+        if fromOthers { noteSeen(entry.id, sentence) }
         noteHeard(entry.id, sentence, fromOthers: fromOthers)
         return entry.id
+    }
+
+    /// When the room sentence's newest words came: how long a word has waited for its translation.
+    private func noteSeen(_ id: UUID, _ sentence: SonioxTranscript.Sentence) {
+        guard sonioxUsesGPT, let end = sentence.endMs else { return }
+        var state = ahead[id] ?? Ahead()
+        if end > (state.seen.last?.endMs ?? Int.min) { state.seen.append((end, Self.now)) }
+        ahead[id] = state
+    }
+
+    /// What a room sentence shows of its translation: Soniox's, or GPT's asked ahead once it has come
+    /// further, and then until Soniox's has come well past it (the text does not jump between the two
+    /// as each comes a little further).
+    private func shownTranslation(_ id: UUID, of sentence: SonioxTranscript.Sentence) -> String {
+        guard var state = ahead[id] else { return sentence.translation }
+        state.soniox = (sentence.translation, sentence.coveredMs)
+        let shown = Self.shown(&state)
+        ahead[id] = state
+        return shown
+    }
+
+    private static func shown(_ state: inout Ahead) -> String {
+        let soniox = state.soniox ?? (translation: "", coveredMs: nil)
+        guard let answer = state.answer else { return soniox.translation }
+        let reached = soniox.coveredMs ?? Int.min
+        if state.showing {
+            if reached > answer.endMs + aheadMargin { state.showing = false }
+        } else if soniox.translation.isEmpty || answer.endMs > reached {
+            state.showing = true
+        }
+        return state.showing ? answer.translation : soniox.translation
+    }
+
+    /// The room's sentence being said is given to GPT to translate (see `ahead`): once its first word
+    /// without a translation has waited `aheadWait` on the screen, as soon as more is said while GPT's
+    /// translation is the one shown, or when the speaker pauses (its translation is then ready if the
+    /// sentence ends there). One question at a time; Luna, the quick one, whatever the final's model.
+    private func translateAhead() {
+        guard running, engine == .soniox, sonioxUsesGPT, let apiKey, let caption = captions[true], var state = ahead[caption.id],
+              state.asked == nil, state.asks < Self.aheadAsks, let transcript = transcripts[true],
+              let entry = entries.first(where: { $0.id == caption.id }), entry.state == .hearing else { return }
+        let sentence = transcript.current
+        let text = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text != state.answer?.text, let end = sentence.endMs,
+              sentence.language != Language.vietnamese.code else { return }
+        let reached = max(sentence.coveredMs ?? Int.min, state.answer?.endMs ?? Int.min)
+        let waited = state.seen.first { $0.endMs > reached }.map { Self.now - $0.at } ?? 0
+        // At a pause the answer is asked for the sentence's final translation (when made with Luna too).
+        let paused = transcript.ended && !transcript.hasGuess && (quality.model == .luna || reached < end)
+        guard paused || waited >= Self.aheadWait || (state.showing && end > reached) else { return }
+        state.asked = text
+        state.asks += 1
+        sonioxLags.asks += 1
+        let asks = state.asks
+        let id = caption.id
+        let context = spokenContext(for: entry)
+        let translate = services.translate
+        let began = Self.now
+        state.task = Task {
+            let translation = try? await translate(apiKey, text, .vietnamese, context, .luna, false)
+            self.answeredAhead(id, text: text, endMs: end, translation: translation, after: Self.now - began)
+        }
+        ahead[id] = state
+        // A connection that hangs does not hold it up: the question is given up, and asked again.
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(Self.aheadPatience * 1_000_000_000))
+            guard let state = self.ahead[id], state.asks == asks, state.asked != nil else { return }
+            state.task?.cancel()
+        }
+    }
+
+    private func answeredAhead(_ id: UUID, text: String, endMs: Int, translation: Translation?, after seconds: Double) {
+        guard var state = ahead[id] else { return }
+        state.asked = nil
+        state.task = nil
+        guard let translation, !translation.text.isEmpty else {
+            ahead[id] = state
+            return
+        }
+        charge { $0.used(translation.usage, by: .luna) }
+        sonioxLags.answers += 1
+        sonioxLags.answering += seconds
+        // Asked for fewer words than an answer already in: not kept.
+        if endMs >= (state.answer?.endMs ?? Int.min) { state.answer = (translation.text, text, endMs) }
+        let shown = Self.shown(&state)
+        ahead[id] = state
+        if let entry = entries.first(where: { $0.id == id }), entry.state == .hearing || entry.state == .translating,
+           entry.translation != shown {
+            update(id) { $0.translation = shown }
+            if state.showing { noteAhead(id, endMs: endMs) }
+        }
+        translateAhead()
+    }
+
+    /// GPT's translation asked while the sentence was being said, when it is of exactly its words, and
+    /// by the model its translation is made with: waited for when still coming.
+    private func aheadTranslation(of entry: Entry, model: TranslationModel) async -> String? {
+        guard !entry.mine, model == .luna, let state = ahead[entry.id] else { return nil }
+        if state.answer?.text != entry.text, state.asked == entry.text, let task = state.task { await task.value }
+        guard let answer = ahead[entry.id]?.answer, answer.text == entry.text else { return nil }
+        return answer.translation
     }
 
     /// When a Soniox sentence was said (`Self.now`'s clock), from where its words are in the sound
@@ -1739,12 +1919,52 @@ final class ConversationModel {
         let sent = sonioxSent[fromOthers] ?? 0
         var times = heardTimes[id] ?? HeardTime()
         if times.start == nil, let start = sentence.startMs { times.start = Double(start) / 1000 }
-        if let end = sentence.endMs { times.end = Double(end) / 1000 }
+        if let end = sentence.endMs.map({ Double($0) / 1000 }) {
+            // A word said after all those shown before: how late it came.
+            if end > (times.newest ?? -1) {
+                times.wordsLate = max(times.wordsLate, sent - end)
+                times.newest = end
+            }
+            times.end = end
+        }
+        if let covered = sentence.coveredMs.map({ Double($0) / 1000 }), covered > (times.covered ?? -1) {
+            times.sonioxLate = max(times.sonioxLate, sent - covered)
+            times.covered = covered
+        }
         if let start = times.start {
             if times.shown == nil, !sentence.text.isEmpty { times.shown = sent - start }
             if times.translated == nil, !sentence.translation.isEmpty { times.translated = sent - start }
         }
         heardTimes[id] = times
+    }
+
+    /// GPT's translation ahead shows: how late after the words it reaches.
+    private func noteAhead(_ id: UUID, endMs: Int) {
+        guard var times = heardTimes[id] else { return }
+        let sent = sonioxSent[true] ?? 0
+        times.gptLate = max(times.gptLate ?? 0, sent - Double(endMs) / 1000)
+        if times.translated == nil, let start = times.start { times.translated = sent - start }
+        heardTimes[id] = times
+    }
+
+    /// The room's session told how far it has heard and settled: every half minute, how far behind it
+    /// was, in the speed log.
+    private func noteProcessed(finalMs: Int, totalMs: Int) {
+        let heard = (sonioxSent[true] ?? 0) - Double(totalMs) / 1000
+        let settled = Double(totalMs - finalMs) / 1000
+        sonioxLags.count += 1
+        sonioxLags.heard += heard
+        sonioxLags.heardMost = max(sonioxLags.heardMost, heard)
+        sonioxLags.settled += settled
+        sonioxLags.settledMost = max(sonioxLags.settledMost, settled)
+        guard Self.now - sonioxLags.since >= 30 else { return }
+        let count = Double(sonioxLags.count)
+        var note = "Soniox nửa phút: nghe chậm TB \(SpeedLog.seconds(sonioxLags.heard / count)), tối đa "
+            + "\(SpeedLog.seconds(sonioxLags.heardMost)) · chốt chậm TB \(SpeedLog.seconds(sonioxLags.settled / count)), tối đa "
+            + "\(SpeedLog.seconds(sonioxLags.settledMost)) · GPT dịch trước \(sonioxLags.asks) lần"
+        if sonioxLags.answers > 0 { note += ", trả lời TB \(SpeedLog.seconds(sonioxLags.answering / Double(sonioxLags.answers)))" }
+        log(nil, note)
+        sonioxLags = SonioxLags(since: Self.now)
     }
 
     /// A sentence ended. With an OpenAI key it is translated again by GPT, with the meeting's
@@ -1764,12 +1984,20 @@ final class ConversationModel {
         if fromOthers, !sentence.speaker.isEmpty { note += " · Người \(sentence.speaker)" }
         note += " · \(sentence.language.isEmpty ? "?" : sentence.language) · \(TranscriptFilter.syllableCount(sentence.text)) âm tiết"
         if let lag { note += " · nhận chậm \(SpeedLog.seconds(lag))" }
-        if let shown = heardTimes[id]?.shown { note += " · chữ hiện sau \(SpeedLog.seconds(shown))" }
+        if let times = heardTimes[id] {
+            if let shown = times.shown { note += " · chữ hiện sau \(SpeedLog.seconds(shown))" }
+            // How late after they were said the words, and the translations reaching them, came at worst.
+            note += " · chữ chậm tối đa \(SpeedLog.seconds(times.wordsLate))"
+            if times.covered != nil { note += " · bản dịch Soniox chậm tối đa \(SpeedLog.seconds(times.sonioxLate))" }
+            if let gpt = times.gptLate { note += " · GPT dịch trước chậm tối đa \(SpeedLog.seconds(gpt))" }
+        }
+        if let asks = ahead[id]?.asks, asks > 0 { note += " · hỏi GPT dịch trước \(asks) lần" }
         log(id, note)
         let language = sentence.text.isEmpty ? sentence.language : Self.language(of: sentence.text, heard: sentence.language)
         // A Vietnamese speaker in the room is shown as they said it.
         guard sonioxUsesGPT, !sentence.text.isEmpty, !fromOthers || language != Language.vietnamese.code else {
             heardTimes[id] = nil
+            ahead.removeValue(forKey: id)?.task?.cancel()
             if !language.isEmpty { update(id) { $0.language = language } }
             finishCaption(id)
             guard let entry = entries.first(where: { $0.id == id }), entry.state == .done, !entry.translation.isEmpty else { return }
@@ -1777,9 +2005,10 @@ final class ConversationModel {
             return
         }
         let target = fromOthers ? Language.vietnamese : partnerLanguage
+        let translation = fromOthers ? shownTranslation(id, of: sentence) : sentence.translation
         update(id) {
             $0.text = sentence.text
-            $0.translation = sentence.translation
+            $0.translation = translation
             $0.language = language
             $0.target = target.code
             $0.state = .translating
@@ -1810,44 +2039,71 @@ final class ConversationModel {
         // What the partners hear is the user's own words: the app's translation model.
         let model = entry.mine ? SharedStore.model : quality.model
         let began = Date()
-        for attempt in 1...2 {
-            do {
-                let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
-                charge { $0.used(result.usage, by: model) }
-                let translation = result.text
-                update(id) {
-                    $0.translation = translation
-                    $0.state = .done
+        if let early = await aheadTranslation(of: entry, model: model) {
+            // GPT translated exactly these words while they were being said.
+            update(id) {
+                $0.translation = early
+                $0.state = .done
+            }
+            log(id, "GPT \(Self.name(of: model)) đã dịch trước, dùng ngay" + heardNote(id, mine: entry.mine))
+        } else {
+            for attempt in 1...2 {
+                do {
+                    let result = try await gptTranslation(of: entry, into: target, model: model, key: apiKey)
+                    charge { $0.used(result.usage, by: model) }
+                    let translation = result.text
+                    update(id) {
+                        $0.translation = translation
+                        $0.state = .done
+                    }
+                    log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))" + heardNote(id, mine: entry.mine))
+                    break
+                } catch {
+                    // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the
+                    // live translation goes on coming in: it was kept as it was when GPT failed, cut short.
+                    if attempt == 1, !(error is CancellationError) {
+                        log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): hỏi lại sau 1,5 s")
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        continue
+                    }
+                    // The live translation that has come furthest: Soniox's once all of it is in.
+                    let kept = keptTranslation(id)
+                    update(id) {
+                        if let kept { $0.translation = kept }
+                        $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done
+                    }
+                    log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
+                    heardTimes[id] = nil
                 }
-                log(id, "GPT \(Self.name(of: model)) \(SpeedLog.seconds(Date().timeIntervalSince(began)))" + heardNote(id, mine: entry.mine))
-                break
-            } catch {
-                // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the
-                // live translation goes on coming in: it was kept as it was when GPT failed, cut short.
-                if attempt == 1, !(error is CancellationError) {
-                    log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): hỏi lại sau 1,5 s")
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    continue
-                }
-                update(id) { $0.state = $0.translation.isEmpty ? .failed(error.localizedDescription) : .done }
-                log(id, "GPT lỗi sau \(SpeedLog.seconds(Date().timeIntervalSince(began))): giữ bản dịch trực tiếp")
-                heardTimes[id] = nil
             }
         }
+        ahead.removeValue(forKey: id)?.task?.cancel()
         guard let done = entries.first(where: { $0.id == id }), done.state == .done else { return }
         record(id)
         if speaks, !done.translation.isEmpty, done.mine || readAloud { sayOnce(done) }
     }
 
-    /// Soniox's translation of the sentences GPT is still translating, as it comes.
+    /// Soniox's translation of the sentences GPT is still translating, as it comes (or GPT's asked ahead,
+    /// while it has come further).
     private func showPreviews(_ previews: [SonioxTranscript.Sentence], fromOthers: Bool) {
         for preview in previews where !preview.translation.isEmpty {
             guard let id = sonioxEntries[fromOthers]?[preview.number],
-                  let entry = entries.first(where: { $0.id == id }), entry.state == .translating,
-                  entry.translation != preview.translation else { continue }
-            update(id) { $0.translation = preview.translation }
+                  let entry = entries.first(where: { $0.id == id }), entry.state == .translating else { continue }
+            let translation = fromOthers ? shownTranslation(id, of: preview) : preview.translation
+            guard entry.translation != translation else { continue }
+            update(id) { $0.translation = translation }
             noteHeard(id, preview, fromOthers: fromOthers)
         }
+    }
+
+    /// When GPT's translation of a finished sentence failed: of the live translations, the one reaching
+    /// furthest into it (Soniox's, once all its pieces are in), or nil to keep what shows.
+    private func keptTranslation(_ id: UUID) -> String? {
+        guard let state = ahead[id], let soniox = state.soniox else { return nil }
+        if let answer = state.answer, soniox.translation.isEmpty || answer.endMs > (soniox.coveredMs ?? Int.min) {
+            return answer.translation
+        }
+        return soniox.translation.isEmpty ? nil : soniox.translation
     }
 
     /// For the speed log, once GPT's translation of a Soniox sentence shows: how soon after its first

@@ -405,4 +405,141 @@ class ConversationSonioxTest {
         folder.deleteRecursively()
         Unit
     }
+
+    /**
+     * Soniox's translation lagging behind the words (a noisy room, several people): GPT translates the
+     * sentence so far ahead of it (dịch trước), and when the sentence ends as GPT was asked it, that answer is
+     * its translation at once. The same scenes as the iPhone app's simulation.
+     */
+    @Test
+    fun translatesAhead() = runBlocking {
+        val server = MockWebServer()
+        val stand = Stand()
+        repeat(3) { server.enqueue(MockResponse().withWebSocketUpgrade(stand)) }
+        server.start()
+        val settings = Settings(MemoryStore()).apply {
+            apiKey = "sk-test"
+            sonioxKey = "soniox-test"
+        }
+        val audio = FakeAudio()
+        val folder = Files.createTempDirectory("meetings").toFile()
+        val asked = Collections.synchronizedList(ArrayList<Pair<String, TranslationModel>>())
+        val services = ConversationServices(
+            transcribe = { _, _, _ -> SpeechServices.Transcript("", null) },
+            translate = { _, text, target, _, model, _ ->
+                val before = synchronized(asked) { asked.count { it.first == text } }
+                asked.add(text to model)
+                // The first request for a sentence marked STALL hangs, as on a stalled phone network.
+                delay(if (text.contains("STALL") && before == 0) 30_000 else 400)
+                Translation("[${target.code}] $text", null, target)
+            },
+            speak = { _, _, _, _, _ -> ByteArray(4_800) },
+            warmUp = {},
+        )
+        val model = ConversationModel(settings, MemoryStore(), audio, MeetingStore(folder), this, services)
+        model.engine = ConversationModel.Engine.SONIOX
+        model.readAloud = false
+        model.partnerCode = "zh"
+        model.voice = ConversationModel.PHONE_VOICE
+        model.sonioxUrl = server.url("/").toString().replaceFirst("http", "ws")
+        model.start()
+        waitFor("both Soniox sessions") { stand.sockets.size == 2 }
+        val room = stand.sockets["vi"]!!
+        val partner = stand.sockets["zh"]!!
+        val tenth = ShortArray(2_400)
+        suspend fun feed(tenths: Int) = repeat(tenths) {
+            audio.onSamples!!.invoke(tenth)
+            delay(100)
+        }
+        fun entry(id: String) = model.entries.first { it.id == id }
+        /** Milliseconds of sound the room's session has been sent. */
+        fun sent() = (stand.sound[room] ?: 0) / 48
+
+        // The microphone's pieces are not even tenths of a second: each goes on whole, at once (the end of one
+        // used to wait a tenth of a second for the next).
+        audio.onSamples!!.invoke(ShortArray(2_390))
+        waitFor("the sound goes to Soniox as it is heard, none held back") { (stand.sound[room] ?: 0) == 2_390 * 2 }
+
+        // Once words have waited 1.2 s on the screen for Soniox's translation, GPT translates the sentence so far;
+        // GPT's showing, it is asked again as more is said.
+        feed(5)
+        var s = sent()
+        room.say(word("这个月的订单", "4", final = false, start = s, end = s + 900))
+        waitFor("the words show") { model.entries.lastOrNull()?.text == "这个月的订单" }
+        val lagging = model.entries.last().id
+        feed(7)
+        room.say(word("这个月的订单", "4", start = s, end = s + 900), word("我们已经安排", "4", final = false, start = s + 1_000, end = s + 1_900))
+        waitFor("more words") { entry(lagging).text == "这个月的订单我们已经安排" }
+        assertTrue(entry(lagging).translation.isEmpty() && asked.none { it.first.startsWith("这个月的订单") }, "under a second without a translation: not yet")
+        feed(10)
+        waitFor("1.2 s without one: GPT's translation of the sentence so far") { entry(lagging).translation == "[vi] 这个月的订单我们已经安排" }
+        assertEquals(State.Hearing, entry(lagging).state, "while it is being said")
+        assertEquals(TranslationModel.LUNA, asked.last().second, "with Luna, the quick one")
+        room.say(translated("Đơn hàng tháng này"))
+        delay(150)
+        assertEquals("[vi] 这个月的订单我们已经安排", entry(lagging).translation, "Soniox's, reaching fewer words, does not replace it")
+        room.say(word("我们已经安排生产了，", "4", start = s + 1_000, end = s + 2_400), word("预计下周三", "4", final = false, start = s + 2_500, end = s + 3_000))
+        waitFor("more said: GPT asked again at once") { asked.lastOrNull()?.first == "这个月的订单我们已经安排生产了，预计下周三" }
+        waitFor("and its answer shows") { entry(lagging).translation == "[vi] 这个月的订单我们已经安排生产了，预计下周三" }
+        room.say(word("预计下周三可以", "4", final = false, start = s + 2_500, end = s + 3_300), translated(" dự kiến thứ Tư có thể", final = false))
+        delay(150)
+        assertEquals("[vi] 这个月的订单我们已经安排生产了，预计下周三", entry(lagging).translation, "Soniox's a little further: GPT's stays shown")
+        assertEquals("这个月的订单我们已经安排生产了，预计下周三", asked.last().first, "and GPT is not asked for words Soniox has translated")
+        val whole = "这个月的订单我们已经安排生产了，预计下周三可以发货。"
+        room.say(word("预计下周三可以发货。", "4", final = false, start = s + 2_500, end = s + 3_600))
+        waitFor("asked for all of it") { asked.lastOrNull()?.first == whole }
+        room.say(word("预计下周三可以发货。", "4", start = s + 2_500, end = s + 3_600), mark("<end>"))
+        waitFor("GPT, asked for exactly its words while they were said, is its translation at once", timeout = 1_000) {
+            entry(lagging).state == State.Done && entry(lagging).translation == "[vi] $whole"
+        }
+        assertEquals(1, asked.count { it.first == whole }, "not asked again")
+        val log = model.speedLogText
+        assertTrue(log.contains("đã dịch trước, dùng ngay") && log.contains("GPT dịch trước chậm tối đa") &&
+            log.contains("hỏi GPT dịch trước 3 lần") && log.contains("chữ chậm tối đa"), "noted in the speed log:\n$log")
+
+        // Soniox's translation keeping up with the words: GPT is not asked before the sentence ends.
+        val askedBefore = asked.size
+        s = sent()
+        room.say(word("好的，", "5", start = s, end = s + 500), translated("Được,"))
+        feed(15)
+        room.say(word("没问题。", "5", start = s + 600, end = s + 1_200), translated(" không vấn đề."), mark("<end>"))
+        waitFor("Soniox keeping up: GPT once, at the end") { model.entries.last().text == "好的，没问题。" && model.entries.last().state == State.Done }
+        assertEquals(askedBefore + 1, asked.size, "GPT once")
+        assertTrue(model.speedLogText.contains("bản dịch Soniox chậm tối đa"), "how late Soniox's translation came is in the speed log")
+
+        // A pause: GPT translates the sentence so far at once; nothing more said, that is its translation the moment
+        // it ends.
+        s = sent()
+        room.say(word("我们考虑一下", "5", start = s, end = s + 900), translated("Chúng tôi sẽ cân nhắc"), mark("<end>"))
+        waitFor("a pause: GPT asked at once") { asked.lastOrNull()?.first == "我们考虑一下" }
+        val paused = model.entries.last().id
+        feed(14)
+        waitFor("ended after the quiet moment, translated already", timeout = 1_000) {
+            entry(paused).state == State.Done && entry(paused).translation == "[vi] 我们考虑一下"
+        }
+        assertEquals(1, asked.count { it.first == "我们考虑一下" }, "asked once")
+
+        // GPT asked ahead hangs (a stalled connection): given up after 4 s, and asked again.
+        s = sent()
+        room.say(word("STALL 价格还可以", "4", final = false, start = s, end = s + 1_200))
+        waitFor("the words show") { model.entries.last().text == "STALL 价格还可以" }
+        val stalled = model.entries.last().id
+        feed(30)
+        assertTrue(entry(stalled).translation.isEmpty() && asked.count { it.first == "STALL 价格还可以" } == 1, "asked, and hanging")
+        feed(30)
+        waitFor("given up and asked again") { entry(stalled).translation == "[vi] STALL 价格还可以" }
+        assertEquals(2, asked.count { it.first == "STALL 价格还可以" }, "twice")
+        room.say(word("STALL 价格还可以", "4", start = s, end = s + 1_200), mark("<end>"))
+        feed(14)
+        waitFor("and that answer is its translation") { entry(stalled).state == State.Done }
+        assertEquals(2, asked.count { it.first == "STALL 价格还可以" }, "not asked a third time")
+
+        model.stop()
+        room.say(mark("<fin>"))
+        partner.say(mark("<fin>"))
+        waitFor("the sessions close") { room in stand.emptied && partner in stand.emptied }
+        server.shutdown()
+        folder.deleteRecursively()
+        Unit
+    }
 }

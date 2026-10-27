@@ -97,8 +97,8 @@ class ConversationServices(
 
 /**
  * Runs on the audio thread: cuts what the others say into sentences, keeps what the user says while
- * the Tôi nói button is down, and in live mode passes the sound on a tenth of a second at a time.
- * Everything it reports goes to the main thread through `post`.
+ * the Tôi nói button is down, and in live mode passes the sound on as it comes. Everything it reports
+ * goes to the main thread through `post`.
  */
 class Listener(silence: Double, val streams: Boolean, private val post: (() -> Unit) -> Unit) {
     // Ten seconds at most: a room that talks on is translated as it goes, not 15 s late.
@@ -114,13 +114,16 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
     var onMine: ((samples: ShortArray, first: Boolean, last: Boolean) -> Unit)? = null
     var onLevel: ((Double, Boolean) -> Unit)? = null
     /**
-     * A tenth of a second of sound, whether someone is speaking in it, and whether a sound some way above
-     * the room's noise is (a far or quiet voice, or what echo cancelling left of the phone's).
+     * The sound just heard (about a tenth of a second, as the microphone gives it), whether someone is
+     * speaking in it, and whether a sound some way above the room's noise is (a far or quiet voice, or
+     * what echo cancelling left of the phone's).
      */
     var onChunk: ((ByteArray, Boolean, Boolean) -> Unit)? = null
 
     companion object {
         private const val RECENT_SAMPLES = PCM.RATE * 3 / 10
+        /** Live mode sends the sound as soon as there is this much of it (a fiftieth of a second). */
+        private const val SMALLEST_CHUNK = PCM.RATE / 50
         /** A turn longer than this goes on as it is said, a piece at a time (cut at a breath). */
         private const val LONGEST_PIECE = PCM.RATE * 20
     }
@@ -137,12 +140,13 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
         if (recent.size > RECENT_SAMPLES) recent.removeFirst(recent.size - RECENT_SAMPLES)
         if (streams) {
             chunk.append(samples)
-            val speech = mine != null || segmenter.speaking
-            val audible = segmenter.audible
-            val tenth = PCM.RATE / 10
-            while (chunk.size >= tenth) {
-                val data = PCM.data(chunk.array, 0, tenth)
-                chunk.removeFirst(tenth)
+            // All of it at once. It went in even tenths of a second, and the end of each of the
+            // microphone's pieces waited a tenth of a second for the next.
+            if (chunk.size >= SMALLEST_CHUNK) {
+                val data = PCM.data(chunk.array, 0, chunk.size)
+                chunk.clear()
+                val speech = mine != null || segmenter.speaking
+                val audible = segmenter.audible
                 post { onChunk?.invoke(data, speech, audible) }
             }
         }
@@ -329,6 +333,16 @@ class ConversationModel(
         private const val PAUSE_ENDS = 1200L
         /** Seconds before each try to open a dropped Soniox session again. */
         private val RECONNECT_DELAYS = listOf(0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 5.0, 5.0)
+        /**
+         * The room's words wait this long on the screen for Soniox's translation before GPT is asked to
+         * translate ahead (seconds). GPT gets this long to answer, and is asked at most this many times a
+         * sentence.
+         */
+        private const val AHEAD_WAIT = 1.2
+        private const val AHEAD_PATIENCE = 4000L
+        private const val AHEAD_ASKS = 12
+        /** Soniox's translation shows again instead of GPT's once it reaches this far past it (ms). */
+        private const val AHEAD_MARGIN = 1500
         const val LONGEST_TOPIC = 200
 
         /** Sound enough to begin reading without running dry while the rest is made: 0.4 s. */
@@ -567,10 +581,61 @@ class ConversationModel(
 
     /**
      * Seconds into a Soniox session's sound: where a sentence's words begin and end, and how much had
-     * been sent when its words, then its first translation, showed (for the speed log).
+     * been sent when its words, then its first translation, showed (for the speed log). And how late its
+     * words, and Soniox's and GPT's translations of them, came at worst: the sound sent after a word when
+     * it, or a translation reaching it, showed.
      */
-    private class HeardTime(var start: Double? = null, var end: Double? = null, var shown: Double? = null, var translated: Double? = null)
+    private class HeardTime(var start: Double? = null, var end: Double? = null, var shown: Double? = null, var translated: Double? = null) {
+        var covered: Double? = null
+        var newest: Double? = null
+        var wordsLate = 0.0
+        var sonioxLate = 0.0
+        var gptLate: Double? = null
+    }
     private val heardTimes = HashMap<String, HeardTime>()
+
+    /**
+     * GPT's translation of the room's sentence while it is still being said (dịch trước). Soniox's own
+     * translation follows the words it has settled, which in a noisy room of several people can be seconds
+     * after they were said: the text fell behind the speaker. When words have waited on the screen a
+     * moment for their translation, or the speaker pauses, GPT translates the sentence so far (guessed
+     * words too); whichever translation has come further shows, and when the sentence ends as GPT was asked
+     * it, that answer is its final translation at once. By the sentence's entry.
+     */
+    private class Ahead {
+        /** The words asked, while GPT translates them. */
+        var asked: String? = null
+        var job: Job? = null
+        /** GPT's latest translation, of which words, and where they end in the session's sound (ms). */
+        var answer: AheadAnswer? = null
+        /** Soniox's translation of the sentence as last told, and where the words it reaches end. */
+        var sonioxTranslation: String? = null
+        var sonioxCovered: Int? = null
+        /** GPT's is the translation shown: the next is asked as soon as this one is in. */
+        var showing = false
+        var asks = 0
+        /** When the sentence's words came (`now()`), by where they end (ms): how long the first word without a translation has waited. */
+        val seen = ArrayList<Pair<Int, Double>>()
+    }
+    private class AheadAnswer(val translation: String, val text: String, val endMs: Int)
+    private val ahead = HashMap<String, Ahead>()
+
+    /**
+     * The room's Soniox session, over the last half minute: how far behind the sound sent it has heard
+     * (the network, and Soniox keeping up) and settled (its guesses waiting to be sure); GPT asked to
+     * translate ahead, and how long its answers took.
+     */
+    private class SonioxLags(val since: Double = 0.0) {
+        var count = 0
+        var heard = 0.0
+        var heardMost = 0.0
+        var settled = 0.0
+        var settledMost = 0.0
+        var asks = 0
+        var answers = 0
+        var answering = 0.0
+    }
+    private var sonioxLags = SonioxLags()
 
     /**
      * The sound sent to one side's Soniox sessions lately, a tenth of a second at a time, each with where
@@ -740,6 +805,8 @@ class ConversationModel(
         meeting = Meeting(topic = topic.ifEmpty { null })
         entries.clear()
         heardTimes.clear()
+        for (state in ahead.values) state.job?.cancel()
+        ahead.clear()
         unrecognised.clear()
         detectedPartner = null
         problem = null
@@ -752,7 +819,10 @@ class ConversationModel(
         this.level = ((level + 60) / 45).coerceIn(0.0, 1.0)
         hearsSpeech = speaking
         if (engine == Engine.LIVE) endLiveCaptions(all = false)
-        if (engine == Engine.SONIOX) expireSentences()
+        if (engine == Engine.SONIOX) {
+            expireSentences()
+            translateAhead()
+        }
         changed()
     }
 
@@ -1072,15 +1142,19 @@ class ConversationModel(
             return (meeting.cost?.dollars ?: 0.0) + unbilledLive / 60 * rate
         }
 
+    /** Only a change is drawn: Soniox sends its guesses again with every message, mostly the same. */
     private fun update(id: String, change: (Entry) -> Unit) {
         val entry = entries.firstOrNull { it.id == id } ?: return
+        fun look() = listOf(entry.language, entry.text, entry.translation, entry.target, entry.state, entry.speaker)
+        val before = look()
         change(entry)
-        changed()
+        if (look() != before) changed()
     }
 
     private fun remove(id: String) {
         entries.removeAll { it.id == id }
         unrecognised.remove(id)
+        ahead.remove(id)?.job?.cancel()
         changed()
     }
 
@@ -1660,6 +1734,7 @@ class ConversationModel(
     }
 
     private fun finishCaption(id: String) {
+        ahead.remove(id)?.job?.cancel()
         val entry = entries.firstOrNull { it.id == id } ?: return
         if (entry.state != State.Hearing) return
         val text = entry.text.trim()
@@ -1692,6 +1767,7 @@ class ConversationModel(
         origins.clear()
         replayFrom.clear()
         myVoice = MyVoiceFilter()
+        sonioxLags = SonioxLags(now())
         sonioxToVietnamese = makeSoniox(Language.vietnamese.code)
         openSonioxPartner()
     }
@@ -1795,6 +1871,7 @@ class ConversationModel(
                         remove(caption.id)
                     }
                 }
+                if (fromOthers) translateAhead()
                 // Stopped: this side has answered once all it heard is settled and nothing of it is left.
                 if (draining) {
                     if (event.tokens.any { it.isFin }) settledAll.add(fromOthers)
@@ -1804,6 +1881,7 @@ class ConversationModel(
                     }
                 }
             }
+            is SonioxEvent.Processed -> if (fromOthers) noteProcessed(event.finalMs, event.totalMs)
             SonioxEvent.Finished -> Unit
             is SonioxEvent.Failed -> when (event.code) {
                 401 -> {
@@ -1863,14 +1941,16 @@ class ConversationModel(
         val shown = current?.let { c -> entries.firstOrNull { it.id == c.id } }
         if (current != null && shown != null) {
             val grew = shown.text != sentence.text
+            val translation = if (fromOthers) shownTranslation(current.id, sentence) else sentence.translation
             update(current.id) {
                 it.text = sentence.text
-                it.translation = sentence.translation
+                it.translation = translation
                 if (sentence.language.isNotEmpty()) it.language = sentence.language
                 if (speaker.isNotEmpty()) it.speaker = speaker
             }
             // When its words last changed: how long the speaker has said nothing more.
             captions[fromOthers] = Caption(current.id, if (grew) now else current.last)
+            if (fromOthers) noteSeen(current.id, sentence)
             noteHeard(current.id, sentence, fromOthers)
             return current.id
         }
@@ -1884,9 +1964,117 @@ class ConversationModel(
         // Someone started a sentence: by its end, GPT's connection is open.
         if (sonioxUsesGPT) services.warmUp()
         captions[fromOthers] = Caption(entry.id, now)
+        if (fromOthers) noteSeen(entry.id, sentence)
         noteHeard(entry.id, sentence, fromOthers)
         changed()
         return entry.id
+    }
+
+    /** When the room sentence's newest words came: how long a word has waited for its translation. */
+    private fun noteSeen(id: String, sentence: SonioxTranscript.Sentence) {
+        if (!sonioxUsesGPT) return
+        val end = sentence.endMs ?: return
+        val state = ahead.getOrPut(id) { Ahead() }
+        if (end > (state.seen.lastOrNull()?.first ?: Int.MIN_VALUE)) state.seen.add(end to now())
+    }
+
+    /**
+     * What a room sentence shows of its translation: Soniox's, or GPT's asked ahead once it has come
+     * further, and then until Soniox's has come well past it (the text does not jump between the two as
+     * each comes a little further).
+     */
+    private fun shownTranslation(id: String, sentence: SonioxTranscript.Sentence): String {
+        val state = ahead[id] ?: return sentence.translation
+        state.sonioxTranslation = sentence.translation
+        state.sonioxCovered = sentence.coveredMs
+        return shown(state)
+    }
+
+    private fun shown(state: Ahead): String {
+        val soniox = state.sonioxTranslation ?: ""
+        val answer = state.answer ?: return soniox
+        val reached = state.sonioxCovered ?: Int.MIN_VALUE
+        if (state.showing) {
+            if (reached > answer.endMs + AHEAD_MARGIN) state.showing = false
+        } else if (soniox.isEmpty() || answer.endMs > reached) {
+            state.showing = true
+        }
+        return if (state.showing) answer.translation else soniox
+    }
+
+    /**
+     * The room's sentence being said is given to GPT to translate (see `ahead`): once its first word
+     * without a translation has waited `AHEAD_WAIT` on the screen, as soon as more is said while GPT's
+     * translation is the one shown, or when the speaker pauses (its translation is then ready if the
+     * sentence ends there). One question at a time; Luna, the quick one, whatever the final's model.
+     */
+    private fun translateAhead() {
+        if (!running || engine != Engine.SONIOX || !sonioxUsesGPT) return
+        val apiKey = apiKey ?: return
+        val caption = captions[true] ?: return
+        val state = ahead[caption.id] ?: return
+        if (state.asked != null || state.asks >= AHEAD_ASKS) return
+        val transcript = transcripts[true] ?: return
+        val entry = entries.firstOrNull { it.id == caption.id } ?: return
+        if (entry.state != State.Hearing) return
+        val sentence = transcript.current
+        val text = sentence.text.trim()
+        val end = sentence.endMs ?: return
+        if (text.isEmpty() || text == state.answer?.text || sentence.language == Language.vietnamese.code) return
+        val reached = maxOf(sentence.coveredMs ?: Int.MIN_VALUE, state.answer?.endMs ?: Int.MIN_VALUE)
+        val waited = state.seen.firstOrNull { it.first > reached }?.let { now() - it.second } ?: 0.0
+        // At a pause the answer is asked for the sentence's final translation (when made with Luna too).
+        val paused = transcript.ended && !transcript.hasGuess && (quality.model == TranslationModel.LUNA || reached < end)
+        if (!paused && waited < AHEAD_WAIT && !(state.showing && end > reached)) return
+        state.asked = text
+        state.asks += 1
+        sonioxLags.asks += 1
+        val id = caption.id
+        val context = spokenContext(entry)
+        val translate = services.translate
+        val began = now()
+        // A connection that hangs does not hold it up: the question is given up, and asked again.
+        state.job = scope.launch {
+            val translation = try {
+                withTimeoutOrNull(AHEAD_PATIENCE) { translate(apiKey, text, Language.vietnamese, context, TranslationModel.LUNA, false) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            answeredAhead(id, text, end, translation, now() - began)
+        }
+    }
+
+    private fun answeredAhead(id: String, text: String, endMs: Int, translation: Translation?, seconds: Double) {
+        val state = ahead[id] ?: return
+        state.asked = null
+        state.job = null
+        if (translation == null || translation.text.isEmpty()) return
+        charge { it.used(translation.usage, TranslationModel.LUNA) }
+        sonioxLags.answers += 1
+        sonioxLags.answering += seconds
+        // Asked for fewer words than an answer already in: not kept.
+        if (endMs >= (state.answer?.endMs ?: Int.MIN_VALUE)) state.answer = AheadAnswer(translation.text, text, endMs)
+        val shown = shown(state)
+        val entry = entries.firstOrNull { it.id == id }
+        if (entry != null && (entry.state == State.Hearing || entry.state == State.Translating) && entry.translation != shown) {
+            update(id) { it.translation = shown }
+            if (state.showing) noteAhead(id, endMs)
+        }
+        translateAhead()
+    }
+
+    /**
+     * GPT's translation asked while the sentence was being said, when it is of exactly its words, and by
+     * the model its translation is made with: waited for when still coming.
+     */
+    private suspend fun aheadTranslation(entry: Entry, model: TranslationModel): String? {
+        if (entry.mine || model != TranslationModel.LUNA) return null
+        val state = ahead[entry.id] ?: return null
+        if (state.answer?.text != entry.text && state.asked == entry.text) state.job?.join()
+        val answer = ahead[entry.id]?.answer ?: return null
+        return if (answer.text == entry.text) answer.translation else null
     }
 
     /**
@@ -1910,10 +2098,52 @@ class ConversationModel(
         val sent = sonioxSent[fromOthers] ?: 0.0
         val times = heardTimes.getOrPut(id) { HeardTime() }
         if (times.start == null) sentence.startMs?.let { times.start = it / 1000.0 }
-        sentence.endMs?.let { times.end = it / 1000.0 }
+        sentence.endMs?.let {
+            val end = it / 1000.0
+            // A word said after all those shown before: how late it came.
+            if (end > (times.newest ?: -1.0)) {
+                times.wordsLate = maxOf(times.wordsLate, sent - end)
+                times.newest = end
+            }
+            times.end = end
+        }
+        sentence.coveredMs?.let {
+            val covered = it / 1000.0
+            if (covered > (times.covered ?: -1.0)) {
+                times.sonioxLate = maxOf(times.sonioxLate, sent - covered)
+                times.covered = covered
+            }
+        }
         val start = times.start ?: return
         if (times.shown == null && sentence.text.isNotEmpty()) times.shown = sent - start
         if (times.translated == null && sentence.translation.isNotEmpty()) times.translated = sent - start
+    }
+
+    /** GPT's translation ahead shows: how late after the words it reaches. */
+    private fun noteAhead(id: String, endMs: Int) {
+        val times = heardTimes[id] ?: return
+        val sent = sonioxSent[true] ?: 0.0
+        times.gptLate = maxOf(times.gptLate ?: 0.0, sent - endMs / 1000.0)
+        if (times.translated == null) times.start?.let { times.translated = sent - it }
+    }
+
+    /** The room's session told how far it has heard and settled: every half minute, how far behind it was, in the speed log. */
+    private fun noteProcessed(finalMs: Int, totalMs: Int) {
+        val heard = (sonioxSent[true] ?: 0.0) - totalMs / 1000.0
+        val settled = (totalMs - finalMs) / 1000.0
+        val lags = sonioxLags
+        lags.count += 1
+        lags.heard += heard
+        lags.heardMost = maxOf(lags.heardMost, heard)
+        lags.settled += settled
+        lags.settledMost = maxOf(lags.settledMost, settled)
+        if (now() - lags.since < 30) return
+        var note = "Soniox nửa phút: nghe chậm TB ${SpeedLog.seconds(lags.heard / lags.count)}, tối đa " +
+            "${SpeedLog.seconds(lags.heardMost)} · chốt chậm TB ${SpeedLog.seconds(lags.settled / lags.count)}, tối đa " +
+            "${SpeedLog.seconds(lags.settledMost)} · GPT dịch trước ${lags.asks} lần"
+        if (lags.answers > 0) note += ", trả lời TB ${SpeedLog.seconds(lags.answering / lags.answers)}"
+        log(null, note)
+        sonioxLags = SonioxLags(now())
     }
 
     /**
@@ -1936,12 +2166,20 @@ class ConversationModel(
         if (fromOthers && sentence.speaker.isNotEmpty()) note += " · Người ${sentence.speaker}"
         note += " · ${sentence.language.ifEmpty { "?" }} · ${TranscriptFilter.syllableCount(sentence.text)} âm tiết"
         if (lag != null) note += " · nhận chậm ${SpeedLog.seconds(lag)}"
-        heardTimes[id]?.shown?.let { note += " · chữ hiện sau ${SpeedLog.seconds(it)}" }
+        heardTimes[id]?.let { times ->
+            times.shown?.let { note += " · chữ hiện sau ${SpeedLog.seconds(it)}" }
+            // How late after they were said the words, and the translations reaching them, came at worst.
+            note += " · chữ chậm tối đa ${SpeedLog.seconds(times.wordsLate)}"
+            if (times.covered != null) note += " · bản dịch Soniox chậm tối đa ${SpeedLog.seconds(times.sonioxLate)}"
+            times.gptLate?.let { note += " · GPT dịch trước chậm tối đa ${SpeedLog.seconds(it)}" }
+        }
+        ahead[id]?.asks?.takeIf { it > 0 }?.let { note += " · hỏi GPT dịch trước $it lần" }
         log(id, note)
         val language = if (sentence.text.isEmpty()) sentence.language else language(sentence.text, sentence.language)
         // A Vietnamese speaker in the room is shown as they said it.
         if (!sonioxUsesGPT || sentence.text.isEmpty() || (fromOthers && language == Language.vietnamese.code)) {
             heardTimes.remove(id)
+            ahead.remove(id)?.job?.cancel()
             if (language.isNotEmpty()) update(id) { it.language = language }
             finishCaption(id)
             val entry = entries.firstOrNull { it.id == id } ?: return
@@ -1950,9 +2188,10 @@ class ConversationModel(
             return
         }
         val target = if (fromOthers) Language.vietnamese else partnerLanguage
+        val translation = if (fromOthers) shownTranslation(id, sentence) else sentence.translation
         update(id) {
             it.text = sentence.text
-            it.translation = sentence.translation
+            it.translation = translation
             it.language = language
             it.target = target.code
             it.state = State.Translating
@@ -1986,47 +2225,80 @@ class ConversationModel(
         // What the partners hear is the user's own words: the app's translation model.
         val model = if (entry.mine) settings.model else quality.model
         val began = millis()
-        for (attempt in 1..2) {
-            try {
-                val result = gptTranslation(entry, target, model, apiKey)
-                charge { it.used(result.usage, model) }
-                update(id) {
-                    it.translation = result.text
-                    it.state = State.Done
+        val early = aheadTranslation(entry, model)
+        if (early != null) {
+            // GPT translated exactly these words while they were being said.
+            update(id) {
+                it.translation = early
+                it.state = State.Done
+            }
+            log(id, "GPT ${name(model)} đã dịch trước, dùng ngay" + heardNote(id, entry.mine))
+        } else {
+            for (attempt in 1..2) {
+                try {
+                    val result = gptTranslation(entry, target, model, apiKey)
+                    charge { it.used(result.usage, model) }
+                    update(id) {
+                        it.translation = result.text
+                        it.state = State.Done
+                    }
+                    log(id, "GPT ${name(model)} ${SpeedLog.seconds((millis() - began) / 1000.0)}" + heardNote(id, entry.mine))
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the live
+                    // translation goes on coming in: it was kept as it was when GPT failed, cut short.
+                    if (attempt == 1) {
+                        log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: hỏi lại sau 1,5 s")
+                        delay(1500)
+                        continue
+                    }
+                    // The live translation that has come furthest: Soniox's once all of it is in.
+                    val kept = keptTranslation(id)
+                    update(id) {
+                        if (kept != null) it.translation = kept
+                        it.state = if (it.translation.isEmpty()) State.Failed(e.message ?: "Lỗi không rõ.") else State.Done
+                    }
+                    log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: giữ bản dịch trực tiếp")
+                    heardTimes.remove(id)
                 }
-                log(id, "GPT ${name(model)} ${SpeedLog.seconds((millis() - began) / 1000.0)}" + heardNote(id, entry.mine))
-                break
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // Asked once more a moment later (a busy server, a network that blinked). Meanwhile the live
-                // translation goes on coming in: it was kept as it was when GPT failed, cut short.
-                if (attempt == 1) {
-                    log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: hỏi lại sau 1,5 s")
-                    delay(1500)
-                    continue
-                }
-                update(id) { it.state = if (it.translation.isEmpty()) State.Failed(e.message ?: "Lỗi không rõ.") else State.Done }
-                log(id, "GPT lỗi sau ${SpeedLog.seconds((millis() - began) / 1000.0)}: giữ bản dịch trực tiếp")
-                heardTimes.remove(id)
             }
         }
+        ahead.remove(id)?.job?.cancel()
         val done = entries.firstOrNull { it.id == id } ?: return
         if (done.state != State.Done) return
         record(id)
         if (speaks && done.translation.isNotEmpty() && (done.mine || readAloud)) sayOnce(done)
     }
 
-    /** Soniox's translation of the sentences GPT is still translating, as it comes. */
+    /**
+     * Soniox's translation of the sentences GPT is still translating, as it comes (or GPT's asked ahead,
+     * while it has come further).
+     */
     private fun showPreviews(previews: List<SonioxTranscript.Sentence>, fromOthers: Boolean) {
         for (preview in previews) {
             if (preview.translation.isEmpty()) continue
             val id = sonioxEntries[fromOthers]?.get(preview.number) ?: continue
             val entry = entries.firstOrNull { it.id == id } ?: continue
-            if (entry.state != State.Translating || entry.translation == preview.translation) continue
-            update(id) { it.translation = preview.translation }
+            if (entry.state != State.Translating) continue
+            val translation = if (fromOthers) shownTranslation(id, preview) else preview.translation
+            if (entry.translation == translation) continue
+            update(id) { it.translation = translation }
             noteHeard(id, preview, fromOthers)
         }
+    }
+
+    /**
+     * When GPT's translation of a finished sentence failed: of the live translations, the one reaching
+     * furthest into it (Soniox's, once all its pieces are in), or null to keep what shows.
+     */
+    private fun keptTranslation(id: String): String? {
+        val state = ahead[id] ?: return null
+        val soniox = state.sonioxTranslation ?: return null
+        val answer = state.answer
+        if (answer != null && (soniox.isEmpty() || answer.endMs > (state.sonioxCovered ?: Int.MIN_VALUE))) return answer.translation
+        return soniox.ifEmpty { null }
     }
 
     /**

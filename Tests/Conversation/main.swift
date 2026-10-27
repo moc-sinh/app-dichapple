@@ -397,19 +397,29 @@ do {
 
 do {
     var gate = LiveGate()
-    func chunk(_ n: UInt8) -> Data { Data([n]) }
+    /// A tenth of a second of sound, marked `n`.
+    func chunk(_ n: UInt8, seconds: Double = 0.1) -> Data { Data(repeating: n, count: Int(seconds * 48_000)) }
     var sent: [Data] = []
     for n in 0..<20 { sent += gate.feed(chunk(UInt8(n)), speech: false) }
     check(sent.isEmpty, "a quiet room is not sent")
     sent = gate.feed(chunk(100), speech: true)
-    check(sent == [15, 16, 17, 18, 19].map(chunk) + [chunk(100)], "speech goes with the half second before it")
+    check(sent == [15, 16, 17, 18, 19].map { chunk($0) } + [chunk(100)], "speech goes with the half second before it")
     var after = 0
     for _ in 0..<100 { after += gate.feed(chunk(0), speech: false).count }
-    check(after == LiveGate.hold, "three seconds after the last word, then nothing, got \(after)")
-    check(gate.feed(chunk(7), speech: true).count == LiveGate.preroll + 1, "the next words open it again, with the half second before")
+    check(after == 30, "three seconds after the last word, then nothing, got \(after) tenths")
+    check(gate.feed(chunk(7), speech: true).count == 6, "the next words open it again, with the half second before")
     _ = gate.feed(chunk(1), speech: true)
     gate.reset()
     check(gate.feed(chunk(2), speech: false).isEmpty, "reset closes it")
+    // The microphone's pieces are not always a tenth of a second: the gate counts the sound itself.
+    gate.reset()
+    for n in 0..<30 { _ = gate.feed(chunk(UInt8(n), seconds: 0.05), speech: false) }
+    sent = gate.feed(chunk(200, seconds: 0.05), speech: true)
+    check(sent.count == 11 && sent.dropLast().reduce(0) { $0 + $1.count } == 24_000,
+          "half a second before, in pieces of a twentieth: \(sent.count) pieces")
+    after = 0
+    for _ in 0..<100 { after += gate.feed(chunk(0, seconds: 0.05), speech: false).count }
+    check(after == 60, "three seconds after, in pieces of a twentieth: \(after)")
 }
 
 // MARK: What it costs
@@ -459,8 +469,9 @@ do {
     let message = #"{"tokens":[{"text":"你好","is_final":true,"language":"zh","translation_status":"original"},"#
         + #"{"text":"Xin chào","is_final":false,"language":"vi","translation_status":"translation"},{"text":"<end>","is_final":true}],"#
         + #""final_audio_proc_ms":760,"total_audio_proc_ms":880}"#
-    check(SonioxEvent.parse(message) == [.tokens([token("你好"), token("Xin chào", final: false, translation: true), token("<end>", language: "")])],
-          "tokens read: said, translated, the end of a sentence")
+    check(SonioxEvent.parse(message) == [.processed(finalMs: 760, totalMs: 880),
+                                         .tokens([token("你好"), token("Xin chào", final: false, translation: true), token("<end>", language: "")])],
+          "tokens read: said, translated, the end of a sentence; and how far Soniox has heard and settled, first")
     check(SonioxEvent.parse(#"{"tokens":[],"finished":true}"#) == [.finished], "finished")
     check(SonioxEvent.parse(#"{"error_code":401,"error_message":"Invalid API key."}"#) == [.failed(code: 401, message: "Invalid API key.")],
           "a wrong key")
@@ -620,6 +631,25 @@ do {
     check(ended.map(\.text) == ["好的。"] && twice.previews.map(\.translation) == ["Được"], "its guessed translation shows")
     _ = twice.take([token("Được rồi.", translation: true)])
     check(twice.previews.map(\.translation) == ["Được rồi."], "settled, it replaces the guess: \(twice.previews)")
+    // How far into the words said the translation has come (each piece follows the words it
+    // translates): the words after that are still waiting for theirs.
+    var reach = SonioxTranscript(target: "vi")
+    reach.splits = true
+    func at(_ text: String, _ start: Int, final: Bool = true) -> SonioxToken {
+        SonioxToken(text: text, isFinal: final, isTranslation: false, language: "zh", speaker: "1", startMs: start, endMs: start + 400)
+    }
+    _ = reach.take([at("这个月的订单", 0), at("我们已经", 500, final: false)])
+    check(reach.current.coveredMs == nil && reach.current.endMs == 900, "words without a translation yet: none of them reached")
+    _ = reach.take([token("Đơn hàng tháng này", translation: true), at("我们已经", 500, final: false)])
+    check(reach.current.coveredMs == 400, "a settled piece reaches the words settled before it: \(reach.current.coveredMs ?? -1)")
+    _ = reach.take([at("我们已经", 500), at("安排生产了，", 1000, final: false), token(" chúng tôi đã", final: false, translation: true)])
+    check(reach.current.coveredMs == 1400, "a guessed piece reaches the guessed words before it: \(reach.current.coveredMs ?? -1)")
+    _ = reach.take([at("安排生产了，", 1000), token(" chúng tôi đã sắp xếp sản xuất,", translation: true)])
+    check(reach.current.coveredMs == 1400, "settled, as far")
+    let longSpeech = reach.take([at("预计下周三可以发货。", 1500)])
+    check(longSpeech.count == 1 && reach.previews.first?.coveredMs == 1400, "a long speech cut at its full stop: its translation still to come")
+    _ = reach.take([token(" dự kiến thứ Tư tuần sau giao hàng.", translation: true)])
+    check(reach.previews.first?.coveredMs == 1900, "its last piece reaches its last word: \(reach.previews.first?.coveredMs ?? -1)")
     // The room's session hears the user's turns too: their voice is taken out, a partner's is not.
     var voices = MyVoiceFilter()
     func voiced(_ text: String, _ speaker: String, _ language: String, at second: Double) -> SonioxToken {
@@ -724,7 +754,7 @@ do {
     check(abs(meter.dollars - 0.18) < 1e-9, "Soniox: about 0.18 USD an hour sent")
     let soniox = CostMeter.perHour(live: true, soniox: true, model: .luna, readAloud: true, openAIVoice: false)
     let checked = CostMeter.perHour(live: true, soniox: true, translatesAgain: true, model: .luna, readAloud: true, openAIVoice: false)
-    check(abs(checked - 0.18 - 0.0756) < 1e-9, "each sentence translated again by Luna: about 0.08 USD more an hour")
+    check(abs(checked - 0.18 - 2 * 0.0756) < 1e-9, "each sentence translated again by Luna, and about once ahead: about 0.15 USD more an hour")
     check(abs(soniox - 0.18) < 1e-9 && soniox < CostMeter.perHour(live: true, model: .luna, readAloud: true, openAIVoice: false) / 10,
           "over ten times cheaper than Dịch liền")
 }

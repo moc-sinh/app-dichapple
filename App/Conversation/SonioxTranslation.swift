@@ -33,6 +33,9 @@ struct SonioxToken: Equatable {
 /// What a Soniox session sends back, and what it is sent.
 enum SonioxEvent: Equatable {
     case tokens([SonioxToken])
+    /// How much of the sound sent Soniox has turned into settled words, and into words at all (settled
+    /// or guessed), in milliseconds: told with each message, before its tokens.
+    case processed(finalMs: Int, totalMs: Int)
     /// Everything sent has been answered; the session ends.
     case finished
     /// 401 a wrong key, 402 or 429 no credit left, 400 a request it does not take; -1 the network.
@@ -47,6 +50,10 @@ enum SonioxEvent: Equatable {
             return [.failed(code: code, message: object["error_message"] as? String ?? "")]
         }
         var events: [SonioxEvent] = []
+        if let final = (object["final_audio_proc_ms"] as? NSNumber)?.intValue,
+           let total = (object["total_audio_proc_ms"] as? NSNumber)?.intValue {
+            events.append(.processed(finalMs: final, totalMs: total))
+        }
         let list = object["tokens"] as? [[String: Any]]
         let tokens = (list ?? []).compactMap { token -> SonioxToken? in
             guard let text = token["text"] as? String, !text.isEmpty else { return nil }
@@ -157,6 +164,9 @@ struct SonioxTranscript {
         /// Where its words begin and end in the session's sound (milliseconds), when told.
         var startMs: Int?
         var endMs: Int?
+        /// Where the words its translation has come for so far end (each piece of translation follows
+        /// the words it translates): the words after it are still untranslated.
+        var coveredMs: Int?
         /// Syllables said in each language.
         var syllables: [String: Int] = [:]
 
@@ -177,6 +187,7 @@ struct SonioxTranscript {
     /// syllables, and the settled translation that came after them (theirs, wherever they go).
     private var switching: [SonioxToken] = []
     private var switchingTranslation = ""
+    private var switchingCovered: Int?
     /// The speaker finished the sentence (without `splits`), or paused in the middle of one (with
     /// `splits`: no full stop yet); its translation may still be on its way.
     private(set) var ended = false
@@ -187,6 +198,7 @@ struct SonioxTranscript {
     /// Soniox's guess at the translation of a finished sentence, and which one.
     private var awaitingGuess = ""
     private var awaitingGuessNumber = 0
+    private var awaitingGuessCovered: Int?
     /// The sentence of the words settled last (0: none yet): the next settled piece of translation is its.
     private var owner = 0
     private var nextNumber = 1
@@ -203,8 +215,10 @@ struct SonioxTranscript {
         var sentence = settled
         for word in switching { Self.add(word, to: &sentence) }
         sentence.translation += switchingTranslation
+        Self.cover(&sentence, to: switchingCovered)
         sentence.text += guess.text
         sentence.translation += guess.translation
+        Self.cover(&sentence, to: guess.coveredMs)
         for (language, count) in guess.syllables { sentence.syllables[language, default: 0] += count }
         sentence.language = Self.majority(sentence.syllables, first: sentence.language.isEmpty ? guess.language : sentence.language)
         if sentence.speaker.isEmpty { sentence.speaker = guess.speaker }
@@ -219,18 +233,22 @@ struct SonioxTranscript {
         // The guesses come again whole in every message.
         guess = Sentence()
         awaitingGuess = ""
+        awaitingGuessCovered = nil
         released = []
         /// A guessed word came in this message: guessed translation after it is of the words being said.
         var guessing = false
+        /// Where the last word of this message ends: a piece of translation after it has come for it.
+        var saidEnd: Int?
         for token in tokens {
             if token.endsSentence {
                 if splits { endSpoken(fin: token.isFin, into: &finished) } else { ended = true }
                 continue
             }
             if token.isTranslation {
-                addTranslation(token, guessing: guessing)
+                addTranslation(token, guessing: guessing, after: saidEnd)
                 continue
             }
+            if let end = token.endMs { saidEnd = end }
             if token.isFinal, let end = token.endMs { settledEnd = Double(end) / 1000 }
             if splits {
                 if token.isFinal {
@@ -265,7 +283,10 @@ struct SonioxTranscript {
     var previews: [Sentence] {
         (released + awaiting).map { sentence in
             var preview = sentence
-            if sentence.number == awaitingGuessNumber { preview.translation += awaitingGuess }
+            if sentence.number == awaitingGuessNumber {
+                preview.translation += awaitingGuess
+                Self.cover(&preview, to: awaitingGuessCovered)
+            }
             preview.translation = preview.translation.trimmingCharacters(in: .whitespacesAndNewlines)
             return preview
         }
@@ -295,6 +316,7 @@ struct SonioxTranscript {
         keepSwitching()
         var sentence = current
         let settledTranslation = settled.translation
+        let settledCovered = settled.coveredMs
         settled = Sentence()
         guess = Sentence()
         ended = false
@@ -308,6 +330,7 @@ struct SonioxTranscript {
         if splits, owner == sentence.number, !sentence.text.isEmpty, sentence.language != target {
             var kept = sentence
             kept.translation = settledTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+            kept.coveredMs = settledCovered
             awaiting.append(kept)
             while awaiting.count > 2 { awaiting.removeFirst() }
         }
@@ -366,8 +389,10 @@ struct SonioxTranscript {
     private mutating func keepSwitching() {
         for word in switching { settle(word) }
         settled.translation += switchingTranslation
+        Self.cover(&settled, to: switchingCovered)
         switching = []
         switchingTranslation = ""
+        switchingCovered = nil
     }
 
     /// The few words of another speaker were theirs: the sentence before ends without them, and they
@@ -375,12 +400,15 @@ struct SonioxTranscript {
     private mutating func confirmSwitch(into finished: inout [Sentence]) {
         let words = switching
         let translation = switchingTranslation
+        let covered = switchingCovered
         switching = []
         switchingTranslation = ""
+        switchingCovered = nil
         guard !words.isEmpty else { return }
         if let sentence = finish() { finished.append(sentence) }
         for word in words { settle(word) }
         settled.translation += translation
+        Self.cover(&settled, to: covered)
     }
 
     /// Soniox's end of sentence, with `splits`: after a full stop, or a turn ended on purpose
@@ -434,25 +462,48 @@ struct SonioxTranscript {
     /// A piece of translation: of the words just before it. A settled piece follows the words settled
     /// last (`owner`), which may be a sentence already cut; a guessed one, the words guessed before it
     /// in this message, or else the settled ones. Without `splits`, the sentence being said.
-    private mutating func addTranslation(_ token: SonioxToken, guessing: Bool) {
+    /// `saidEnd`: where the last word before it in this message ends (none: the words it translates
+    /// came in an earlier message, and end where its sentence's settled words do).
+    private mutating func addTranslation(_ token: SonioxToken, guessing: Bool, after saidEnd: Int?) {
         // After words held (another speaker's few, the last settled): theirs, wherever they go.
         if !switching.isEmpty {
-            if token.isFinal { switchingTranslation += token.text } else { Self.add(token, to: &guess) }
+            if token.isFinal {
+                switchingTranslation += token.text
+                switchingCovered = saidEnd ?? switching.last?.endMs
+            } else {
+                Self.add(token, to: &guess)
+                Self.cover(&guess, to: saidEnd ?? switching.last?.endMs)
+            }
             return
         }
         let number = !splits || guessing || owner == 0 ? settled.number : owner
         if number != settled.number {
             // A cut sentence's: the one waiting for it (one let go of is gone, and the piece with it).
             guard let index = awaiting.firstIndex(where: { $0.number == number }) else { return }
+            let covered = saidEnd ?? awaiting[index].endMs
             if token.isFinal {
                 awaiting[index].translation += token.text
+                Self.cover(&awaiting[index], to: covered)
             } else {
                 awaitingGuess += token.text
                 awaitingGuessNumber = number
+                awaitingGuessCovered = covered
             }
             return
         }
-        if token.isFinal { Self.add(token, to: &settled) } else { Self.add(token, to: &guess) }
+        if token.isFinal {
+            Self.add(token, to: &settled)
+            Self.cover(&settled, to: saidEnd ?? settled.endMs)
+        } else {
+            Self.add(token, to: &guess)
+            Self.cover(&guess, to: saidEnd ?? guess.endMs ?? settled.endMs)
+        }
+    }
+
+    /// The translation has come for the words up to `end`.
+    private static func cover(_ sentence: inout Sentence, to end: Int?) {
+        guard let end else { return }
+        sentence.coveredMs = max(sentence.coveredMs ?? end, end)
     }
 
     private static func add(_ token: SonioxToken, to sentence: inout Sentence) {

@@ -101,6 +101,13 @@ struct Simulation {
         let quietBefore = others.sent
         await feed(Array(repeating: 0, count: 24_000))
         check(others.sent - quietBefore > 0.8, "Soniox hears the quiet room too: a far voice is never held back")
+        // The microphone's pieces are not even tenths of a second: each goes on whole, at once (the end of
+        // one used to wait a tenth of a second for the next).
+        let unevenBefore = others.sent
+        AudioIO.current?.feed(Array(repeating: 0, count: 2_390))
+        await sleep(0.05)
+        check(abs(others.sent - unevenBefore - 2_390.0 / 24_000) < 0.0001,
+              "the sound goes to Soniox as it is heard, none held back: \(others.sent - unevenBefore) s")
 
         // Three people talk on without pausing.
         await feed(speech(2))
@@ -278,6 +285,92 @@ struct Simulation {
         let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
         check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 1: 等一下。") == true,
               "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
+
+        // Soniox's translation lags behind the words (a noisy room, several people): once words have waited
+        // 1.2 s on the screen, GPT translates the sentence so far (dịch trước); GPT's showing, it is asked
+        // again as more is said; the sentence ending as GPT was last asked it, that answer is its final
+        // translation, at once.
+        func entry(_ id: UUID?) -> ConversationModel.Entry? { model.entries.first { $0.id == id } }
+        others.onEvent?(.processed(finalMs: Int(others.sent * 1000) - 2_000, totalMs: Int(others.sent * 1000) - 500))
+        check(model.speedLogText.contains("Soniox nửa phút: nghe chậm TB 0,5 s, tối đa 0,5 s · chốt chậm TB 1,5 s, tối đa 1,5 s"),
+              "the speed log says how far behind Soniox hears and settles")
+        calls.translateDelay = 400_000_000
+        var s = Int(others.sent * 1000)
+        others.say([w("这个月的订单", "4", final: false, start: s, end: s + 900)])
+        let lagging = model.entries.last?.id
+        await feed(speech(1))
+        others.say([w("这个月的订单", "4", start: s, end: s + 900), w("我们已经安排", "4", final: false, start: s + 1000, end: s + 1900)])
+        check(entry(lagging)?.translation.isEmpty == true && !calls.translated.contains { $0.text.hasPrefix("这个月的订单") },
+              "a second without a translation: not yet")
+        await feed(speech(1))
+        check(entry(lagging)?.translation == "[vi] 这个月的订单我们已经安排" && entry(lagging)?.state == .hearing,
+              "1.2 s without one: GPT's translation of the sentence so far: \(entry(lagging)?.translation ?? "")")
+        check(calls.translated.last?.model == .luna, "with Luna, the quick one")
+        others.say([t("Đơn hàng tháng này")])
+        check(entry(lagging)?.translation == "[vi] 这个月的订单我们已经安排", "Soniox's, reaching fewer words, does not replace it")
+        others.say([w("我们已经安排生产了，", "4", start: s + 1000, end: s + 2400), w("预计下周三", "4", final: false, start: s + 2500, end: s + 3000)])
+        await sleep(0.05)
+        check(calls.translated.last?.text == "这个月的订单我们已经安排生产了，预计下周三", "more said: GPT asked again at once")
+        await feed(speech(0.5))
+        check(entry(lagging)?.translation == "[vi] 这个月的订单我们已经安排生产了，预计下周三", "and its answer shows")
+        // Soniox's reaching a little past GPT's: the text does not jump back to it.
+        others.say([w("预计下周三可以", "4", final: false, start: s + 2500, end: s + 3300), t(" dự kiến thứ Tư có thể", final: false)])
+        check(entry(lagging)?.translation == "[vi] 这个月的订单我们已经安排生产了，预计下周三",
+              "Soniox's a little further: GPT's stays shown: \(entry(lagging)?.translation ?? "")")
+        await sleep(0.05)
+        check(calls.translated.last?.text == "这个月的订单我们已经安排生产了，预计下周三", "and GPT is not asked for words Soniox has translated")
+        await feed(speech(0.5))
+        others.say([w("预计下周三可以发货。", "4", final: false, start: s + 2500, end: s + 3600)])
+        await sleep(0.1)
+        others.say([w("预计下周三可以发货。", "4", start: s + 2500, end: s + 3600), w("<end>", "")])
+        let whole = "这个月的订单我们已经安排生产了，预计下周三可以发货。"
+        check(entry(lagging)?.state == .translating, "the sentence ends")
+        await sleep(0.45)
+        check(entry(lagging)?.state == .done && entry(lagging)?.translation == "[vi] \(whole)",
+              "GPT, asked for exactly its words while they were said, is its translation at once: \(String(describing: entry(lagging)))")
+        check(calls.translated.filter { $0.text == whole }.count == 1, "not asked again")
+        check(model.speedLogText.contains("đã dịch trước, dùng ngay") && model.speedLogText.contains("GPT dịch trước chậm tối đa")
+              && model.speedLogText.contains("hỏi GPT dịch trước 3 lần") && model.speedLogText.contains("chữ chậm tối đa"),
+              "noted in the speed log")
+        await sleep(1.5)
+        // Soniox's translation keeping up with the words: GPT is not asked before the sentence ends.
+        let askedBefore = calls.translated.count
+        s = Int(others.sent * 1000)
+        others.say([w("好的，", "5", start: s, end: s + 500), t("Được,")])
+        await feed(speech(1.5))
+        others.say([w("没问题。", "5", start: s + 600, end: s + 1200), t(" không vấn đề."), w("<end>", "")])
+        await sleep(0.6)
+        check(calls.translated.count == askedBefore + 1 && model.entries.last?.state == .done, "Soniox keeping up: GPT once, at the end")
+        check(model.speedLogText.contains("bản dịch Soniox chậm tối đa"), "how late Soniox's translation came is in the speed log")
+        await sleep(1.5)
+        // A pause: GPT translates the sentence so far at once; nothing more said, that is its translation
+        // the moment it ends.
+        s = Int(others.sent * 1000)
+        others.say([w("我们考虑一下", "5", start: s, end: s + 900), t("Chúng tôi sẽ cân nhắc"), w("<end>", "")])
+        let paused = model.entries.last?.id
+        await sleep(0.05)
+        check(calls.translated.last?.text == "我们考虑一下", "a pause: GPT asked at once")
+        await feed(Array(repeating: 0, count: 2_400 * 14))
+        check(entry(paused)?.state == .done && entry(paused)?.translation == "[vi] 我们考虑一下"
+              && calls.translated.filter { $0.text == "我们考虑一下" }.count == 1,
+              "ended after the quiet moment, translated already: \(String(describing: entry(paused)))")
+        await sleep(1.5)
+        // GPT asked ahead hangs (a stalled connection): given up after 4 s, and asked again.
+        s = Int(others.sent * 1000)
+        others.say([w("STALL 价格还可以", "4", final: false, start: s, end: s + 1200)])
+        let stalled = model.entries.last?.id
+        await feed(Array(repeating: 0, count: 2_400 * 30))
+        check(entry(stalled)?.translation.isEmpty == true && calls.translated.filter { $0.text == "STALL 价格还可以" }.count == 1,
+              "asked, and hanging")
+        await feed(Array(repeating: 0, count: 2_400 * 30))
+        check(entry(stalled)?.translation == "[vi] STALL 价格还可以" && calls.translated.filter { $0.text == "STALL 价格还可以" }.count == 2,
+              "given up and asked again: \(entry(stalled)?.translation ?? "")")
+        others.say([w("STALL 价格还可以", "4", start: s, end: s + 1200), w("<end>", "")])
+        await feed(Array(repeating: 0, count: 2_400 * 14))
+        check(entry(stalled)?.state == .done && calls.translated.filter { $0.text == "STALL 价格还可以" }.count == 2,
+              "and that answer is its translation")
+        calls.translateDelay = 100_000_000
+        await sleep(1.5)
 
         // A room that talks on: the voice catches up.
         Sim.speed = 1

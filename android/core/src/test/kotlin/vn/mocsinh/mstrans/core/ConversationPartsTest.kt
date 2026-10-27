@@ -385,7 +385,8 @@ class ConversationPartsTest {
     fun liveGateAndCost() {
         val c = Checks()
         val gate = LiveGate()
-        fun chunk(n: Int) = byteArrayOf(n.toByte())
+        /** A tenth of a second of sound, marked `n`. */
+        fun chunk(n: Int, seconds: Double = 0.1) = ByteArray((seconds * 48_000).toInt()) { n.toByte() }
         var sent = ArrayList<ByteArray>()
         for (n in 0 until 20) sent += gate.feed(chunk(n), false)
         c.check(sent.isEmpty(), "a quiet room is not sent")
@@ -393,11 +394,19 @@ class ConversationPartsTest {
         c.check(opened.map { it[0].toInt() } == listOf(15, 16, 17, 18, 19, 100), "speech goes with the half second before it")
         var after = 0
         repeat(100) { after += gate.feed(chunk(0), false).size }
-        c.check(after == LiveGate.HOLD, "three seconds after the last word, then nothing, got $after")
-        c.check(gate.feed(chunk(7), true).size == LiveGate.PREROLL + 1, "the next words open it again")
+        c.check(after == 30, "three seconds after the last word, then nothing, got $after tenths")
+        c.check(gate.feed(chunk(7), true).size == 6, "the next words open it again")
         gate.feed(chunk(1), true)
         gate.reset()
         c.check(gate.feed(chunk(2), false).isEmpty(), "reset closes it")
+        // The microphone's pieces are not always a tenth of a second: the gate counts the sound itself.
+        gate.reset()
+        for (n in 0 until 30) gate.feed(chunk(n, 0.05), false)
+        val halves = gate.feed(chunk(200, 0.05), true)
+        c.check(halves.size == 11 && halves.dropLast(1).sumOf { it.size } == 24_000, "half a second before, in twentieths: ${halves.size}")
+        after = 0
+        repeat(100) { after += gate.feed(chunk(0, 0.05), false).size }
+        c.check(after == 60, "three seconds after, in twentieths: $after")
 
         fun near(a: Double, b: Double) = abs(a - b) < 1e-9
         var meter = CostMeter()
@@ -441,8 +450,9 @@ class ConversationPartsTest {
         val message = """{"tokens":[{"text":"你好","is_final":true,"language":"zh","translation_status":"original"},""" +
             """{"text":"Xin chào","is_final":false,"language":"vi","translation_status":"translation"},{"text":"<end>","is_final":true}],""" +
             """"final_audio_proc_ms":760,"total_audio_proc_ms":880}"""
-        c.check(SonioxEvent.parse(message) == listOf(SonioxEvent.Tokens(listOf(token("你好"),
-            token("Xin chào", final = false, translation = true), token("<end>", language = "")))), "tokens read")
+        c.check(SonioxEvent.parse(message) == listOf(SonioxEvent.Processed(760, 880), SonioxEvent.Tokens(listOf(token("你好"),
+            token("Xin chào", final = false, translation = true), token("<end>", language = "")))),
+            "tokens read; and how far Soniox has heard and settled, first")
         c.check(SonioxEvent.parse("""{"tokens":[],"finished":true}""") == listOf(SonioxEvent.Finished), "finished")
         c.check(SonioxEvent.parse("""{"error_code":401,"error_message":"Invalid API key."}""") ==
             listOf(SonioxEvent.Failed(401, "Invalid API key.")), "a wrong key")
@@ -574,6 +584,22 @@ class ConversationPartsTest {
         c.check(ended.map { it.text } == listOf("好的。") && twice.previews.map { it.translation } == listOf("Được"), "its guessed translation shows")
         twice.take(listOf(token("Được rồi.", translation = true)))
         c.check(twice.previews.map { it.translation } == listOf("Được rồi."), "settled, it replaces the guess: ${twice.previews}")
+        // How far into the words said the translation has come (each piece follows the words it translates):
+        // the words after that are still waiting for theirs.
+        val reach = SonioxTranscript("vi").apply { splits = true }
+        fun at(text: String, start: Int, final: Boolean = true) = SonioxToken(text, final, false, "zh", "1", start, start + 400)
+        reach.take(listOf(at("这个月的订单", 0), at("我们已经", 500, final = false)))
+        c.check(reach.current.coveredMs == null && reach.current.endMs == 900, "words without a translation yet: none of them reached")
+        reach.take(listOf(token("Đơn hàng tháng này", translation = true), at("我们已经", 500, final = false)))
+        c.check(reach.current.coveredMs == 400, "a settled piece reaches the words settled before it: ${reach.current.coveredMs}")
+        reach.take(listOf(at("我们已经", 500), at("安排生产了，", 1000, final = false), token(" chúng tôi đã", final = false, translation = true)))
+        c.check(reach.current.coveredMs == 1400, "a guessed piece reaches the guessed words before it: ${reach.current.coveredMs}")
+        reach.take(listOf(at("安排生产了，", 1000), token(" chúng tôi đã sắp xếp sản xuất,", translation = true)))
+        c.check(reach.current.coveredMs == 1400, "settled, as far")
+        val longSpeech = reach.take(listOf(at("预计下周三可以发货。", 1500)))
+        c.check(longSpeech.size == 1 && reach.previews.firstOrNull()?.coveredMs == 1400, "a long speech cut at its full stop: its translation still to come")
+        reach.take(listOf(token(" dự kiến thứ Tư tuần sau giao hàng.", translation = true)))
+        c.check(reach.previews.firstOrNull()?.coveredMs == 1900, "its last piece reaches its last word: ${reach.previews.firstOrNull()?.coveredMs}")
         // The room's session hears the user's turns too: their voice is taken out, a partner's is not.
         val voices = MyVoiceFilter()
         fun voiced(text: String, speaker: String, language: String, at: Double) =
@@ -657,7 +683,7 @@ class ConversationPartsTest {
         c.check(abs(sonioxHour - 0.18) < 1e-9 && sonioxHour < CostMeter.perHour(true, false, TranslationModel.LUNA, true, false) / 10,
             "over ten times cheaper than Dịch liền")
         val checked = CostMeter.perHour(true, true, TranslationModel.LUNA, true, false, translatesAgain = true)
-        c.check(abs(checked - 0.18 - 0.0756) < 1e-9, "each sentence translated again by Luna: about 0.08 USD more an hour")
+        c.check(abs(checked - 0.18 - 2 * 0.0756) < 1e-9, "each sentence translated again by Luna, and about once ahead: about 0.15 USD more an hour")
         c.done()
     }
 }

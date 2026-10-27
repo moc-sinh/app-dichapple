@@ -38,13 +38,16 @@ struct CostMeter: Codable, Equatable {
     /// 750 tokens in (instructions, glossary, the meeting's last sentences) and 60 out (160 with
     /// GPT-6.1 Sol's reasoning); read aloud, about as long in Vietnamese as it was said.
     /// Soniox's words are read aloud like Chính xác's. `translatesAgain`: each sentence of Soniox or
-    /// Dịch liền is translated again by GPT, as Chính xác's are.
+    /// Dịch liền is translated again by GPT, as Chính xác's are; Soniox's, about once more ahead of its end
+    /// (with Luna, while Soniox's own translation lags), on average.
     static func perHour(live: Bool, soniox: Bool = false, translatesAgain: Bool = false, model: TranslationModel,
                         readAloud: Bool, openAIVoice: Bool) -> Double {
         let price = model.price
         let sentence = (750 * price.input + (model == .luna ? 60 : 160) * price.output) / 1_000_000
         let again = translatesAgain ? 720 * sentence : 0
-        if soniox { return 60 * Rate.sonioxPerMinute + again + (readAloud && openAIVoice ? 60 * Rate.voicePerMinute : 0) }
+        let luna = TranslationModel.luna.price
+        let ahead = translatesAgain ? 720 * (750 * luna.input + 60 * luna.output) / 1_000_000 : 0
+        if soniox { return 60 * Rate.sonioxPerMinute + again + ahead + (readAloud && openAIVoice ? 60 * Rate.voicePerMinute : 0) }
         if live { return 60 * Rate.livePerMinute + again }
         var hour = 60 * Rate.transcribePerMinute + 720 * sentence
         if readAloud, openAIVoice { hour += 60 * Rate.voicePerMinute }

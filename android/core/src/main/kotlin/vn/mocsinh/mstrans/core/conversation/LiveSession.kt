@@ -166,15 +166,15 @@ class LiveSession(
  */
 class LiveGate {
     companion object {
-        /** In chunks of a tenth of a second. */
-        const val PREROLL = 5
-        const val HOLD = 30
+        /** In samples (24 kHz PCM16): half a second, and three. */
+        const val PREROLL = PCM.RATE / 2
+        const val HOLD = PCM.RATE * 3
     }
 
     private val buffered = ArrayList<ByteArray>()
     private var left = 0
 
-    /** The next tenth of a second, and whether someone is speaking in it; returns what to send now. */
+    /** The sound just heard (any length), and whether someone is speaking in it; returns what to send now. */
     fun feed(chunk: ByteArray, speech: Boolean): List<ByteArray> {
         if (speech) {
             left = HOLD
@@ -184,11 +184,18 @@ class LiveGate {
             return out
         }
         if (left > 0) {
-            left -= 1
+            left -= chunk.size / 2
             return listOf(chunk)
         }
         buffered.add(chunk)
-        while (buffered.size > PREROLL) buffered.removeAt(0)
+        // The last piece, and those before it that fit in the half second.
+        var kept = buffered.last().size / 2
+        var first = buffered.size - 1
+        while (first > 0 && kept + buffered[first - 1].size / 2 <= PREROLL) {
+            first -= 1
+            kept += buffered[first].size / 2
+        }
+        repeat(first) { buffered.removeAt(0) }
         return emptyList()
     }
 

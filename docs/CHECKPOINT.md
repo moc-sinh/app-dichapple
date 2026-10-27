@@ -1,4 +1,4 @@
-# Checkpoint — 26/10/2026
+# Checkpoint — 27/10/2026
 
 Điểm dừng để phiên mới (có thể ở tài khoản khác) làm tiếp. Mọi mã đã được push lên nhánh
 `claude/funny-gates-s6pl2c` (PR #1 nháp vào `claude/stoic-hopper-f60iid`) của repo `moc-sinh/app-dichapple`.
@@ -10,14 +10,16 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (226 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (234 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, rồi rà soát lần hai trên
+- **Bản mới nhất:** iPhone 1.14.0 và Android 1.3.0 (bản dịch chữ theo kịp người nói: GPT dịch trước khi bản dịch của
+  Soniox chậm, tiếng gửi đi không bị giữ lại, nhật ký tốc độ tách được Soniox nghe/chốt/dịch chậm; xem mục 1.14.0). Trước đó
+  iPhone 1.13.0 và Android 1.2.0 (rà soát độc lập phần nghe dịch: 12 phát hiện, rồi rà soát lần hai trên
   chính các sửa: 5 phát hiện; sửa trên cả hai bản; xem mục 1.13.0). Commit 4b70f13: iOS run 77 xanh (IPA
   `https://github.com/moc-sinh/app-dichapple/actions/runs/40424082233/artifacts/12699018370`), Android run 6 xanh (release
   `android-1.2.0-6`); đã gửi người dùng cả hai link. Trước đó 1.12.1 (bản dịch tạm của Soniox gắn đúng câu theo thứ tự token, nhật ký đo độ trễ người dùng
@@ -374,9 +376,44 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   và test Kotlin thêm đủ 5 cảnh; đột biến từng sửa đều bị bắt. Lưu ý cho mô phỏng: micro thật gửi âm thanh liên tục, cảnh nào
   cần giờ của câu thì phải `feed` trong lúc chờ.
 
+- **1.14.0 + Android 1.3.0: bản dịch chữ theo kịp người nói (27/10).** Người dùng (sau 1.13.0): "phần dịch giọng ra chữ không
+  theo kịp người nói", vẫn chưa gửi nhật ký tốc độ. Đọc lại cả đường đi micro → Soniox → màn hình và tài liệu Soniox
+  (`soniox.com/docs/llms-full.txt` tải được từ máy cloud): bản dịch của Soniox đến sau chữ gốc nó đã **chốt** ("generated after
+  their spoken tokens"); chữ chốt dần, hoặc ở `<end>`/`finalize`; tham số `max_non_final_tokens_duration_ms` (giữ chữ chưa chốt
+  tối đa bao lâu) có trong API nhưng không có trong tài liệu (chỉ có thông báo lỗi; bài best-practices cũ khuyên đặt 6000 cho phòng
+  ồn để tách người nói tốt hơn, tức mặc định thấp hơn, có thể 4000): trong phòng ồn nhiều người, bản dịch Soniox có thể chậm vài
+  giây sau chữ gốc. Chưa đặt tham số này (không có tài liệu, có thể làm kém tách người nói); `endpoint_latency_adjustment_level`/
+  `endpoint_sensitivity` cũng chưa dùng. Soniox có máy chủ Nhật (`stt-rt.jp.soniox.com`) nhưng cần project riêng có vùng Nhật
+  (người dùng phải xin ở console) nên chưa làm. Đã sửa (iPhone và Android như nhau):
+  1. **GPT dịch trước** (`ahead`, `translateAhead`): câu của phòng đang nói, chữ đầu tiên chưa có bản dịch đã hiện quá 1,2 s
+     (`aheadWait`, tính theo giờ máy từ lúc chữ hiện, `seen`), thì hỏi GPT Luna (luôn Luna, nhanh) dịch cả câu tới lúc đó (cả chữ
+     đoán); đang hiện bản GPT thì hỏi tiếp ngay khi nói thêm; Soniox `<end>` không dấu chấm (ngừng giữa câu) thì hỏi ngay. Một câu
+     hỏi một lúc, tối đa 12 lần một câu, mỗi lần 4 s (`aheadPatience`, quá thì bỏ và hỏi lại). Hiện bản nào dịch tới xa hơn trong
+     câu (`SonioxTranscript.Sentence.coveredMs`: mảnh dịch phủ tới chữ đứng trước nó trong luồng); đã hiện bản GPT thì giữ tới khi
+     Soniox vượt quá 1,5 s (`aheadMargin`), để chữ không nhảy qua lại. Hết câu mà chữ đúng như lần hỏi gần nhất (và câu dịch bằng
+     Luna) thì câu trả lời đó là bản dịch cuối, hiện ngay (`aheadTranslation`, chờ nếu đang về); GPT cuối lỗi hai lần thì giữ bản
+     dịch trực tiếp đi xa nhất (`keptTranslation`). Ước tính chi phí thêm một lần Luna mỗi câu (~0,08 USD/giờ).
+  2. **Tiếng gửi đi không bị giữ**: `Listener` gửi cả phần micro vừa đưa (≥ 20 ms), không cắt thành từng 0,1 s (phần lẻ từng chờ
+     0,1 s cho phần sau, tức trễ tới 0,1 s mỗi lần); `LiveGate` tính theo số mẫu (0,5 s trước, 3 s sau) thay vì số khúc.
+  3. **Bớt vẽ lại**: `update` chỉ ghi khi câu thật sự đổi (Soniox gửi lại chữ đoán y hệt trong mỗi tin).
+  4. **Nhật ký tốc độ**: `SonioxEvent.processed` (`final_audio_proc_ms`, `total_audio_proc_ms` có trong mọi tin): mỗi nửa phút một dòng
+     "Soniox nửa phút: nghe chậm TB/tối đa (tiếng đã gửi trừ phần Soniox đã nghe: mạng, Soniox), chốt chậm TB/tối đa (chữ đoán chờ
+     chốt), GPT dịch trước N lần, trả lời TB". Mỗi câu thêm "chữ chậm tối đa" (chữ hiện sau lời nói bao lâu), "bản dịch Soniox chậm
+     tối đa", "GPT dịch trước chậm tối đa", "hỏi GPT dịch trước N lần", và "GPT Luna đã dịch trước, dùng ngay". **Đọc nhật ký**: nghe
+     chậm lớn = mạng/upload (384 kbps PCM 24 kHz; có thể chuyển 16 kHz hoặc nén); chốt chậm lớn = Soniox giữ chữ đoán lâu (thử
+     `max_non_final_tokens_duration_ms`, có tự quay lại nếu Soniox từ chối); bản dịch Soniox chậm mà chốt nhanh = Soniox dịch theo cụm;
+     GPT dịch trước chậm = mạng tới OpenAI.
+  Test: `Tests/Conversation` 234 kiểm tra (độ phủ bản dịch, `processed`, `LiveGate` khúc 0,05 s); mô phỏng thêm: tiếng lẻ gửi ngay,
+  Soniox dịch chậm → GPT dịch trước rồi hỏi tiếp, Soniox vượt ít không giành lại, hết câu dùng ngay câu trả lời (không hỏi lần hai),
+  Soniox dịch kịp → không hỏi GPT trước, ngừng giữa câu → dịch sẵn, GPT dịch trước treo → bỏ sau 4 s và hỏi lại; bỏ từng sửa (gửi
+  0,1 s, không dịch trước, không dùng lại, không bỏ câu treo, không giữ bản GPT, không hỏi lúc ngừng) đều làm mô phỏng trượt.
+  Android: cùng kiểm tra trong `ConversationPartsTest`, `ConversationSonioxTest.translatesAhead` (máy chủ Soniox giả), 27 test qua.
+  **Chưa thử trên máy thật.** Không đổi gì cho Dịch liền ngoài `LiveGate` (chữ của nó đã hiện ngay khi OpenAI gửi).
+
 ## Việc tiếp theo (theo thứ tự)
 
-0. Đã gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
+0. Gửi link IPA 1.14.0 và APK 1.3.0. Người dùng thử họp thật rồi gửi nhật ký tốc độ: đọc dòng "Soniox nửa phút" và các dòng câu
+   (xem cách đọc ở mục 1.14.0) trước khi sửa tiếp. Trước đó đã gửi link IPA 1.13.0 và APK 1.2.0. Người dùng ghi Chủ đề cuộc họp rồi thử trong cuộc họp thật 4–5 người (khuyên **Soniox + Chỉ chữ**) rồi gửi nhật ký
    tốc độ (⋯ › Sao chép nhật ký tốc độ, ngay sau buổi họp vì nó mất khi tắt app): đọc nó trước khi sửa tiếp, đừng
    đoán. Mỗi câu có các dòng cùng mã 4 ký tự: `Soniox · Người N · zh · 18 âm tiết · nhận chậm X s · chữ hiện sau X s`
    (Soniox chậm), `GPT Luna X s · bản dịch đầu tiên sau X s · bản GPT sau X s từ lúc ngừng nói` (đây là độ trễ người
