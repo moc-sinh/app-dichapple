@@ -469,12 +469,13 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   Commit f573bbf: Android run 9 xanh (release `android-1.5.0-9`, đã gửi link APK). iOS run 80 bị huỷ 2 lần nữa (tổng 5 lần,
   ~2,5 giờ, cùng thông báo thiếu máy macOS arm64), nên job `build` chuyển sang `macos-15-intel` (job này chỉ build cho iPhone,
   không cần máy arm64; `keyboard-smoke` dựng simulator arm64 nên vẫn ở `macos-15`). Khi GitHub hết thiếu máy có thể trả về
-  `macos-15` (nhanh hơn).
+  `macos-15` (nhanh hơn). Commit 3dd1ddc: iOS run 81 xanh (build trên Intel 8,5 phút, không cảnh báo; keyboard-smoke xanh), IPA
+  `https://github.com/moc-sinh/app-dichapple/actions/runs/40539614440/artifacts/12750412841`; đã gửi người dùng link IPA và APK.
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.16.0 (đã gửi APK 1.5.0; IPA 1.15.0 chưa từng build được vì GitHub thiếu máy macOS arm64, job `build` giờ
-   chạy trên `macos-15-intel`). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
+0. Đã gửi link IPA 1.16.0 (run 81) và APK 1.5.0 (`android-1.5.0-9`). Chờ người dùng họp thử rồi gửi nhật ký tốc độ và biên
+   bản có đánh dấu câu dịch sai; đọc chúng trước khi sửa tiếp (thuật ngữ thiếu thì thêm vào `Trade`, cả hai tệp). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
    Trước đó: gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
    "bỏ đọc: câu của bạn đọc trước"), chữ gọn có dễ đọc không. Nếu Tôi nói vẫn chậm: câu của bạn dịch bằng model của Cài đặt
    (mặc định Sol, suy luận "low", 2–4 s); có thể cho Tôi nói dùng Luna hoặc dịch trước trong lúc giữ nút — hỏi người dùng trước
