@@ -152,7 +152,8 @@ struct Simulation {
         await sleep(1.5)
         calls.voiceBytes = 480_000   // 10 s of voice: 2.5 s at this speed
         others.say([w("那我们下周一确认订单。", "3"), w("<end>", "")])
-        await sleep(0.7)
+        // The microphone's sound goes on meanwhile, as it always does.
+        await feed(Array(repeating: 0, count: 2_400 * 7))
         check(model.speaking, "the phone reads it")
         let echoAt = Int(others.sent * 1000)
         others.say([w("Vậy thứ Hai tuần sau chúng ta xác nhận đơn hàng.", "4", "vi", start: echoAt - 900, end: echoAt), w("<end>", "")])
@@ -161,8 +162,13 @@ struct Simulation {
         await sleep(2.5)
         calls.voiceBytes = 96_000
 
+        // A partner asks, and the user answers at once: the question ends as the button goes down (Soniox
+        // sends no end of sentence while the user talks on: the room's session hears their turn too).
+        others.say([w("交货期多长？", "1")])
         // The user speaks.
         model.talk(true)
+        check(model.entries.last?.text == "交货期多长？" && model.entries.last?.state == .translating,
+              "the partner's question goes to GPT as the user begins: \(String(describing: model.entries.last))")
         let roomBefore = others.sent
         await feed(speech(1.5))
         check(partner.sent > 1, "the user's sound goes to their own session")
@@ -253,6 +259,22 @@ struct Simulation {
         await feed(Array(repeating: 0, count: 2_400 * 9))
         check(model.entries.last?.text == "那个" && model.entries.last?.state != .hearing, "ended after a quiet moment")
         await sleep(0.5)
+        // The speaker goes on after a pause, Soniox settling the new words late: the pause is not ended
+        // with them still guessed (they came again as the next sentence once settled).
+        others.say([w("如果你们订一千台，", "1"), w("<end>", "")])
+        await feed(Array(repeating: 0, count: 2_400 * 3))
+        others.say([w("价格", "1", final: false)])
+        await feed(Array(repeating: 0, count: 2_400 * 16))
+        check(model.entries.last?.state == .hearing, "a pause with the next words still guessed: not ended")
+        others.say([w("价格再低一点。", "1"), w("<end>", "")])
+        check(model.entries.last?.text == "如果你们订一千台，价格再低一点。" && model.entries.filter { $0.text.contains("价格再低") }.count == 1,
+              "one sentence, the words not twice: \(model.entries.suffix(2).map(\.text))")
+        // A word guessed, then taken back (an empty list): nothing of it is kept.
+        others.say([w("嗯", "2", final: false)])
+        check(model.entries.last?.text == "嗯" && model.entries.last?.state == .hearing, "a guess shows at once")
+        others.say([])
+        check(!model.entries.contains { $0.text == "嗯" }, "taken back, it is gone (it was kept as a sentence 8 s later)")
+        await sleep(0.5)
         let mineContext = calls.translated.last { $0.text == "Anh gửi giúp em báo giá nhé" }
         check(mineContext?.speaker == "User" && mineContext?.context.last?.hasPrefix("Người 1: 等一下。") == true,
               "the user's own sentence: GPT is told it is theirs: \(String(describing: mineContext))")
@@ -304,6 +326,23 @@ struct Simulation {
         again.say([w("很好。", "2"), w("<end>", "")])
         check(model.entries.last?.text == "很好。", "the words not settled are heard again")
         await sleep(0.5)
+        // Soniox numbers the new session's speakers anew: the user is now "1", a partner "2". The user's
+        // English word is not a partner's, and the partner answering during the turn is.
+        again.say([w("好的，没问题。", "2"), w("<end>", "")])
+        await sleep(0.5)
+        model.talk(true)
+        await feed(speech(1.5))
+        let anewAt = Int(again.sent * 1000)
+        again.say([w("OK", "1", "en", start: anewAt - 1400, end: anewAt - 1200), w(" anh", "1", "vi", start: anewAt - 1100, end: anewAt - 900),
+                   w("等一下，我问一下。", "2", start: anewAt - 800, end: anewAt - 100), w("<end>", "")])
+        check(!model.entries.contains { !$0.mine && $0.text == "OK" }, "the user's own English word is not someone else's")
+        check(model.entries.last?.text == "等一下，我问一下。", "the partner answering during the turn is heard")
+        partner.say([w("Anh chờ chút", "", "vi", end: 1400)])
+        model.talk(false)
+        await feed(speech(0.2))
+        await sleep(0.3)
+        partner.say([w("<fin>", "")])
+        await sleep(0.8)
 
         // Stop while Soniox has not settled the last words: they still come in.
         let partnerFinalized = partner.finalized

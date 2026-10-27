@@ -23,8 +23,9 @@ final class Listener: @unchecked Sendable {
     /// (`first` and `last` piece of the turn).
     var onMine: ((_ samples: [Int16], _ first: Bool, _ last: Bool) -> Void)?
     var onLevel: ((Double, Bool) -> Void)?
-    /// A tenth of a second of sound, and whether someone is speaking in it.
-    var onChunk: ((Data, Bool) -> Void)?
+    /// A tenth of a second of sound, whether someone is speaking in it, and whether a sound some way above
+    /// the room's noise is (a far or quiet voice, or what echo cancelling left of the phone's).
+    var onChunk: ((Data, Bool, Bool) -> Void)?
 
     private static let recentSamples = PCM.rate * 3 / 10
     /// A turn longer than this goes on as it is said, a piece at a time (cut at a breath), so
@@ -48,11 +49,12 @@ final class Listener: @unchecked Sendable {
         if recent.count > Self.recentSamples { recent.removeFirst(recent.count - Self.recentSamples) }
         if streams {
             chunk.append(contentsOf: samples)
-            let speech = mine != nil || segmenter.speaking || segmenter.audible
+            let speech = mine != nil || segmenter.speaking
+            let audible = segmenter.audible
             while chunk.count >= PCM.rate / 10 {
                 let data = PCM.data(chunk[..<(PCM.rate / 10)])
                 chunk.removeFirst(PCM.rate / 10)
-                DispatchQueue.main.async { [weak self] in self?.onChunk?(data, speech) }
+                DispatchQueue.main.async { [weak self] in self?.onChunk?(data, speech, audible) }
             }
         }
         sinceLevel += samples.count
@@ -104,7 +106,7 @@ final class Listener: @unchecked Sendable {
         // The last moment of sound goes too: it may end the last word.
         if streams, !chunk.isEmpty {
             let data = PCM.data(chunk[...])
-            DispatchQueue.main.async { [weak self] in self?.onChunk?(data, false) }
+            DispatchQueue.main.async { [weak self] in self?.onChunk?(data, false, false) }
         }
         chunk = []
     }
@@ -360,7 +362,7 @@ final class ConversationModel {
     /// Listening stopped with Soniox: its sessions settle what they heard, and their last words and
     /// translations still come in, two seconds at most (they were lost when the sessions closed at
     /// once). The sides whose sessions have answered.
-    @ObservationIgnored private var draining = false
+    private var draining = false
     @ObservationIgnored private var settledAll: Set<Bool> = []
     @ObservationIgnored private var drained: Set<Bool> = []
     @ObservationIgnored private var drainTask: Task<Void, Never>?
@@ -378,6 +380,8 @@ final class ConversationModel {
     @ObservationIgnored private var sonioxEntries: [Bool: [Int: UUID]] = [:]
     /// Seconds of sound sent to each Soniox session (true: the others'), for how far it lags.
     @ObservationIgnored private var sonioxSent: [Bool: Double] = [:]
+    /// When the last of it was sent (`Self.now`'s clock).
+    @ObservationIgnored private var sonioxSentAt: [Bool: Double] = [:]
     /// Entries already read aloud: one read from Soniox's translation is not read again for GPT's.
     @ObservationIgnored private var voiced: Set<UUID> = []
     /// Counts the others' sentences queued to be read, so one can tell how many wait behind it.
@@ -501,7 +505,7 @@ final class ConversationModel {
         listener.onUtterance = { [weak self] utterance in self?.heard(utterance) }
         listener.onMine = { [weak self] samples, first, last in self?.said(samples, first: first, last: last) }
         listener.onLevel = { [weak self] level, speaking in self?.heard(level: level, speaking: speaking) }
-        listener.onChunk = { [weak self] data, speech in self?.stream(data, speech: speech) }
+        listener.onChunk = { [weak self] data, speech, audible in self?.stream(data, speech: speech, audible: audible) }
         self.listener = listener
         audio.onSamples = Listener.sink(listener)
         do {
@@ -621,6 +625,13 @@ final class ConversationModel {
             if engine == .soniox {
                 openSonioxPartner()
                 myVoice.began(at: trails[true]?.end ?? 0)
+                // Whoever spoke in the room has stopped: their sentence ends now, as at Soniox's end of a
+                // sentence, which it does not send while the user talks on.
+                if sonioxUsesGPT, var room = transcripts[true] {
+                    let finished = room.endHere()
+                    transcripts[true] = room
+                    for sentence in finished { finishSentence(sentence, fromOthers: true) }
+                }
             }
         } else if engine == .live {
             // The sound said just before the button went up, then a moment of silence lets the last
@@ -1259,11 +1270,11 @@ final class ConversationModel {
     /// down (and a moment after, for the sound still on its way), everyone else's otherwise. Dịch
     /// liền's room session gets silence meanwhile, so it finishes what it was saying, and is not sent
     /// a quiet room (it is paid by the minute sent, 2 USD an hour). Soniox's room session hears
-    /// everything (0.18 USD an hour), the user's turns too, without the user's voice (`myVoice`): a
-    /// quiet or far voice the level meter took for the room, the first syllable after a pause, a
-    /// partner answering while the user speaks, are never lost, and Soniox hears for itself where a
-    /// sentence ends.
-    private func stream(_ data: Data, speech: Bool) {
+    /// everything (0.18 USD an hour), with GPT the user's turns too, without the user's voice
+    /// (`myVoice`): a quiet or far voice the level meter took for the room, the first syllable after a
+    /// pause, a partner answering while the user speaks, are never lost, and Soniox hears for itself
+    /// where a sentence ends.
+    private func stream(_ data: Data, speech: Bool, audible: Bool) {
         guard running || draining, engine.streams else { return }
         let silent = Data(count: data.count)
         let mine = talking || Date() < mineTailUntil
@@ -1276,10 +1287,15 @@ final class ConversationModel {
         // is its Vietnamese (Đọc lại) when no echo cancelling takes it out.
         let phoneSpeaks = playingMine > 0 || (playingAloud > 0 && !echoCancelling)
         if engine == .soniox {
-            sendOthers(phoneSpeaks ? silent : data)
+            // Without GPT, Soniox's own translation of a sentence comes after its end, which Soniox sends
+            // only after a quiet moment: the room is sent silence during the user's turn, as before.
+            sendOthers(phoneSpeaks || (mine && !sonioxUsesGPT) ? silent : data)
         } else {
+            // A sound only some way above the room's noise may be what echo cancelling left of the
+            // phone's own voice: sent on only while the phone is silent.
             let quiet = mine || phoneSpeaks
-            for chunk in othersGate.feed(quiet ? silent : data, speech: speech && !quiet) { sendOthers(chunk) }
+            let voice = speech || (audible && playingAloud == 0)
+            for chunk in othersGate.feed(quiet ? silent : data, speech: voice && !quiet) { sendOthers(chunk) }
         }
     }
 
@@ -1290,6 +1306,7 @@ final class ConversationModel {
             guard let session = sonioxToVietnamese else { return }
             session.send(audio: chunk)
             sonioxSent[true, default: 0] += PCM.seconds(chunk)
+            sonioxSentAt[true] = Self.now
         } else {
             guard let session = liveToVietnamese else { return }
             session.send(audio: chunk)
@@ -1303,6 +1320,7 @@ final class ConversationModel {
             guard let session = sonioxToPartner else { return }
             session.send(audio: chunk)
             sonioxSent[false, default: 0] += PCM.seconds(chunk)
+            sonioxSentAt[false] = Self.now
         } else {
             guard let session = liveToPartner else { return }
             session.send(audio: chunk)
@@ -1530,6 +1548,9 @@ final class ConversationModel {
             self.soniox(event, from: session)
         }
         sonioxSent[room] = 0
+        sonioxSentAt[room] = nil
+        // Soniox numbers a new session's speakers anew.
+        if room { myVoice.newSession() }
         session.open()
         // Opened again after a drop: sent at once what the one before had not settled, and what was
         // said meanwhile.
@@ -1542,7 +1563,10 @@ final class ConversationModel {
                 sonioxSent[room, default: 0] += PCM.seconds(chunk.data)
                 unbilledLive += PCM.seconds(chunk.data)
             }
-            if !missed.isEmpty { log(nil, "Soniox nối lại: gửi lại \(SpeedLog.seconds(trail.end - (origins[room] ?? 0))) tiếng chưa chốt") }
+            if !missed.isEmpty {
+                sonioxSentAt[room] = Self.now
+                log(nil, "Soniox nối lại: gửi lại \(SpeedLog.seconds(trail.end - (origins[room] ?? 0))) tiếng chưa chốt")
+            }
         } else {
             origins[room] = trail.end
         }
@@ -1586,6 +1610,8 @@ final class ConversationModel {
         case .tokens(let tokens):
             liveRetries = 0
             if problem?.hasPrefix("Mất kết nối") == true { problem = nil }
+            // Nothing new, nothing guessed to take back.
+            if tokens.isEmpty, transcripts[fromOthers]?.showsGuess != true { return }
             var transcript = transcripts[fromOthers] ?? newTranscript(target: session.target)
             let heard = fromOthers ? myVoice.filter(tokens, origin: origins[true] ?? 0) : tokens
             let finished = transcript.take(heard)
@@ -1606,7 +1632,15 @@ final class ConversationModel {
             showPreviews(transcript.previews, fromOthers: fromOthers)
             let current = transcript.current
             // Cut by GPT's sentences, a piece of translation no sentence took is not shown on its own.
-            if transcript.splits ? !current.text.isEmpty : !current.isEmpty { showSentence(current, fromOthers: fromOthers) }
+            if transcript.splits ? !current.text.isEmpty : !current.isEmpty {
+                showSentence(current, fromOthers: fromOthers)
+            } else if let caption = captions[fromOthers],
+                      entries.first(where: { $0.id == caption.id })?.state == .hearing {
+                // Words guessed, then taken back (or taken out as the user's): nothing of them is kept.
+                captions[fromOthers] = nil
+                heardTimes[caption.id] = nil
+                remove(caption.id)
+            }
         case .finished:
             break
         case .failed(let code, let message):
@@ -1689,9 +1723,10 @@ final class ConversationModel {
     }
 
     /// When a Soniox sentence was said (`Self.now`'s clock), from where its words are in the sound
-    /// sent: the sound goes as it is heard, so the end of what was sent is now.
+    /// sent: the sound goes as it is heard, so the end of what was sent was said when it was sent
+    /// (after Stop, nothing more is).
     private func saidTime(_ sentence: SonioxTranscript.Sentence, fromOthers: Bool) -> (from: Double, to: Double) {
-        let now = Self.now
+        let now = sonioxSentAt[fromOthers] ?? Self.now
         let sent = sonioxSent[fromOthers] ?? 0
         let to = sentence.endMs.map { now - (sent - Double($0) / 1000) } ?? now
         let from = sentence.startMs.map { now - (sent - Double($0) / 1000) } ?? to - 3
@@ -1825,14 +1860,20 @@ final class ConversationModel {
         return note
     }
 
-    /// A sentence Soniox ended but whose translation never came, one paused without a full stop
-    /// whose speaker says nothing more, or one Soniox stopped sending words for (the connection
-    /// hung): finished with what is known, after a moment.
+    /// A sentence Soniox ended but whose translation never came, one paused without a full stop (or
+    /// said before the user began to speak) whose speaker says nothing more, or one Soniox stopped
+    /// sending words for (the connection hung): finished with what is known, after a moment.
     private func expireSentences() {
+        let turn = talking || Date() < mineTailUntil
         for (fromOthers, current) in captions {
             let quiet = Date().timeIntervalSince(current.last)
             let transcript = transcripts[fromOthers]
-            let wait: Double = transcript?.ended != true ? 8 : transcript?.splits == true ? Self.pauseEnds : 2
+            let splits = transcript?.splits == true
+            // While the user speaks, the room's Soniox hears their turn and sends no end of sentence:
+            // the room's sentence ends after the quiet moment that ends a pause. Not while its words are
+            // still guessed (they settle first).
+            let paused = transcript?.ended == true || (fromOthers && turn && splits)
+            let wait: Double = !paused || transcript?.hasGuess == true ? 8 : splits ? Self.pauseEnds : 2
             guard quiet >= wait else { continue }
             if let sentence = transcripts[fromOthers]?.finish() {
                 finishSentence(sentence, fromOthers: fromOthers)

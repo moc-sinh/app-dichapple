@@ -446,8 +446,8 @@ class ConversationPartsTest {
         c.check(SonioxEvent.parse("""{"tokens":[],"finished":true}""") == listOf(SonioxEvent.Finished), "finished")
         c.check(SonioxEvent.parse("""{"error_code":401,"error_message":"Invalid API key."}""") ==
             listOf(SonioxEvent.Failed(401, "Invalid API key.")), "a wrong key")
-        c.check(SonioxEvent.parse("""{"tokens":[],"total_audio_proc_ms":100}""").isEmpty() && SonioxEvent.parse("not json").isEmpty(),
-            "nothing new, nothing told")
+        c.check(SonioxEvent.parse("""{"tokens":[],"total_audio_proc_ms":100}""") == listOf(SonioxEvent.Tokens(emptyList())) &&
+            SonioxEvent.parse("not json").isEmpty(), "an empty list is told (Soniox's guess taken back), garbage is not")
 
         val config = Json.parseToJsonElement(SonioxEvent.configMessage("k", "stt-rt-v5", "vi", listOf("zh", "vi"),
             listOf("报价"), listOf("报价" to "báo giá"))).jsonObject
@@ -589,6 +589,42 @@ class ConversationPartsTest {
         c.check(voices.filter(listOf(voiced("好的", "3", "zh", 14.0)), 0.0).size == 1, "after it, everyone passes")
         c.check(voices.filter(listOf(voiced("vâng", "2", "vi", 1.5)), 0.0).size == 1 &&
             voices.filter(listOf(voiced("vâng", "2", "vi", 1.5)), 10.0).isEmpty(), "a session opened again: its times count from where its sound begins")
+        // A partner's word in Vietnamese in a turn ("vâng") does not make them the user for the rest of the meeting;
+        // a voice heard saying one word in another language is not yet known for a partner's.
+        val vang = MyVoiceFilter()
+        vang.filter(listOf(voiced("这个价格可以吗", "1", "zh", 1.0), voiced("OK", "5", "en", 3.0)), 0.0)
+        vang.began(10.0)
+        vang.filter(listOf(voiced("vâng", "1", "vi", 10.2)), 0.0)
+        c.check(vang.filter(listOf(voiced("等一下", "1", "zh", 11.0)), 0.0).size == 1, "a partner's 'vâng' in a turn: still a partner")
+        c.check(vang.filter(listOf(voiced("deal", "5", "en", 11.5)), 0.0).isEmpty(), "one English word outside the turns: not yet a partner")
+        vang.ended(12.0)
+        vang.began(20.0)
+        c.check(vang.filter(listOf(voiced("价格不能再低了", "1", "zh", 21.0)), 0.0).size == 1, "in a later turn too")
+        vang.filter(listOf(voiced("Dạ bên em đồng ý với giá này", "1", "vi", 22.0)), 0.0)
+        c.check(vang.filter(listOf(voiced("OK", "1", "en", 23.0)), 0.0).isEmpty(), "the user's own voice, whatever number it had")
+        vang.newSession()
+        vang.filter(listOf(voiced("好的", "3", "zh", 1.0)), 30.0)
+        vang.began(35.0)
+        c.check(vang.filter(listOf(voiced("等一下", "1", "zh", 6.0)), 30.0).isEmpty(), "after it is opened again, numbers known before mean nothing")
+        // A pause is not ended while the speaker's next words are still Soniox's guess.
+        val resumed = SonioxTranscript("vi").apply { splits = true }
+        resumed.take(listOf(spoken("如果你们订五百台，", "1"), spoken("<end>", "")))
+        c.check(!resumed.hasGuess, "paused, nothing guessed")
+        resumed.take(listOf(spoken("我们可以", "1", final = false)))
+        c.check(resumed.ended && resumed.hasGuess && resumed.showsGuess, "the speaker goes on: guessed")
+        c.check(resumed.take(listOf(spoken("我们可以便宜。", "1"), spoken("<end>", ""))).map { it.text } == listOf("如果你们订五百台，我们可以便宜。"),
+            "settled: one sentence")
+        resumed.take(listOf(spoken("嗯", "2", final = false)))
+        c.check(resumed.take(emptyList()).isEmpty() && resumed.current.isEmpty && !resumed.showsGuess, "a guess taken back is gone")
+        // The user begins to speak: the room's sentence ends as at Soniox's end of a sentence.
+        val pressed = SonioxTranscript("vi").apply { splits = true }
+        pressed.take(listOf(spoken("这个价格可以吗？", "1")))
+        c.check(pressed.endHere().map { it.text } == listOf("这个价格可以吗？"), "a question ends as the user begins to speak")
+        pressed.take(listOf(spoken("那个", "2")))
+        c.check(pressed.endHere().isEmpty() && pressed.ended, "without a full stop: a pause")
+        val stillGuessed = SonioxTranscript("vi").apply { splits = true }
+        stillGuessed.take(listOf(spoken("这个价格", "1"), spoken("可以吗？", "1", final = false)))
+        c.check(stillGuessed.endHere().isEmpty() && !stillGuessed.ended, "words still guessed: they settle first")
         val shortPhrase = SonioxTranscript("vi").apply { splits = true }
         shortPhrase.take(listOf(spoken("好", "1"), spoken("OK", "1", "en"), spoken("的", "1")))
         c.check(shortPhrase.current.text == "好OK的", "a word of English in a short phrase stays in it")

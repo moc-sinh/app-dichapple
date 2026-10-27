@@ -113,8 +113,11 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
     /** What the user said while holding the button: the whole turn, or a long turn piece by piece. */
     var onMine: ((samples: ShortArray, first: Boolean, last: Boolean) -> Unit)? = null
     var onLevel: ((Double, Boolean) -> Unit)? = null
-    /** A tenth of a second of sound, and whether someone is speaking in it. */
-    var onChunk: ((ByteArray, Boolean) -> Unit)? = null
+    /**
+     * A tenth of a second of sound, whether someone is speaking in it, and whether a sound some way above
+     * the room's noise is (a far or quiet voice, or what echo cancelling left of the phone's).
+     */
+    var onChunk: ((ByteArray, Boolean, Boolean) -> Unit)? = null
 
     companion object {
         private const val RECENT_SAMPLES = PCM.RATE * 3 / 10
@@ -134,12 +137,13 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
         if (recent.size > RECENT_SAMPLES) recent.removeFirst(recent.size - RECENT_SAMPLES)
         if (streams) {
             chunk.append(samples)
-            val speech = mine != null || segmenter.speaking || segmenter.audible
+            val speech = mine != null || segmenter.speaking
+            val audible = segmenter.audible
             val tenth = PCM.RATE / 10
             while (chunk.size >= tenth) {
                 val data = PCM.data(chunk.array, 0, tenth)
                 chunk.removeFirst(tenth)
-                post { onChunk?.invoke(data, speech) }
+                post { onChunk?.invoke(data, speech, audible) }
             }
         }
         sinceLevel += samples.size
@@ -190,7 +194,7 @@ class Listener(silence: Double, val streams: Boolean, private val post: (() -> U
         // The last moment of sound goes too: it may end the last word.
         if (streams && chunk.size > 0) {
             val data = PCM.data(chunk.array, 0, chunk.size)
-            post { onChunk?.invoke(data, false) }
+            post { onChunk?.invoke(data, false, false) }
         }
         chunk.clear()
     }
@@ -552,6 +556,8 @@ class ConversationModel(
     private val sonioxEntries = HashMap<Boolean, HashMap<Int, String>>()
     /** Seconds of sound sent to each Soniox session (true: the others'), for how far it lags. */
     private val sonioxSent = HashMap<Boolean, Double>()
+    /** When the last of it was sent (`now()`'s clock). */
+    private val sonioxSentAt = HashMap<Boolean, Double>()
     /** Entries already read aloud: one read from Soniox's translation is not read again for GPT's. */
     private val voiced = HashSet<String>()
     /** Counts the others' sentences queued to be read, so one can tell how many wait behind it. */
@@ -648,7 +654,7 @@ class ConversationModel(
             listener.onUtterance = { heard(it) }
             listener.onMine = { samples, first, last -> said(samples, first, last) }
             listener.onLevel = { level, speaking -> heard(level, speaking) }
-            listener.onChunk = { data, speech -> stream(data, speech) }
+            listener.onChunk = { data, speech, audible -> stream(data, speech, audible) }
             this.listener = listener
             audio.onSamples = { listener.take(it) }
             try {
@@ -774,6 +780,9 @@ class ConversationModel(
             if (engine == Engine.SONIOX) {
                 openSonioxPartner()
                 myVoice.began(trails[true]?.end ?: 0.0)
+                // Whoever spoke in the room has stopped: their sentence ends now, as at Soniox's end of a
+                // sentence, which it does not send while the user talks on.
+                if (sonioxUsesGPT) transcripts[true]?.endHere()?.forEach { finishSentence(it, true) }
             }
         } else if (engine == Engine.LIVE) {
             // The sound said just before the button went up, then a moment of silence lets the last words through.
@@ -1400,12 +1409,12 @@ class ConversationModel(
      * The microphone's sound goes to the session for whoever speaks: the user's while the button is down
      * (and a moment after, for the sound still on its way), everyone else's otherwise. Dịch liền's room
      * session gets silence meanwhile, so it finishes what it was saying, and is not sent a quiet room (paid
-     * by the minute sent, 2 USD an hour). Soniox's room session hears everything (0.18 USD an hour), the
-     * user's turns too, without the user's voice (`myVoice`): a quiet or far voice the level meter took for
+     * by the minute sent, 2 USD an hour). Soniox's room session hears everything (0.18 USD an hour), with
+     * GPT the user's turns too, without the user's voice (`myVoice`): a quiet or far voice the level meter took for
      * the room, the first syllable after a pause, a partner answering while the user speaks, are never
      * lost, and Soniox hears for itself where a sentence ends.
      */
-    private fun stream(data: ByteArray, speech: Boolean) {
+    private fun stream(data: ByteArray, speech: Boolean, audible: Boolean) {
         if (!(running || draining) || !engine.streams) return
         val silent = ByteArray(data.size)
         val mine = talking || millis() < mineTailUntil
@@ -1418,10 +1427,15 @@ class ConversationModel(
         // Vietnamese (Đọc lại) when no echo cancelling takes it out.
         val phoneSpeaks = playingMine > 0 || (playingAloud > 0 && !echoCancelling)
         if (engine == Engine.SONIOX) {
-            sendOthers(if (phoneSpeaks) silent else data)
+            // Without GPT, Soniox's own translation of a sentence comes after its end, which Soniox sends only
+            // after a quiet moment: the room is sent silence during the user's turn, as before.
+            sendOthers(if (phoneSpeaks || (mine && !sonioxUsesGPT)) silent else data)
         } else {
+            // A sound only some way above the room's noise may be what echo cancelling left of the phone's
+            // own voice: sent on only while the phone is silent.
             val quiet = mine || phoneSpeaks
-            for (chunk in othersGate.feed(if (quiet) silent else data, speech && !quiet)) sendOthers(chunk)
+            val voice = speech || (audible && playingAloud == 0)
+            for (chunk in othersGate.feed(if (quiet) silent else data, voice && !quiet)) sendOthers(chunk)
         }
     }
 
@@ -1431,6 +1445,7 @@ class ConversationModel(
             // While it is opened again, the sound waits in the trail.
             (sonioxToVietnamese ?: return).send(chunk)
             sonioxSent[true] = (sonioxSent[true] ?: 0.0) + PCM.seconds(chunk)
+            sonioxSentAt[true] = now()
         } else {
             (liveToVietnamese ?: return).send(chunk)
         }
@@ -1442,6 +1457,7 @@ class ConversationModel(
             trails.getOrPut(false) { SoundTrail() }.add(chunk)
             (sonioxToPartner ?: return).send(chunk)
             sonioxSent[false] = (sonioxSent[false] ?: 0.0) + PCM.seconds(chunk)
+            sonioxSentAt[false] = now()
         } else {
             (liveToPartner ?: return).send(chunk)
         }
@@ -1693,6 +1709,9 @@ class ConversationModel(
         val session = SonioxSession(key, target, hints, settings.glossary, scope, speakers = room, about = sonioxAbout, url = sonioxUrl)
         session.onEvent = { soniox(it, session) }
         sonioxSent[room] = 0.0
+        sonioxSentAt.remove(room)
+        // Soniox numbers a new session's speakers anew.
+        if (room) myVoice.newSession()
         session.open()
         // Opened again after a drop: sent at once what the one before had not settled, and what was said meanwhile.
         val trail = trails[room]
@@ -1705,7 +1724,10 @@ class ConversationModel(
                 sonioxSent[room] = (sonioxSent[room] ?: 0.0) + PCM.seconds(chunk.data)
                 unbilledLive += PCM.seconds(chunk.data)
             }
-            if (missed.isNotEmpty()) log(null, "Soniox nối lại: gửi lại ${SpeedLog.seconds(trail.end - (origins[room] ?: 0.0))} tiếng chưa chốt")
+            if (missed.isNotEmpty()) {
+                sonioxSentAt[room] = now()
+                log(null, "Soniox nối lại: gửi lại ${SpeedLog.seconds(trail.end - (origins[room] ?: 0.0))} tiếng chưa chốt")
+            }
         } else {
             origins[room] = trail?.end ?: 0.0
         }
@@ -1751,6 +1773,8 @@ class ConversationModel(
             is SonioxEvent.Tokens -> {
                 liveRetries = 0
                 if (problem?.startsWith("Mất kết nối") == true) problem = null
+                // Nothing new, nothing guessed to take back.
+                if (event.tokens.isEmpty() && transcripts[fromOthers]?.showsGuess != true) return
                 val transcript = transcripts.getOrPut(fromOthers) { newTranscript(session.target) }
                 val heard = if (fromOthers) myVoice.filter(event.tokens, origins[true] ?: 0.0) else event.tokens
                 val finished = transcript.take(heard)
@@ -1760,7 +1784,17 @@ class ConversationModel(
                 showPreviews(transcript.previews, fromOthers)
                 val current = transcript.current
                 // Cut by GPT's sentences, a piece of translation no sentence took is not shown on its own.
-                if (if (transcript.splits) current.text.isNotEmpty() else !current.isEmpty) showSentence(current, fromOthers)
+                if (if (transcript.splits) current.text.isNotEmpty() else !current.isEmpty) {
+                    showSentence(current, fromOthers)
+                } else {
+                    // Words guessed, then taken back (or taken out as the user's): nothing of them is kept.
+                    val caption = captions[fromOthers]
+                    if (caption != null && entries.firstOrNull { it.id == caption.id }?.state == State.Hearing) {
+                        captions.remove(fromOthers)
+                        heardTimes.remove(caption.id)
+                        remove(caption.id)
+                    }
+                }
                 // Stopped: this side has answered once all it heard is settled and nothing of it is left.
                 if (draining) {
                     if (event.tokens.any { it.isFin }) settledAll.add(fromOthers)
@@ -1857,10 +1891,11 @@ class ConversationModel(
 
     /**
      * When a Soniox sentence was said (`now()`'s clock), from where its words are in the sound sent: the
-     * sound goes as it is heard, so the end of what was sent is now.
+     * sound goes as it is heard, so the end of what was sent was said when it was sent (after Stop, nothing
+     * more is).
      */
     private fun saidTime(sentence: SonioxTranscript.Sentence, fromOthers: Boolean): Pair<Double, Double> {
-        val now = now()
+        val now = sonioxSentAt[fromOthers] ?: now()
         val sent = sonioxSent[fromOthers] ?: 0.0
         val to = sentence.endMs?.let { now - (sent - it / 1000.0) } ?: now
         val from = sentence.startMs?.let { now - (sent - it / 1000.0) } ?: (to - 3)
@@ -2008,15 +2043,21 @@ class ConversationModel(
     }
 
     /**
-     * A sentence Soniox ended but whose translation never came, one paused without a full stop whose
-     * speaker says nothing more, or one Soniox stopped sending words for (the connection hung): finished
-     * with what is known, after a moment.
+     * A sentence Soniox ended but whose translation never came, one paused without a full stop (or said
+     * before the user began to speak) whose speaker says nothing more, or one Soniox stopped sending words for
+     * (the connection hung): finished with what is known, after a moment.
      */
     private fun expireSentences() {
+        val turn = talking || millis() < mineTailUntil
         for ((fromOthers, current) in captions.entries.toList()) {
             val quiet = millis() - current.last
             val transcript = transcripts[fromOthers]
-            val wait = if (transcript?.ended != true) 8000L else if (transcript.splits) PAUSE_ENDS else 2000L
+            val splits = transcript?.splits == true
+            // While the user speaks, the room's Soniox hears their turn and sends no end of sentence: the
+            // room's sentence ends after the quiet moment that ends a pause. Not while its words are still
+            // guessed (they settle first).
+            val paused = transcript?.ended == true || (fromOthers && turn && splits)
+            val wait = if (!paused || transcript?.hasGuess == true) 8000L else if (splits) PAUSE_ENDS else 2000L
             if (quiet < wait) continue
             val sentence = transcripts[fromOthers]?.finish()
             if (sentence != null) {

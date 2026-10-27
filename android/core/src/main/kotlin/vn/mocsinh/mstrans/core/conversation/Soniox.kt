@@ -63,7 +63,8 @@ sealed class SonioxEvent {
                 return listOf(Failed(o["error_code"].int() ?: 0, o["error_message"].str() ?: ""))
             }
             val events = ArrayList<SonioxEvent>()
-            val tokens = (o["tokens"].arr() ?: emptyList()).mapNotNull { element ->
+            val list = o["tokens"].arr()
+            val tokens = (list ?: emptyList()).mapNotNull { element ->
                 val token = element.obj() ?: return@mapNotNull null
                 val t = token["text"].str()
                 if (t.isNullOrEmpty()) return@mapNotNull null
@@ -74,8 +75,10 @@ sealed class SonioxEvent {
                     startMs = token["start_ms"].int(), endMs = token["end_ms"].int(),
                 )
             }
-            if (tokens.isNotEmpty()) events.add(Tokens(tokens))
-            if (o["finished"].bool() == true) events.add(Finished)
+            // An empty list too: Soniox's guesses, sent again whole in every message, are gone (taken back).
+            val finished = o["finished"].bool() == true
+            if (list != null && !(tokens.isEmpty() && finished)) events.add(Tokens(tokens))
+            if (finished) events.add(Finished)
             return events
         }
 
@@ -346,6 +349,28 @@ class SonioxTranscript(
             sentence.copy(translation = translation.trim())
         }
 
+    /** Something shown is Soniox's guess (words or translation): a message without it takes it back. */
+    val showsGuess: Boolean get() = !guess.isEmpty || awaitingGuess.isNotEmpty()
+
+    /**
+     * Words of the sentence being said are still Soniox's guess: its speaker goes on (or someone else
+     * begins). A pause is not ended until they settle: ended with them, the words came again as the next
+     * sentence once settled.
+     */
+    val hasGuess: Boolean get() = guess.text.isNotBlank()
+
+    /**
+     * The user began to speak (Tôi nói): the room's speaker has stopped, as at Soniox's end of a sentence,
+     * which Soniox does not send while the user talks on (it hears their turn too). Not while words of it
+     * are still guessed: they settle first.
+     */
+    fun endHere(): List<Sentence> {
+        if (!splits || hasGuess) return emptyList()
+        val finished = ArrayList<Sentence>()
+        endSpoken(false, finished)
+        return finished
+    }
+
     /** Ends the sentence being said, with what is known of it (null when nothing is). */
     fun finish(): Sentence? {
         // A word or two of another speaker at its very end stay in it.
@@ -549,17 +574,23 @@ class SonioxTranscript(
 /**
  * The user's own voice in what the room's Soniox session hears. The room is listened to during the
  * user's turns (Tôi nói) too, so a partner who answers meanwhile, or finishes a sentence as the button
- * goes down, is not lost; the user's words, which their own session translates, are taken out. In a
- * turn only a voice known to be a partner's passes: one Soniox heard before, outside the user's turns,
- * in another language than Vietnamese, and never in Vietnamese in a turn.
+ * goes down, is not lost; the user's words, which their own session translates, are taken out. In a turn
+ * only a voice known to be a partner's passes: one heard saying a few syllables in another language than
+ * Vietnamese outside the user's turns, more than it said in Vietnamese in them (a partner's "vâng", or the
+ * user's first word given a partner's number, no longer made that partner the user for the rest of the
+ * meeting).
  */
 class MyVoiceFilter {
     private class Turn(val from: Double, var to: Double = Double.POSITIVE_INFINITY)
 
     /** The user's turns, in seconds of the room's sound (the last one open while it lasts). */
     private val turns = ArrayList<Turn>()
-    private val mine = HashSet<String>()
-    private val theirs = HashSet<String>()
+    /**
+     * Syllables each of the room's voices (Soniox's speaker numbers) said in Vietnamese in the user's
+     * turns, and in another language outside them.
+     */
+    private val mine = HashMap<String, Int>()
+    private val theirs = HashMap<String, Int>()
     /** The last settled word was taken out: the settled translation after it goes too. */
     private var droppingSettled = false
 
@@ -571,6 +602,13 @@ class MyVoiceFilter {
 
     fun ended(at: Double) {
         for (turn in turns) if (turn.to == Double.POSITIVE_INFINITY) turn.to = at
+    }
+
+    /** The room's session was opened again: Soniox numbers its speakers anew. */
+    fun newSession() {
+        mine.clear()
+        theirs.clear()
+        droppingSettled = false
     }
 
     /**
@@ -608,24 +646,27 @@ class MyVoiceFilter {
             learn(token)
             return false
         }
-        if (token.isFinal && token.speaker.isNotEmpty() && token.language == Language.vietnamese.code) {
-            mine.add(token.speaker)
-            theirs.remove(token.speaker)
+        if (token.language == Language.vietnamese.code) {
+            if (token.isFinal && token.speaker.isNotEmpty()) mine.merge(token.speaker, TranscriptFilter.syllableCount(token.text), Int::plus)
+            return true
         }
-        return token.language == Language.vietnamese.code || token.speaker !in theirs
+        val said = theirs[token.speaker] ?: 0
+        return token.speaker.isEmpty() || said < KNOWN || said <= (mine[token.speaker] ?: 0)
     }
 
     /** A word outside the user's turns: a voice heard in another language is a partner's. */
     private fun learn(token: SonioxToken) {
         if (!token.isFinal || token.isTranslation || token.speaker.isEmpty() || token.language.isEmpty() ||
-            token.language == Language.vietnamese.code || token.speaker in mine
+            token.language == Language.vietnamese.code
         ) return
-        theirs.add(token.speaker)
+        theirs.merge(token.speaker, TranscriptFilter.syllableCount(token.text), Int::plus)
     }
 
     companion object {
         /** Sound around a turn that is still the user's: the button pressed a moment after they began, and how far Soniox's times are off. */
         const val MARGIN = 0.3
+        /** Syllables a voice says in another language outside the user's turns before it is a partner's. */
+        const val KNOWN = 3
     }
 }
 

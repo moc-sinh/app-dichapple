@@ -47,7 +47,8 @@ enum SonioxEvent: Equatable {
             return [.failed(code: code, message: object["error_message"] as? String ?? "")]
         }
         var events: [SonioxEvent] = []
-        let tokens = (object["tokens"] as? [[String: Any]] ?? []).compactMap { token -> SonioxToken? in
+        let list = object["tokens"] as? [[String: Any]]
+        let tokens = (list ?? []).compactMap { token -> SonioxToken? in
             guard let text = token["text"] as? String, !text.isEmpty else { return nil }
             let speaker = token["speaker"] as? String ?? (token["speaker"] as? Int).map(String.init) ?? ""
             return SonioxToken(text: text, isFinal: token["is_final"] as? Bool ?? false,
@@ -55,7 +56,8 @@ enum SonioxEvent: Equatable {
                                language: token["language"] as? String ?? "", speaker: speaker,
                                startMs: token["start_ms"] as? Int, endMs: token["end_ms"] as? Int)
         }
-        if !tokens.isEmpty { events.append(.tokens(tokens)) }
+        // An empty list too: Soniox's guesses, sent again whole in every message, are gone (taken back).
+        if list != nil, !(tokens.isEmpty && object["finished"] as? Bool == true) { events.append(.tokens(tokens)) }
         if object["finished"] as? Bool == true { events.append(.finished) }
         return events
     }
@@ -269,6 +271,24 @@ struct SonioxTranscript {
         }
     }
 
+    /// Something shown is Soniox's guess (words or translation): a message without it takes it back.
+    var showsGuess: Bool { !guess.isEmpty || !awaitingGuess.isEmpty }
+
+    /// Words of the sentence being said are still Soniox's guess: its speaker goes on (or someone else
+    /// begins). A pause is not ended until they settle: ended with them, the words came again as the
+    /// next sentence once settled.
+    var hasGuess: Bool { !guess.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// The user began to speak (Tôi nói): the room's speaker has stopped, as at Soniox's end of a
+    /// sentence, which Soniox does not send while the user talks on (it hears their turn too). Not while
+    /// words of it are still guessed: they settle first.
+    mutating func endHere() -> [Sentence] {
+        guard splits, !hasGuess else { return [] }
+        var finished: [Sentence] = []
+        endSpoken(fin: false, into: &finished)
+        return finished
+    }
+
     /// Ends the sentence being said, with what is known of it (nil when nothing is).
     mutating func finish() -> Sentence? {
         // A word or two of another speaker at its very end stay in it.
@@ -464,18 +484,24 @@ struct SonioxTranscript {
 /// The user's own voice in what the room's Soniox session hears. The room is listened to during the
 /// user's turns (Tôi nói) too, so a partner who answers meanwhile, or finishes a sentence as the
 /// button goes down, is not lost; the user's words, which their own session translates, are taken
-/// out. In a turn only a voice known to be a partner's passes: one Soniox heard before, outside the
-/// user's turns, in another language than Vietnamese, and never in Vietnamese in a turn.
+/// out. In a turn only a voice known to be a partner's passes: one heard saying a few syllables in
+/// another language than Vietnamese outside the user's turns, more than it said in Vietnamese in
+/// them (a partner's "vâng", or the user's first word given a partner's number, no longer made that
+/// partner the user for the rest of the meeting).
 struct MyVoiceFilter {
     /// The user's turns, in seconds of the room's sound (the last one open while it lasts).
     private(set) var turns: [(from: Double, to: Double)] = []
-    private var mine: Set<String> = []
-    private var theirs: Set<String> = []
+    /// Syllables each of the room's voices (Soniox's speaker numbers) said in Vietnamese in the user's
+    /// turns, and in another language outside them.
+    private var mine: [String: Int] = [:]
+    private var theirs: [String: Int] = [:]
     /// The last settled word was taken out: the settled translation after it goes too.
     private var droppingSettled = false
     /// Sound around a turn that is still the user's: the button pressed a moment after they began,
     /// and how far Soniox's times are off.
     static let margin = 0.3
+    /// Syllables a voice says in another language outside the user's turns before it is a partner's.
+    static let known = 3
 
     mutating func began(at: Double) {
         guard turns.last?.to != .infinity else { return }
@@ -485,6 +511,13 @@ struct MyVoiceFilter {
 
     mutating func ended(at: Double) {
         for index in turns.indices where turns[index].to == .infinity { turns[index].to = at }
+    }
+
+    /// The room's session was opened again: Soniox numbers its speakers anew.
+    mutating func newSession() {
+        mine = [:]
+        theirs = [:]
+        droppingSettled = false
     }
 
     /// The room's tokens without the user's words said in their turns, and the translation of those
@@ -520,18 +553,21 @@ struct MyVoiceFilter {
             learn(token)
             return false
         }
-        if token.isFinal, !token.speaker.isEmpty, token.language == Language.vietnamese.code {
-            mine.insert(token.speaker)
-            theirs.remove(token.speaker)
+        if token.language == Language.vietnamese.code {
+            if token.isFinal, !token.speaker.isEmpty {
+                mine[token.speaker, default: 0] += TranscriptFilter.syllableCount(token.text)
+            }
+            return true
         }
-        return token.language == Language.vietnamese.code || !theirs.contains(token.speaker)
+        let said = theirs[token.speaker] ?? 0
+        return token.speaker.isEmpty || said < Self.known || said <= mine[token.speaker] ?? 0
     }
 
     /// A word outside the user's turns: a voice heard in another language is a partner's.
     private mutating func learn(_ token: SonioxToken) {
         guard token.isFinal, !token.isTranslation, !token.speaker.isEmpty, !token.language.isEmpty,
-              token.language != Language.vietnamese.code, !mine.contains(token.speaker) else { return }
-        theirs.insert(token.speaker)
+              token.language != Language.vietnamese.code else { return }
+        theirs[token.speaker, default: 0] += TranscriptFilter.syllableCount(token.text)
     }
 }
 

@@ -237,6 +237,29 @@ class ConversationSonioxTest {
             delay(100)
         }
         waitFor("nothing more said: it ends after a quiet moment") { model.entries.last().text == "那个" && model.entries.last().state != State.Hearing }
+        // The speaker goes on after a pause, Soniox settling the new words late: the pause is not ended with them
+        // still guessed (they came again as the next sentence once settled).
+        room.say(word("如果你们订一千台，", "1"), mark("<end>"))
+        waitFor("paused") { model.entries.last().text == "如果你们订一千台，" }
+        repeat(3) {
+            audio.onSamples!!.invoke(tenth)
+            delay(100)
+        }
+        room.say(word("价格", "1", final = false))
+        waitFor("the next words guessed") { model.entries.last().text == "如果你们订一千台，价格" }
+        repeat(16) {
+            audio.onSamples!!.invoke(tenth)
+            delay(100)
+        }
+        assertEquals(State.Hearing, model.entries.last().state, "a pause with the next words still guessed: not ended")
+        room.say(word("价格再低一点。", "1"), mark("<end>"))
+        waitFor("one sentence") { model.entries.last().text == "如果你们订一千台，价格再低一点。" }
+        assertEquals(1, model.entries.count { it.text.contains("价格再低") }, "the words not twice")
+        // A word guessed, then taken back (an empty list): nothing of it is kept.
+        room.say(word("嗯", "2", final = false))
+        waitFor("a guess shows at once") { model.entries.last().text == "嗯" }
+        room.say()
+        waitFor("taken back, it is gone (it was kept as a sentence 8 s later)") { model.entries.none { it.text == "嗯" } }
 
         // GPT's connection stalls: asked again after 2.5 s, the second answer is taken.
         room.say(word("STALL 我们明天发货。", "1"), mark("<end>"))
@@ -262,7 +285,12 @@ class ConversationSonioxTest {
 
         // The user speaks: their own session, settled at once when they let go, translated by the
         // app's model with the meeting as context.
+        // A partner asks, and the user answers at once: the question ends as the button goes down (Soniox sends no
+        // end of sentence while the user talks on: the room's session hears their turn too).
+        room.say(word("交货期多长？", "1"))
+        waitFor("the partner's question") { model.entries.last().text == "交货期多长？" }
         model.talk(true)
+        assertEquals(State.Translating, model.entries.last { it.text == "交货期多长？" }.state, "the partner's question goes to GPT as the user begins")
         val roomBefore = stand.sound[room] ?: 0
         repeat(15) { audio.onSamples!!.invoke(tenth) }
         waitFor("the room's session still hears the room") { (stand.sound[room] ?: 0) - roomBefore >= 15 * 4_800 }
@@ -308,6 +336,11 @@ class ConversationSonioxTest {
         waitFor("the others' words read aloud") {
             model.entries.any { it.text == "我们下周见。" && it.state == State.Done } && audio.played > playedBefore
         }
+        // The microphone's sound goes on meanwhile, as it always does.
+        repeat(3) {
+            audio.onSamples!!.invoke(tenth)
+            delay(50)
+        }
         room.say(word("Hẹn gặp tuần sau.", "4", "vi"), mark("<end>"))
         delay(300)
         assertFalse(model.entries.any { it.text == "Hẹn gặp tuần sau." },
@@ -332,12 +365,32 @@ class ConversationSonioxTest {
         assertTrue(model.speedLogText.contains("gửi lại"), "noted in the speed log")
         again.say(word("很好。", "2"), mark("<end>"))
         waitFor("the words not settled are heard again") { model.entries.last().text == "很好。" }
+        // Soniox numbers the new session's speakers anew: the user is now "1", a partner "2". The user's English word
+        // is not a partner's, and the partner answering during the turn is.
+        again.say(word("好的，没问题。", "2"), mark("<end>"))
+        waitFor("a partner in the new session") { model.entries.last().text == "好的，没问题。" }
+        val turnSound = stand.sound[again] ?: 0
+        model.talk(true)
+        repeat(15) { audio.onSamples!!.invoke(tenth) }
+        waitFor("the turn's sound sent") { (stand.sound[again] ?: 0) - turnSound >= 15 * 4_800 }
+        val anewAt = (stand.sound[again] ?: 0) / 48
+        again.say(word("OK", "1", "en", start = anewAt - 1_400, end = anewAt - 1_200), word(" anh", "1", "vi", start = anewAt - 1_100, end = anewAt - 900),
+            word("等一下，我问一下。", "2", start = anewAt - 800, end = anewAt - 100), mark("<end>"))
+        waitFor("the partner answering during the turn is heard") { model.entries.last().text == "等一下，我问一下。" }
+        assertFalse(model.entries.any { !it.mine && it.text == "OK" }, "the user's own English word is not someone else's")
+        val zhTurn = stand.finalized["zh"] ?: 0
+        partner.say(word("Anh chờ chút", "", "vi", start = 100, end = 1_400))
+        model.talk(false)
+        waitFor("the user's turn settled") { (stand.finalized["zh"] ?: 0) > zhTurn }
+        partner.say(mark("<fin>"))
+        waitFor("the user's sentence translated") { model.entries.last().mine && model.entries.last().state == State.Done }
 
         // Stop while Soniox has not settled the last words: they still come in.
         again.say(word("我们下周", "1"), word("一确认", "1", final = false))
         waitFor("the last words shown") { model.entries.last().text == "我们下周一确认" }
+        val zhBefore = stand.finalized["zh"] ?: 0
         model.stop()
-        waitFor("stopped: Soniox is asked to settle what it heard") { (stand.finalized["vi"] ?: 0) >= 1 && (stand.finalized["zh"] ?: 0) >= 2 }
+        waitFor("stopped: Soniox is asked to settle what it heard") { (stand.finalized["vi"] ?: 0) >= 1 && (stand.finalized["zh"] ?: 0) > zhBefore }
         assertFalse(again in stand.emptied, "and kept open for its answer")
         again.say(word("一确认订单，价格不变。", "1"), mark("<fin>"))
         partner.say(mark("<fin>"))

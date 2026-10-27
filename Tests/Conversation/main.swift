@@ -464,8 +464,8 @@ do {
     check(SonioxEvent.parse(#"{"tokens":[],"finished":true}"#) == [.finished], "finished")
     check(SonioxEvent.parse(#"{"error_code":401,"error_message":"Invalid API key."}"#) == [.failed(code: 401, message: "Invalid API key.")],
           "a wrong key")
-    check(SonioxEvent.parse(#"{"tokens":[],"total_audio_proc_ms":100}"#).isEmpty && SonioxEvent.parse("not json").isEmpty,
-          "nothing new, nothing told")
+    check(SonioxEvent.parse(#"{"tokens":[],"total_audio_proc_ms":100}"#) == [.tokens([])] && SonioxEvent.parse("not json").isEmpty,
+          "an empty list is told (Soniox's guess taken back), garbage is not")
 
     let config = SonioxEvent.configMessage(apiKey: "k", model: "stt-rt-v5", target: "vi", hints: ["zh", "vi"],
                                            terms: ["报价"], pairs: [("报价", "báo giá")], speakers: true)
@@ -639,6 +639,50 @@ do {
     check(voices.filter([voiced("vâng", "2", "vi", at: 1.5)], origin: 0).count == 1
           && voices.filter([voiced("vâng", "2", "vi", at: 1.5)], origin: 10).isEmpty,
           "a session opened again: its times count from where its sound begins")
+    // A partner's word in Vietnamese in a turn ("vâng") does not make them the user for the rest of the
+    // meeting; a voice heard saying one word in another language is not yet known for a partner's.
+    var vâng = MyVoiceFilter()
+    _ = vâng.filter([voiced("这个价格可以吗", "1", "zh", at: 1), voiced("OK", "5", "en", at: 3)], origin: 0)
+    vâng.began(at: 10)
+    _ = vâng.filter([voiced("vâng", "1", "vi", at: 10.2)], origin: 0)
+    check(vâng.filter([voiced("等一下", "1", "zh", at: 11)], origin: 0).count == 1, "a partner's 'vâng' in a turn: still a partner")
+    check(vâng.filter([voiced("deal", "5", "en", at: 11.5)], origin: 0).isEmpty, "one English word outside the turns: not yet a partner")
+    vâng.ended(at: 12)
+    vâng.began(at: 20)
+    check(vâng.filter([voiced("价格不能再低了", "1", "zh", at: 21)], origin: 0).count == 1, "in a later turn too")
+    // A voice that said more in Vietnamese in the turns than in another language outside them is the user's.
+    _ = vâng.filter([voiced("Dạ bên em đồng ý với giá này", "1", "vi", at: 22)], origin: 0)
+    check(vâng.filter([voiced("OK", "1", "en", at: 23)], origin: 0).isEmpty, "the user's own voice, whatever number it had")
+    // The room's session opened again numbers its speakers anew: nobody is known yet.
+    vâng.newSession()
+    _ = vâng.filter([voiced("好的", "3", "zh", at: 1)], origin: 30)
+    vâng.began(at: 35)
+    check(vâng.filter([voiced("等一下", "1", "zh", at: 6)], origin: 30).isEmpty, "after it is opened again, numbers known before mean nothing")
+    // A pause is not ended while the speaker's next words are still Soniox's guess: ended with them,
+    // they came again as the next sentence once settled.
+    var resumed = SonioxTranscript(target: "vi")
+    resumed.splits = true
+    _ = resumed.take([spoken("如果你们订五百台，", "1"), spoken("<end>", "")])
+    check(!resumed.hasGuess, "paused, nothing guessed")
+    _ = resumed.take([spoken("我们可以", "1", final: false)])
+    check(resumed.ended && resumed.hasGuess && resumed.showsGuess, "the speaker goes on: guessed")
+    check(resumed.take([spoken("我们可以便宜。", "1"), spoken("<end>", "")]).map(\.text) == ["如果你们订五百台，我们可以便宜。"],
+          "settled: one sentence")
+    // A guess taken back (an empty list) shows nothing more.
+    _ = resumed.take([spoken("嗯", "2", final: false)])
+    check(resumed.take([]).isEmpty && resumed.current.isEmpty && !resumed.showsGuess, "a guess taken back is gone")
+    // The user begins to speak: the room's sentence ends as at Soniox's end of a sentence (which Soniox
+    // does not send while the user talks on: the room's session hears their turn too).
+    var pressed = SonioxTranscript(target: "vi")
+    pressed.splits = true
+    _ = pressed.take([spoken("这个价格可以吗？", "1")])
+    check(pressed.endHere().map(\.text) == ["这个价格可以吗？"], "a question ends as the user begins to speak")
+    _ = pressed.take([spoken("那个", "2")])
+    check(pressed.endHere().isEmpty && pressed.ended, "without a full stop: a pause")
+    var stillGuessed = SonioxTranscript(target: "vi")
+    stillGuessed.splits = true
+    _ = stillGuessed.take([spoken("这个价格", "1"), spoken("可以吗？", "1", final: false)])
+    check(stillGuessed.endHere().isEmpty && !stillGuessed.ended, "words still guessed: they settle first")
     var short = SonioxTranscript(target: "vi")
     short.splits = true
     _ = short.take([spoken("好", "1"), spoken("OK", "1", language: "en"), spoken("的", "1")])

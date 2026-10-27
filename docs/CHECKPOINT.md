@@ -10,7 +10,7 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 2. Kiểm tra trên Linux trước mọi lần push (cần toolchain `swift-6.1.2-RELEASE-ubuntu24.04`):
    - Bàn phím: lệnh y như bước "Typing tests" trong `.github/workflows/ios.yml`.
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
-     (214 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
+     (226 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
@@ -354,6 +354,23 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   câu kết thúc sau 1,2 s, GPT lỗi rồi hỏi lại, lượt Tôi nói (phòng vẫn nghe, lọc giọng, đuôi 0,35 s), mất kết nối giữa câu,
   dừng khi Soniox chưa trả xong; thử đột biến từng sửa chính đều bị bắt. Android: cùng kiểm tra trong `ConversationPartsTest`,
   `ConversationSonioxTest` (máy chủ Soniox giả), 26 test Kotlin qua, APK build tại chỗ.
+  **Rà soát lần hai** (trợ lý độc lập soát chính các sửa trên, tái hiện bằng mô phỏng): 5 phát hiện, sửa cả hai bản trước khi
+  gửi link:
+  1. Một chữ tiếng Việt dưới số của đối tác trong lượt người dùng ("vâng", hay chữ đầu của người dùng bị gán nhầm số) làm đối
+     tác thành "người dùng" tới hết buổi → `MyVoiceFilter` đếm âm tiết từng giọng: là đối tác khi đã nói ≥ 3 âm tiết tiếng khác
+     ngoài lượt và nhiều hơn số âm tiết tiếng Việt giọng đó nói trong lượt.
+  2. Phiên phòng mở lại thì Soniox đánh số người nói lại → `newSession()` xoá các số đã biết (giữ các lượt).
+  3. Hết 1,2 s ngừng mà chữ nói tiếp còn là chữ đoán → câu kết thúc kèm chữ đoán, chốt xong chữ đó lặp ở câu sau → không kết
+     thúc chỗ ngừng khi còn chữ đoán (`hasGuess`; vẫn có mốc 8 s).
+  4. Bấm Tôi nói ngay sau câu hỏi của đối tác: phòng nghe cả giọng người dùng nên Soniox không gửi `<end>`, câu hỏi chờ tới 8 s
+     → bấm nút kết thúc câu của phòng như `<end>` (`endHere`), trong lượt câu của phòng kết thúc sau 1,2 s không có chữ mới;
+     không có key OpenAI (bản dịch của Soniox đến sau `<end>`) thì phòng nhận im lặng trong lượt như cũ.
+  5. Chữ đoán bị Soniox rút lại (tin có danh sách token rỗng, trước bị bỏ qua) nằm lại trên thẻ rồi thành câu ma sau 8 s →
+     tin rỗng được báo khi đang có chữ đoán, thẻ không còn chữ thì bỏ.
+  Nhỏ: giờ câu Soniox tính từ lúc gửi đoạn âm thanh cuối (`sonioxSentAt`, câu chốt lúc đang chờ sau Dừng không lệch); Dịch liền
+  chỉ dùng mức "nghe thấy" khi máy không đọc (tiếng vọng còn sót); iOS theo dõi `draining` để nút Cuộc họp mới bật lại. Mô phỏng
+  và test Kotlin thêm đủ 5 cảnh; đột biến từng sửa đều bị bắt. Lưu ý cho mô phỏng: micro thật gửi âm thanh liên tục, cảnh nào
+  cần giờ của câu thì phải `feed` trong lúc chờ.
 
 ## Việc tiếp theo (theo thứ tự)
 
