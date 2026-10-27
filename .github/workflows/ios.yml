@@ -19,7 +19,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # An Intel Mac: GitHub's Apple-silicon Macs were short ("capacity constraints", 27/10) and the job
+    # was cancelled after waiting 15 minutes, five times. A build for the iPhone needs none (the
+    # simulator in keyboard-smoke does, so it stays on macos-15).
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

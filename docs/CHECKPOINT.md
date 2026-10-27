@@ -466,12 +466,15 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   Test: `Tests/Conversation` 250 kiểm tra (Trade.swift vào lệnh CI và `run.sh`), mô phỏng (phiên Soniox nhận thuật ngữ, GPT nhận
   `domain`); Android 30 test (`ConversationPartsTest`, `ConversationSonioxTest` kiểm cấu hình gửi Soniox giả). **Chưa thử trên máy
   thật**; chưa đo được thuật ngữ giúp bao nhiêu: cần biên bản có đánh dấu câu sai.
+  Commit f573bbf: Android run 9 xanh (release `android-1.5.0-9`, đã gửi link APK). iOS run 80 bị huỷ 2 lần nữa (tổng 5 lần,
+  ~2,5 giờ, cùng thông báo thiếu máy macOS arm64), nên job `build` chuyển sang `macos-15-intel` (job này chỉ build cho iPhone,
+  không cần máy arm64; `keyboard-smoke` dựng simulator arm64 nên vẫn ở `macos-15`). Khi GitHub hết thiếu máy có thể trả về
+  `macos-15` (nhanh hơn).
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Gửi link IPA 1.16.0 và APK 1.5.0 (IPA 1.15.0 chưa từng build được vì GitHub thiếu máy macOS; nếu vẫn bị huỷ thì chạy lại
-   run, hoặc tạm đổi `runs-on` của job build sang máy Intel `macos-15-intel`: job `keyboard-smoke` dựng simulator arm64 nên
-   không chạy được trên Intel). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
+0. Gửi link IPA 1.16.0 (đã gửi APK 1.5.0; IPA 1.15.0 chưa từng build được vì GitHub thiếu máy macOS arm64, job `build` giờ
+   chạy trên `macos-15-intel`). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
    Trước đó: gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
    "bỏ đọc: câu của bạn đọc trước"), chữ gọn có dễ đọc không. Nếu Tôi nói vẫn chậm: câu của bạn dịch bằng model của Cài đặt
    (mặc định Sol, suy luận "low", 2–4 s); có thể cho Tôi nói dùng Luna hoặc dịch trước trong lúc giữ nút — hỏi người dùng trước
