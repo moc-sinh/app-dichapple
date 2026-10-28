@@ -489,6 +489,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   (1.16.1 bật sẵn), bản dịch không vừa dòng tin thì `expandIfLong` mở bảng đọc **thay chỗ các phím** (`keyboard.isHidden`), phải bấm
   Xong mới có phím. Bỏ `expandIfLong` (cả Android): bản dịch chỉ ở dòng tin, chạm để đọc đủ. Chưa có nhật ký gõ xác nhận; nếu vẫn
   gặp bàn phím trống, xin người dùng Cài đặt › Chẩn đoán bàn phím › Sao chép nhật ký gõ / báo cáo (bước "1 khởi động… 4 đã hiện").
+  Commit 85ad8b2: Android run 11 xanh (`android-1.5.2-11`), iOS run 83 build xanh (IPA
+  `https://github.com/moc-sinh/app-dichapple/actions/runs/40713318685/artifacts/12827397461`); đã gửi cả hai link.
 
 ## Việc tiếp theo (theo thứ tự)
 
