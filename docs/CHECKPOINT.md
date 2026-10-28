@@ -17,7 +17,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.16.1 và Android 1.5.1 (bàn phím tự dịch tin vừa sao chép, bật sẵn; xem mục 1.16.1). Trước đó
+- **Bản mới nhất:** iPhone 1.16.2 và Android 1.5.2 (bản dịch dài không còn tự mở che phím; xem mục 1.16.2). Trước đó iPhone 1.16.1
+  và Android 1.5.1 (bàn phím tự dịch tin vừa sao chép, bật sẵn; xem mục 1.16.1). Trước đó
   iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
   1.16.0). Trước đó iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
   nói, lời đối phương mặc định chỉ hiện chữ, GPT được dặn đổi số 万/亿 và tên Hán Việt; xem mục 1.15.0). Trước đó iPhone 1.14.0
@@ -482,6 +483,12 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   chức năng bật tắt": công tắc vẫn còn (đã giải thích); đề nghị thêm nút bật/tắt ngay trên menu bàn phím, chờ người dùng trả lời.
   Commit edcb413: Android run 10 xanh (`android-1.5.1-10`), iOS run 82 build xanh (IPA
   `https://github.com/moc-sinh/app-dichapple/actions/runs/40658015270/artifacts/12802542383`); đã gửi cả hai link.
+
+- **1.16.2 + Android 1.5.2: bàn phím không còn hiện lên mà mất phím (28/10).** Người dùng (iPhone): "bấm vào 1 mục để hiện bàn phím,
+  nhiều trường hợp bàn phím sổ lên kín màn hình và không hiện ra bàn phím". Đọc mã: tin vừa sao chép được tự dịch khi bàn phím mở
+  (1.16.1 bật sẵn), bản dịch không vừa dòng tin thì `expandIfLong` mở bảng đọc **thay chỗ các phím** (`keyboard.isHidden`), phải bấm
+  Xong mới có phím. Bỏ `expandIfLong` (cả Android): bản dịch chỉ ở dòng tin, chạm để đọc đủ. Chưa có nhật ký gõ xác nhận; nếu vẫn
+  gặp bàn phím trống, xin người dùng Cài đặt › Chẩn đoán bàn phím › Sao chép nhật ký gõ / báo cáo (bước "1 khởi động… 4 đã hiện").
 
 ## Việc tiếp theo (theo thứ tự)
 

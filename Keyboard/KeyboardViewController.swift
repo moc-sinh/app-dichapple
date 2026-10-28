@@ -1075,23 +1075,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         }
     }
 
-    /// A long translation of the partner's message opens in full while nothing has been typed
-    /// yet: reading comes before replying, and one tap closes it.
-    private func expandIfLong(source: String, translation: Translation) {
-        // Not while typing has begun: the panel hides the keys, and the field may not say it has
-        // text yet.
-        guard mode == .normal, CACurrentMediaTime() - lastKeyAt > 1.5, !textDocumentProxy.hasText,
-              !fitsInfoLine(translation.text) else { return }
-        presentIncoming(source: source, translation: translation)
-    }
-
-    private func fitsInfoLine(_ text: String) -> Bool {
-        guard !text.contains("\n") else { return false }
-        let available = infoButton.bounds.width - 64
-        guard available > 0 else { return true }
-        return (text as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 15)]).width <= available
-    }
-
     // MARK: Translating the user's message
 
     private func readyKey() -> String? {
@@ -1488,11 +1471,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         }
     }
 
+    /// On the info line; a long one is read in full with a tap on it. It never opens over the keys
+    /// by itself: a keyboard that came up with no keys, a translation in their place, was taken for broken.
     private func show(incoming source: String, translation: Translation) {
         TypingLog.mark("tin đối tác")
         lastIncoming = (source, translation)
         info = .incoming(source: source, translation: translation)
-        expandIfLong(source: source, translation: translation)
     }
 }
 

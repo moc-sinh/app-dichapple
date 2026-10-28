@@ -973,24 +973,6 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         }
     }
 
-    /** A long translation of the partner's message opens in full while nothing has been typed yet. */
-    private fun expandIfLong(translation: String) {
-        if (mode != Mode.Normal || now() - lastKeyAt <= 1.5 || fieldHasText() || fitsInfoLine(translation)) return
-        presentIncoming(translation)
-    }
-
-    private fun fitsInfoLine(text: String): Boolean {
-        if (text.contains('\n')) return false
-        val available = root.width - dp(64)
-        if (available <= 0) return true
-        return infoLine.paint.measureText(text) <= available
-    }
-
-    private fun fieldHasText(): Boolean {
-        val ic = currentInputConnection ?: return false
-        return !ic.getTextBeforeCursor(1, 0).isNullOrEmpty() || !ic.getTextAfterCursor(1, 0).isNullOrEmpty()
-    }
-
     // Translating the user's message
 
     private fun readyKey(): String? {
@@ -1212,10 +1194,13 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         }
     }
 
+    /**
+     * On the info line; a long one is read in full with a tap on it. It never opens over the keys by itself: a
+     * keyboard that came up with no keys, a translation in their place, was taken for broken.
+     */
     private fun show(source: String, translation: String) {
         lastIncoming = source to translation
         info = Info.Incoming(source, translation)
-        expandIfLong(translation)
     }
 
     companion object {
