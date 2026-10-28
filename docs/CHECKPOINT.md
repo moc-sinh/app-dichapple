@@ -478,7 +478,10 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   "Dịch ngay khi mở bàn phím" (`instantIncoming`), mặc định tắt. Giờ khoá mới `autoTranslateCopied`, mặc định **bật** (bật lại cả khi
   trước đó đã tắt), công tắc đổi tên **Tự dịch tin vừa sao chép** (Cài đặt › Tin đối tác gửi), cả hai app; `ci/keyboard-smoke.sh` và
   `ci/typing-benchmark.py` dùng khoá mới. iPhone: cần Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép, không thì iOS hỏi dán
-  mỗi lần. Tin trông như mật khẩu/mã/link và tin đánh dấu nhạy cảm vẫn chỉ hiện "chạm để dịch".
+  mỗi lần. Tin trông như mật khẩu/mã/link và tin đánh dấu nhạy cảm vẫn chỉ hiện "chạm để dịch". Người dùng hỏi lại "muốn có cả
+  chức năng bật tắt": công tắc vẫn còn (đã giải thích); đề nghị thêm nút bật/tắt ngay trên menu bàn phím, chờ người dùng trả lời.
+  Commit edcb413: Android run 10 xanh (`android-1.5.1-10`), iOS run 82 build xanh (IPA
+  `https://github.com/moc-sinh/app-dichapple/actions/runs/40658015270/artifacts/12802542383`); đã gửi cả hai link.
 
 ## Việc tiếp theo (theo thứ tự)
 
