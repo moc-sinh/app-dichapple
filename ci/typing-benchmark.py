@@ -38,7 +38,7 @@ def setup(group_dir):
     values = load(group_dir)
     values["typingBenchmark"] = True
     # No paste prompt in the way: only the copy offer stays on, as in daily use.
-    values["instantIncoming"] = False
+    values["autoTranslateCopied"] = False
     values.pop("typingBenchmarkResult", None)
     with open(prefs_path(group_dir), "wb") as f:
         plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)

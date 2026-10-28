@@ -11,7 +11,7 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.gender, store: SharedStore.defaults) private var gender = 0
     @AppStorage(SharedStore.Key.addressing, store: SharedStore.defaults) private var addressing = ""
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
-    @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = false
+    @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = true
     @AppStorage(SharedStore.Key.haptics, store: SharedStore.defaults) private var haptics = true
     @AppStorage(SharedStore.Key.typesOnTouchDown, store: SharedStore.defaults) private var typesOnTouchDown = true
     @AppStorage(SharedStore.Key.keySounds, store: SharedStore.defaults) private var keySounds = true
@@ -61,7 +61,7 @@ struct SettingsView: View {
                     detail: "Chạm MSTrans trong danh sách bàn phím rồi bật. Cần để gửi câu bạn bấm Dịch tới OpenAI.")
             StepRow(done: setup.hasKey, title: "Dán API key OpenAI", detail: "Ở mục OpenAI ngay bên dưới.")
             StepRow(done: nil, title: "Cho phép dán (nên bật)",
-                    detail: "Cài đặt › MSTrans › Dán từ ứng dụng khác › Cho phép: iOS không hỏi lại, và bạn bật được “Dịch ngay khi mở bàn phím” ở mục Tin đối tác gửi.")
+                    detail: "Cài đặt › MSTrans › Dán từ ứng dụng khác › Cho phép: iOS không hỏi lại mỗi lần bàn phím tự dịch tin vừa sao chép.")
             Button("Mở Cài đặt iPhone", action: openSystemSettings)
             NavigationLink {
                 DiagnosticsView()
@@ -145,7 +145,7 @@ struct SettingsView: View {
 
     private var incomingSection: some View {
         Section {
-            Toggle("Dịch ngay khi mở bàn phím", isOn: $instantIncoming)
+            Toggle("Tự dịch tin vừa sao chép", isOn: $instantIncoming)
             if instantIncoming {
                 Button("Cho phép dán trong Cài đặt iPhone", action: openSystemSettings)
             }
@@ -155,7 +155,7 @@ struct SettingsView: View {
             if instantIncoming {
                 Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay ở dòng trên cùng của bàn phím, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
             } else {
-                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
+                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Bật “Tự dịch tin vừa sao chép” để bỏ cả cái chạm đó.")
             }
         }
     }

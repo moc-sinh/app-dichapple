@@ -39,7 +39,7 @@ Mở MSTrans › tab **Cài đặt**, mục **Bắt đầu** có sẵn từng b�
 2. Dán API key OpenAI ở mục **OpenAI**, bấm **Kiểm tra kết nối**.
 3. Mục **Về bạn**: chọn giới tính, ghi cách xưng hô (ví dụ “tôi xưng em, gọi đối tác là anh”) và vài dòng về công việc. Tab **Thuật ngữ**: thêm tên sản phẩm, thuật ngữ ngành để bản dịch luôn dùng đúng từ.
 4. Cài đặt iPhone › MSTrans › **Dán từ ứng dụng khác** › **Cho phép**. Không đặt thì lần đầu dịch tin đã sao chép iOS hỏi “Cho phép dán”, và chạm vào ô trả lời là phải chạm thêm một lần nữa.
-5. Trong app, mục **Tin đối tác gửi**, bật **Dịch ngay khi mở bàn phím**: từ đó sao chép tin rồi chạm vào ô trả lời là bản dịch hiện ngay.
+5. Mục **Tin đối tác gửi** › **Tự dịch tin vừa sao chép** bật sẵn: sao chép tin rồi chạm vào ô trả lời là bản dịch hiện ngay, không cần chạm thêm. Tắt đi thì bàn phím chỉ báo "Có tin vừa sao chép · chạm để dịch".
 
 Bước “Cho phép truy cập đầy đủ” được đánh dấu xong sau khi bạn mở bàn phím MSTrans lần đầu.
 

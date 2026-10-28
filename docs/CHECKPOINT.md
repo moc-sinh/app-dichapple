@@ -17,7 +17,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
+- **Bản mới nhất:** iPhone 1.16.1 và Android 1.5.1 (bàn phím tự dịch tin vừa sao chép, bật sẵn; xem mục 1.16.1). Trước đó
+  iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
   1.16.0). Trước đó iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
   nói, lời đối phương mặc định chỉ hiện chữ, GPT được dặn đổi số 万/亿 và tên Hán Việt; xem mục 1.15.0). Trước đó iPhone 1.14.0
   và Android 1.3.0 (bản dịch chữ theo kịp người nói: GPT dịch trước khi bản dịch của
@@ -471,6 +472,13 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   không cần máy arm64; `keyboard-smoke` dựng simulator arm64 nên vẫn ở `macos-15`). Khi GitHub hết thiếu máy có thể trả về
   `macos-15` (nhanh hơn). Commit 3dd1ddc: iOS run 81 xanh (build trên Intel 8,5 phút, không cảnh báo; keyboard-smoke xanh), IPA
   `https://github.com/moc-sinh/app-dichapple/actions/runs/40539614440/artifacts/12750412841`; đã gửi người dùng link IPA và APK.
+
+- **1.16.1 + Android 1.5.1: bàn phím tự dịch tin vừa sao chép (28/10).** Người dùng: "sao chép xong phải bấm để dịch, muốn
+  như cũ: chỉ cần sao chép là tự động dịch". Mã bàn phím không đổi từ 1.9.1 (Android từ bản đầu): tự dịch luôn phụ thuộc công tắc
+  "Dịch ngay khi mở bàn phím" (`instantIncoming`), mặc định tắt. Giờ khoá mới `autoTranslateCopied`, mặc định **bật** (bật lại cả khi
+  trước đó đã tắt), công tắc đổi tên **Tự dịch tin vừa sao chép** (Cài đặt › Tin đối tác gửi), cả hai app; `ci/keyboard-smoke.sh` và
+  `ci/typing-benchmark.py` dùng khoá mới. iPhone: cần Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép, không thì iOS hỏi dán
+  mỗi lần. Tin trông như mật khẩu/mã/link và tin đánh dấu nhạy cảm vẫn chỉ hiện "chạm để dịch".
 
 ## Việc tiếp theo (theo thứ tự)
 

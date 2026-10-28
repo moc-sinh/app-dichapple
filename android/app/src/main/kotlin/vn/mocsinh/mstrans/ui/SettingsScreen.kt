@@ -190,9 +190,9 @@ class SettingsScreen(private val activity: MainActivity) : Screen {
             "Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay ở dòng trên cùng của bàn phím, không cần chạm thêm."
         } else {
             "Giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, " +
-                "chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó."
+                "chạm một lần. Bật “Tự dịch tin vừa sao chép” để bỏ cả cái chạm đó."
         },
-        listOf(activity.switchRow("Dịch ngay khi mở bàn phím", settings.instantIncoming) {
+        listOf(activity.switchRow("Tự dịch tin vừa sao chép", settings.instantIncoming) {
             settings.instantIncoming = it
             build()
         }))

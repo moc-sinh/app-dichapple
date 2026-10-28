@@ -25,7 +25,8 @@ enum SharedStore {
         static let gender = "gender"
         static let glossary = "glossary"
         static let checkMeaning = "checkMeaning"
-        static let instantIncoming = "instantIncoming"
+        /// A new key: a copied message is translated by itself unless turned off (the user wants it on).
+        static let instantIncoming = "autoTranslateCopied"
         static let haptics = "haptics"
         static let memory = "memory"
         static let incomingCache = "incomingCache"
@@ -95,7 +96,7 @@ enum SharedStore {
     static var checkMeaning: Bool { defaults.object(forKey: Key.checkMeaning) as? Bool ?? true }
     /// Read the copied message as the keyboard opens, no tap. Needs paste permission set to
     /// "Allow" for MSTrans, or iOS asks every time.
-    static var instantIncoming: Bool { defaults.bool(forKey: Key.instantIncoming) }
+    static var instantIncoming: Bool { defaults.object(forKey: Key.instantIncoming) as? Bool ?? true }
     static var haptics: Bool { defaults.object(forKey: Key.haptics) as? Bool ?? true }
     /// Keys type as the finger lands (see `KeyboardLayoutView.typesOnTouchDown`); off, as the
     /// finger lifts, like the Apple keyboard.

@@ -44,7 +44,8 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
         const val GENDER = "gender"
         const val GLOSSARY = "glossary"
         const val CHECK_MEANING = "checkMeaning"
-        const val INSTANT_INCOMING = "instantIncoming"
+        /** A new key: a copied message is translated by itself unless turned off (the user wants it on). */
+        const val INSTANT_INCOMING = "autoTranslateCopied"
         const val HAPTICS = "haptics"
         const val MEMORY = "memory"
         const val INCOMING_CACHE = "incomingCache"
@@ -121,7 +122,7 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
 
     /** Read the copied message as the keyboard opens, no tap. */
     var instantIncoming: Boolean
-        get() = bool(Key.INSTANT_INCOMING, false)
+        get() = bool(Key.INSTANT_INCOMING, true)
         set(value) = store.set(Key.INSTANT_INCOMING, value.toString())
 
     var haptics: Boolean
