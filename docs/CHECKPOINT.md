@@ -540,8 +540,10 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   - Chưa thử trên máy thật. Nếu chậm hay lỗi, xin nhật ký gõ (dòng ⇄) trước khi sửa.
   - Commit 389a193: Android run 13 xanh (`android-1.6.0-13`), iOS run 85 build xanh (IPA
     `https://github.com/moc-sinh/app-dichapple/actions/runs/41119404940/artifacts/13007232966`; annotation chỉ có cảnh báo Node 20 của
-    GitHub, không có cảnh báo trình biên dịch trong mã app). `keyboard-smoke` xếp hàng chờ máy macOS arm64 (ở run 83, 84 job này bị huỷ sau 15 phút chờ).
-    Bảng so sánh trước/sau (Claude Doc): `https://claude.ai/artifact/Vo41rFdkNmpEAzJ8X6UKst`. Đã gửi người dùng link IPA, APK và bảng.
+    GitHub, không có cảnh báo trình biên dịch trong mã app). `keyboard-smoke` chờ máy macOS arm64 15 phút rồi chạy xanh (bàn phím mở trong simulator, không crash).
+    Bảng so sánh trước/sau (Claude Doc): `https://claude.ai/artifact/Vo41rFdkNmpEAzJ8X6UKst`. Đã gửi người dùng link IPA, APK và bảng. Người dùng hỏi bàn phím có đắt hơn không: không, trừ iPhone gửi sớm
+    phần ô đang thấy; đoạn nhiều dòng thì lần đó bị huỷ và gửi lại cả đoạn (lần huỷ vẫn tính tiền phần chữ đã gửi, ước tính 50–200 đồng
+    với Sol). Đã đề nghị tắt gửi sớm nếu muốn (mọi lần Dịch chậm hơn ~0,3 s), khuyên giữ; chờ người dùng.
 
 ## Việc tiếp theo (theo thứ tự)
 
