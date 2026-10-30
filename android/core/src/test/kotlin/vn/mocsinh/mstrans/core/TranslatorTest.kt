@@ -125,6 +125,25 @@ class TranslatorTest {
     }
 
     @Test
+    fun historyIsReadAgainOnlyWhenItChanges() {
+        val store = MemoryStore()
+        val settings = Settings(store)
+        settings.addHistory(HistoryItem(side = ChatLine.Side.ME, source = "a", translation = "A", languageCode = "en"))
+        val first = settings.history()
+        assertTrue(first === settings.history(), "the same JSON is not read again")
+        // Written by another reader of the same store: read anew.
+        Settings(store).addHistory(HistoryItem(side = ChatLine.Side.PARTNER, source = "b", translation = "B", languageCode = "zh"))
+        assertEquals(listOf("b", "a"), settings.history().map { it.source })
+        settings.updateHistory(settings.history().last().copy(meaning = "nghĩa"))
+        assertEquals("nghĩa", Settings(store).history().last().meaning)
+        // Unreadable: nothing is written over it.
+        store.set("history", "[{")
+        assertTrue(settings.history().isEmpty())
+        settings.addHistory(HistoryItem(side = ChatLine.Side.ME, source = "c", translation = "C", languageCode = "en"))
+        assertEquals("[{", store.get("history"))
+    }
+
+    @Test
     fun languages() {
         fun code(text: String) = LanguageDetector.language(text)?.code
         assertEquals("zh", code("这个型号的价格是多少？"))

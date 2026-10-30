@@ -24,6 +24,7 @@ import vn.mocsinh.mstrans.core.TranslateError
 import vn.mocsinh.mstrans.core.Translator
 import vn.mocsinh.mstrans.core.target
 import vn.mocsinh.mstrans.ui.PillStyle
+import vn.mocsinh.mstrans.ui.StreamedText
 import vn.mocsinh.mstrans.ui.TextSize
 import vn.mocsinh.mstrans.ui.colors
 import vn.mocsinh.mstrans.ui.copyText
@@ -105,7 +106,7 @@ class ProcessTextActivity : Activity() {
         }
     }
 
-    /** The partner's message, in Vietnamese. */
+    /** The partner's message, in Vietnamese: shown as it is written, from its first words. */
     private fun read(source: String, apiKey: String) {
         val c = colors
         caption("Tin đối tác → Tiếng Việt")
@@ -113,36 +114,56 @@ class ProcessTextActivity : Activity() {
         val waiting = progress("Đang dịch sang tiếng Việt…")
         body.addView(waiting)
         setActions(close = "Đóng")
+        val shown = label("", TextSize.BODY, c.text)
+        val stream = StreamedText {
+            val text = it.text.trim()
+            if (text.isEmpty()) return@StreamedText
+            if (shown.parent == null) {
+                body.removeView(waiting)
+                body.addView(shown)
+            }
+            shown.text = text
+        }
         job = scope.launch {
             try {
                 val cached = settings.cachedIncoming(source)
                 val translation = cached ?: run {
                     val context = withContext(Dispatchers.IO) { settings.context() }
-                    val result = Translator(apiKey, settings.model, settings).translate(source, Language.vietnamese, context)
-                    withContext(Dispatchers.IO) {
+                    val result = Translator(apiKey, settings.model, settings)
+                        .translate(source, Language.vietnamese, context, progress = stream::heard)
+                    save {
                         settings.cacheIncoming(source, result.text)
                         settings.addHistory(HistoryItem(side = ChatLine.Side.PARTNER, source = source, translation = result.text,
                             languageCode = LanguageDetector.language(source)?.code ?: ""))
                     }
                     result.text
                 }
-                withContext(Dispatchers.IO) { settings.remember(ChatLine(ChatLine.Side.PARTNER, source, System.currentTimeMillis())) }
+                stream.stopped = true
                 body.removeView(waiting)
-                body.addView(label(translation, TextSize.BODY, c.text).selectable())
+                if (shown.parent == null) body.addView(shown)
+                shown.text = translation
+                shown.selectable()
                 setActions(close = "Xong", primary = "Sao chép bản dịch") {
                     copyText(translation)
                     finish()
                 }
+                save { settings.remember(ChatLine(ChatLine.Side.PARTNER, source, System.currentTimeMillis())) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 body.removeView(waiting)
+                body.removeView(shown)
                 fail(e.message ?: "Không dịch được. Thử lại.")
+            } finally {
+                stream.stopped = true
             }
         }
     }
 
-    /** Your Vietnamese, in the partner's language, copied so it can be pasted into the chat. */
+    /**
+     * Your Vietnamese, in the partner's language, copied so it can be pasted into the chat: as soon
+     * as the translation is whole, while its meaning check is still being written.
+     */
     private fun reply(source: String, apiKey: String, canReplace: Boolean) {
         val c = colors
         caption("Bạn viết")
@@ -150,41 +171,77 @@ class ProcessTextActivity : Activity() {
         val waiting = progress("Đang dịch…")
         body.addView(waiting)
         setActions(close = "Đóng")
+        val checking = progress("Đang kiểm tra nghĩa…")
         job = scope.launch {
+            var saved: HistoryItem? = null
+            var stream: StreamedText? = null
             try {
-                val context = withContext(Dispatchers.IO) { settings.context() }
-                val target = settings.target(settings.targetCode, context)
+                val (context, target) = withContext(Dispatchers.Default) {
+                    val context = settings.context()
+                    context to settings.target(settings.targetCode, context)
+                }
                 (waiting.getChildAt(1) as? android.widget.TextView)?.text = "Đang dịch sang ${target.name}…"
-                val result = Translator(apiKey, settings.model, settings).translate(source, target, context, settings.checkMeaning)
-                withContext(Dispatchers.IO) {
-                    settings.remember(ChatLine(ChatLine.Side.ME, result.text, System.currentTimeMillis()))
-                    settings.addHistory(HistoryItem(side = ChatLine.Side.ME, source = source, translation = result.text,
-                        languageCode = target.code, meaning = result.meaning))
+                val checkMeaning = settings.checkMeaning
+                fun whole(text: String) {
+                    if (saved != null) return
+                    saved = replied(source, text, target, canReplace, waiting)
+                    if (checkMeaning) body.addView(checking)
                 }
-                // Copied at once, ready to paste; the keyboard does not offer it back as the partner's.
-                copyText(result.text)
-                body.removeView(waiting)
-                caption("Đã chép bản ${target.name}, dán vào ô chat")
-                body.addView(label(result.text, TextSize.BODY, c.text).selectable())
-                result.meaning?.let {
+                val heard = StreamedText { if (it.whole) whole(it.text) }
+                stream = heard
+                val result = Translator(apiKey, settings.model, settings).translate(source, target, context, checkMeaning, heard::heard)
+                heard.stopped = true
+                // Not whole before the end (a model without the JSON format): now.
+                whole(result.text)
+                body.removeView(checking)
+                result.meaning?.let { meaning ->
                     caption("Nghĩa khi dịch ngược")
-                    body.addView(label(it, TextSize.SUBHEADLINE, c.secondary).selectable())
-                }
-                if (canReplace) {
-                    setActions(close = "Xong", primary = "Thay chữ đã chọn") {
-                        setResult(RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, result.text))
-                        finish()
-                    }
-                } else {
-                    setActions(close = "Xong")
+                    body.addView(label(meaning, TextSize.SUBHEADLINE, c.secondary).selectable())
+                    saved?.let { item -> save { settings.updateHistory(item.copy(meaning = meaning)) } }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 body.removeView(waiting)
                 fail(e.message ?: "Không dịch được. Thử lại.")
+            } finally {
+                stream?.stopped = true
             }
         }
+    }
+
+    /**
+     * The translation is whole: copied at once, ready to paste (the keyboard does not offer it back as
+     * the partner's), and saved, so closing the window before its meaning check comes loses nothing.
+     */
+    private fun replied(source: String, text: String, target: Language, canReplace: Boolean, waiting: View): HistoryItem {
+        copyText(text)
+        body.removeView(waiting)
+        caption("Đã chép bản ${target.name}, dán vào ô chat")
+        body.addView(label(text, TextSize.BODY, colors.text).selectable())
+        if (canReplace) {
+            setActions(close = "Xong", primary = "Thay chữ đã chọn") {
+                setResult(RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, text))
+                finish()
+            }
+        } else {
+            setActions(close = "Xong")
+        }
+        val item = HistoryItem(side = ChatLine.Side.ME, source = source, translation = text, languageCode = target.code)
+        save {
+            settings.remember(ChatLine(ChatLine.Side.ME, text, System.currentTimeMillis()))
+            settings.addHistory(item)
+        }
+        return item
+    }
+
+    /** Off the main thread, in order, and on after the window closes. */
+    private fun save(write: () -> Unit) {
+        MSTransApp.of(this).scope.launch(writes) { write() }
+    }
+
+    private companion object {
+        val writes = Dispatchers.IO.limitedParallelism(1)
     }
 
     private fun caption(text: String) {

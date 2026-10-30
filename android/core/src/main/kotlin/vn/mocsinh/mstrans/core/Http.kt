@@ -33,7 +33,7 @@ object Http {
             // waited behind them. They share one HTTP/2 connection anyway.
             .dispatcher(Dispatcher().apply { maxRequestsPerHost = MAX_REQUESTS_PER_HOST })
             .connectTimeout(15, TimeUnit.SECONDS)
-            // The answer comes in one piece once it is written: a long message can take a while.
+            // An answer not streamed comes in one piece once it is written: a long message can take a while.
             .readTimeout(90, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(20, TimeUnit.SECONDS)
@@ -79,6 +79,35 @@ suspend fun Call.text(): Pair<Int, String> = suspendCancellableCoroutine { conti
             val result = try {
                 response.use { it.code to it.body?.string().orEmpty() }
             } catch (e: IOException) {
+                if (!continuation.isCancelled) continuation.resumeWithException(e)
+                return
+            }
+            continuation.resume(result)
+        }
+
+        override fun onFailure(call: Call, e: IOException) {
+            if (continuation.isCancelled) return
+            continuation.resumeWithException(e)
+        }
+    })
+    continuation.invokeOnCancellation { runCatching { cancel() } }
+}
+
+/**
+ * Runs the call and reads a streamed answer on OkHttp's thread, a line at a time as it comes, each one
+ * handed to `line` there; returns the status, and the body when it is not 200 (OpenAI's error).
+ */
+suspend fun Call.lines(line: (String) -> Unit): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
+    enqueue(object : Callback {
+        override fun onResponse(call: Call, response: Response) {
+            val result = try {
+                response.use {
+                    if (it.code != 200) return@use it.code to it.body?.string().orEmpty()
+                    val source = it.body?.source()
+                    while (source != null) line(source.readUtf8Line() ?: break)
+                    it.code to ""
+                }
+            } catch (e: Exception) {
                 if (!continuation.isCancelled) continuation.resumeWithException(e)
                 return
             }

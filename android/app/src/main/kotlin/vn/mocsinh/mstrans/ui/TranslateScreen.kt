@@ -10,11 +10,13 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import vn.mocsinh.mstrans.MainActivity
 import vn.mocsinh.mstrans.R
 import vn.mocsinh.mstrans.Screen
@@ -42,6 +44,12 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
     private var error: String? = null
     private var busy = false
     private var job: Job? = null
+    /** The translation as it is written, while busy; shown from its first words. */
+    private var stream: StreamedText? = null
+    private var streamLabel: TextView? = null
+    private var streamWhole = false
+    /** Its meaning check is written after it (the user's own message). */
+    private var streamChecked = false
     private var copied = false
     private var recent: List<HistoryItem> = emptyList()
     /** The language "Tự động" stands for now, worked out as the screen shows (not on each key). */
@@ -79,6 +87,8 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
+                // Typing: the connection to OpenAI is opened now, not when Dịch is tapped.
+                if (settings.apiKey != null) Translator.warmUp()
                 // The text changed: a translation of the text before must not be copied for it.
                 if (result != null || busy) {
                     job?.cancel()
@@ -92,7 +102,10 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
         updateHint()
     }
 
-    override fun shown() = refresh()
+    override fun shown() {
+        if (settings.apiKey != null) Translator.warmUp()
+        refresh()
+    }
 
     override fun destroyed() = scope.cancel()
 
@@ -227,7 +240,9 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
 
     private fun renderResults() {
         results.removeAllViews()
-        if (busy) results.addView(busyCard(), matchWidth())
+        streamLabel = null
+        val partial = stream?.takeIf { busy }?.text?.trim().orEmpty()
+        if (busy) results.addView(if (partial.isEmpty()) busyCard() else streamingCard(partial), matchWidth())
         error?.let { results.addView(errorCard(it), matchWidth()) }
         result?.let { results.addView(resultCard(it), matchWidth()) }
         if (result == null && error == null && !busy) {
@@ -251,6 +266,61 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
         }, matchWidth())
     }
 
+    /**
+     * The translation as it is written, from its first words. Whole, it can be copied while its
+     * meaning check is still being written.
+     */
+    private fun streamingCard(text: String): View {
+        val side = if (direction == Direction.OUTGOING) ChatLine.Side.ME else ChatLine.Side.PARTNER
+        val whole = streamWhole
+        return activity.card(side.color(c)).apply {
+            addView(activity.horizontal(8).apply {
+                addView(activity.spinner())
+                val status = if (whole && streamChecked) "Đang kiểm tra nghĩa…" else "Đang dịch…"
+                addView(activity.label(status, TextSize.SUBHEADLINE, c.secondary), weighted())
+                if (whole) {
+                    addView(copyButton(text))
+                } else {
+                    addView(activity.pill("Hủy") {
+                        job?.cancel()
+                        busy = false
+                        renderResults()
+                    })
+                }
+            }, matchWidth())
+            val label = activity.label(text, TextSize.TITLE3)
+            if (whole) label.selectable()
+            streamLabel = label
+            addView(label, matchWidth())
+        }
+    }
+
+    /** As it comes: the text only, the card again when it becomes whole. */
+    private fun drawStream(stream: StreamedText) {
+        if (stream !== this.stream || !busy) return
+        val text = stream.text.trim()
+        if (text.isEmpty()) return
+        val label = streamLabel
+        if (label == null || stream.whole != streamWhole) {
+            streamWhole = stream.whole
+            renderResults()
+        } else {
+            label.text = text
+        }
+    }
+
+    private fun copyButton(text: String): View =
+        activity.pill(if (copied) "Đã chép" else "Sao chép", if (copied) R.drawable.ic_check else R.drawable.ic_copy) {
+            activity.copyText(text)
+            copied = true
+            renderResults()
+            scope.launch {
+                delay(1500)
+                copied = false
+                renderResults()
+            }
+        }
+
     private fun errorCard(message: String): View = activity.card(c.red).apply {
         addView(activity.label(message, TextSize.BODY, c.red).leading(R.drawable.ic_error, c.red, 20, 8))
         if (settings.apiKey == null) {
@@ -262,16 +332,7 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
         addView(activity.horizontal(8).apply {
             addView(activity.sideTag(resultSide, resultLanguage), weighted())
             addView(activity.iconButton(R.drawable.ic_share, c.green, 40, c.fill, "Chia sẻ bản dịch") { activity.shareText(result.text) })
-            addView(activity.pill(if (copied) "Đã chép" else "Sao chép", if (copied) R.drawable.ic_check else R.drawable.ic_copy) {
-                activity.copyText(result.text)
-                copied = true
-                renderResults()
-                scope.launch {
-                    delay(1500)
-                    copied = false
-                    renderResults()
-                }
-            })
+            addView(copyButton(result.text))
         }, matchWidth())
         addView(activity.label(result.text, TextSize.TITLE3).selectable(), matchWidth())
         result.meaning?.let { meaning ->
@@ -335,26 +396,36 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
         val context = settings.context()
         if (outgoing && settings.targetCode == Language.AUTO) partnerLanguage = settings.target(Language.AUTO, context)
         val target = if (outgoing) resolvedTarget else Language.vietnamese
-        val sourceLanguage = if (outgoing) null else LanguageDetector.language(source)
         busy = true
         error = null
         result = null
         job?.cancel()
+        this.stream?.stopped = true
+        // Shown as it is written (OpenAI streams the answer), from its first words.
+        val stream = StreamedText { drawStream(it) }
+        this.stream = stream
+        streamWhole = false
+        val checkMeaning = outgoing && settings.checkMeaning
+        streamChecked = checkMeaning
         renderResults()
         val translator = Translator(apiKey, settings.model, settings)
         lateinit var task: Job
         task = scope.launch {
             try {
-                val translation = translator.translate(source, target, context, checkMeaning = outgoing && settings.checkMeaning)
-                val item = HistoryItem(
-                    side = if (outgoing) ChatLine.Side.ME else ChatLine.Side.PARTNER,
-                    source = source,
-                    translation = translation.text,
-                    languageCode = if (outgoing) target.code else sourceLanguage?.code ?: "",
-                    meaning = translation.meaning,
-                )
-                settings.addHistory(item)
-                recent = settings.history().take(3)
+                val translation = translator.translate(source, target, context, checkMeaning, stream::heard)
+                // The history's JSON and the language of the partner's message: not on the main thread.
+                val (item, latest) = withContext(Dispatchers.Default) {
+                    val item = HistoryItem(
+                        side = if (outgoing) ChatLine.Side.ME else ChatLine.Side.PARTNER,
+                        source = source,
+                        translation = translation.text,
+                        languageCode = if (outgoing) target.code else LanguageDetector.language(source)?.code ?: "",
+                        meaning = translation.meaning,
+                    )
+                    settings.addHistory(item)
+                    item to settings.history().take(3)
+                }
+                recent = latest
                 resultSide = item.side
                 resultLanguage = item.languageName
                 result = translation
@@ -363,6 +434,7 @@ class TranslateScreen(private val activity: MainActivity) : Screen {
             } catch (e: Exception) {
                 error = e.message ?: "Lỗi không rõ."
             } finally {
+                stream.stopped = true
                 // A cancelled translation leaves the one that replaced it busy.
                 if (job === task) {
                     busy = false

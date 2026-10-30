@@ -76,6 +76,12 @@ data class SpokenContext(
     }
 }
 
+/**
+ * The translation as far as it has been written while the answer streams in, and whether it is whole
+ * (all that comes after it is the meaning check). Called on OkHttp's thread.
+ */
+typealias TranslationProgress = (text: String, whole: Boolean) -> Unit
+
 /** One request per translation to the OpenAI Responses API. */
 class Translator(
     private val apiKey: String,
@@ -87,17 +93,20 @@ class Translator(
 ) {
     /**
      * Translates `text` into `target`. Into Vietnamese means a message from the partner; anything
-     * else means the user's own message, optionally with a back-translation.
+     * else means the user's own message, optionally with a back-translation. With `progress`, the
+     * answer is streamed: the translation can be shown, or put in the chat, as it comes, before the
+     * meaning check after it is written.
      */
     suspend fun translate(
         text: String,
         target: Language,
         context: List<ChatLine> = emptyList(),
         checkMeaning: Boolean = false,
+        progress: TranslationProgress? = null,
     ): Translation {
         val outgoing = target.code != Language.vietnamese.code
         val instructions = if (outgoing) Prompt.outgoing(target, settings) else Prompt.incoming(settings)
-        return request(instructions, Prompt.input(text, context), target, outgoing && checkMeaning)
+        return request(instructions, Prompt.input(text, context), target, outgoing && checkMeaning, progress)
     }
 
     /**
@@ -112,16 +121,27 @@ class Translator(
         return request(instructions, Prompt.spokenInput(text, context), target, false)
     }
 
-    private suspend fun request(instructions: String, input: String, target: Language, withMeaning: Boolean): Translation {
-        val structured = requestBody(instructions, input, withMeaning)
+    private suspend fun request(
+        instructions: String,
+        input: String,
+        target: Language,
+        withMeaning: Boolean,
+        progress: TranslationProgress? = null,
+    ): Translation {
+        if (progress != null) return streamed(instructions, input, target, withMeaning, progress)
         var usedFormat = true
         val json = try {
-            send(structured)
+            send(requestBody(instructions, input, withMeaning))
         } catch (e: TranslateError) {
             if (e.kind != TranslateError.Kind.FORMAT_UNSUPPORTED) throw e
             usedFormat = false
             send(requestBody(instructions, input, null))
         }
+        return translation(json, target, usedFormat)
+    }
+
+    /** The translation in OpenAI's answer, or why there is none. */
+    private fun translation(json: JsonObject, target: Language, structured: Boolean): Translation {
         // Cut off (too long): half a translation must never replace the message.
         if (json["status"].str() == "incomplete") {
             throw TranslateError.server("Tin quá dài, bản dịch bị cắt. Chia tin ra rồi dịch lại.")
@@ -131,9 +151,79 @@ class Translator(
             if (refused(json)) throw TranslateError.server("OpenAI từ chối dịch tin này.")
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
-        val translation = parse(output, target, usedFormat)
+        val translation = parse(output, target, structured)
         if (translation == null || translation.text.isEmpty()) throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         return translation.copy(usage = TokenUsage.from(json))
+    }
+
+    /**
+     * As `request`, with the answer streamed: `progress` hears the translation as it is written, and
+     * as soon as it is whole, while the meaning check after it is still being written. Once the
+     * translation is whole, whatever goes wrong after it costs only the meaning check.
+     */
+    private suspend fun streamed(
+        instructions: String,
+        input: String,
+        target: Language,
+        withMeaning: Boolean,
+        progress: TranslationProgress,
+    ): Translation {
+        var structured = true
+        // Written on OkHttp's thread; read here once the request is over.
+        var whole: String? = null
+        var retried = false
+        while (true) {
+            val asked = structured
+            try {
+                val json = streamOnce(requestBody(instructions, input, if (asked) withMeaning else null, stream = true)) { output ->
+                    if (whole != null) return@streamOnce
+                    if (!asked) return@streamOnce progress(output.trim(), false)
+                    val (text, complete) = Prompt.partialTranslation(output) ?: return@streamOnce
+                    if (complete) whole = text
+                    progress(text, complete)
+                }
+                return try {
+                    translation(json, target, asked)
+                } catch (e: TranslateError) {
+                    // The meaning check was cut off, or came unreadable: the translation came whole.
+                    Translation(whole ?: throw e, null, target, TokenUsage.from(json))
+                }
+            } catch (e: TranslateError) {
+                when {
+                    e.kind == TranslateError.Kind.FORMAT_UNSUPPORTED && asked -> structured = false
+                    // One quick retry, as `send`, while nothing has been used yet.
+                    e.isTransient && !retried && whole == null -> {
+                        retried = true
+                        delay(700)
+                    }
+                    else -> return Translation(whole ?: throw e, null, target)
+                }
+            }
+        }
+    }
+
+    /**
+     * One streamed request: `heard` gets the answer's text so far each time it grows (on OkHttp's
+     * thread); returns the whole response, as a request without streaming returns it.
+     */
+    private suspend fun streamOnce(body: JsonObject, heard: (String) -> Unit): JsonObject {
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("Authorization", "Bearer $apiKey")
+            .header("Accept", "text/event-stream")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val stream = ResponseStream()
+        val (status, text) = try {
+            (if (spare) Http.spare else Http.client).newCall(request).lines { if (stream.feed(it)) heard(stream.text) }
+        } catch (e: IOException) {
+            if (e.isTimeout()) throw TranslateError.server("OpenAI trả lời quá lâu. Thử lại, hoặc chia tin ngắn hơn.")
+            throw TranslateError.network()
+        }
+        if (status != 200) throw failure(status, parseObject(text) ?: JsonObject(emptyMap()), body)
+        stream.failure?.let { throw streamFailure(it) }
+        // Ended without its last event: the connection dropped.
+        return stream.response ?: throw TranslateError.network()
     }
 
     /** A plain written answer (the summary of a meeting): no translation format. */
@@ -157,7 +247,7 @@ class Translator(
      * Keys in sorted order, so the schema asks for the translation before its meaning check (the
      * model writes the fields in schema order: a meaning written first checks nothing).
      */
-    private fun requestBody(instructions: String, input: String, withMeaning: Boolean?): JsonObject = buildJsonObject {
+    private fun requestBody(instructions: String, input: String, withMeaning: Boolean?, stream: Boolean = false): JsonObject = buildJsonObject {
         put("input", input)
         put("instructions", instructions)
         // Reasoning counts too: a long message with its meaning check went over 4,000 and was cut off.
@@ -165,6 +255,7 @@ class Translator(
         put("model", model.id)
         putJsonObject("reasoning") { put("effort", model.reasoningEffort) }
         put("store", false)
+        if (stream) put("stream", true)
         if (withMeaning != null) {
             putJsonObject("text") {
                 putJsonObject("format") {
@@ -203,13 +294,26 @@ class Translator(
         }
         val json = parseObject(text) ?: JsonObject(emptyMap())
         if (status == 200) return json
+        throw failure(status, json, body)
+    }
+
+    /** What a request answered with another status than 200 means. */
+    private fun failure(status: Int, json: JsonObject, body: JsonObject): TranslateError {
         val error = json["error"].obj()
         val message = error?.get("message").str() ?: ""
         if (status == 400 && body.containsKey("text") &&
             listOf("text.format", "json_schema", "response_format").any { message.contains(it) }
-        ) throw TranslateError.formatUnsupported()
-        if (status in 500..599) throw TranslateError.busy()
-        throw TranslateError.server(explain(status, error?.get("code").str() ?: "", message, model.id))
+        ) return TranslateError.formatUnsupported()
+        if (status in 500..599) return TranslateError.busy()
+        return TranslateError.server(explain(status, error?.get("code").str() ?: "", message, model.id))
+    }
+
+    /** An error OpenAI sent in the middle of a streamed answer. */
+    private fun streamFailure(error: JsonObject): TranslateError {
+        val code = error["code"].str() ?: ""
+        val message = error["message"].str() ?: ""
+        if (code == "server_error" || code.isEmpty() && message.isEmpty()) return TranslateError.busy()
+        return TranslateError.server(explain(if (code == "rate_limit_exceeded") 429 else 400, code, message, model.id))
     }
 
     companion object {
@@ -286,6 +390,39 @@ class Translator(
                 }
             }
         }
+    }
+}
+
+/**
+ * The Responses API's answer streamed as server-sent events: its text as it grows, then the whole
+ * response (as a request without streaming returns it), or what went wrong.
+ */
+class ResponseStream {
+    private val written = StringBuilder()
+    val text: String get() = written.toString()
+    var response: JsonObject? = null
+        private set
+
+    /** An `error` event, or the error of a failed response. */
+    var failure: JsonObject? = null
+        private set
+
+    /** One line of the stream; true when the text grew. */
+    fun feed(line: String): Boolean {
+        if (!line.startsWith("data:")) return false
+        val event = parseObject(line.substring(5).trimStart(' ')) ?: return false
+        when (event["type"].str()) {
+            "response.output_text.delta" -> {
+                val delta = event["delta"].str()
+                if (delta.isNullOrEmpty()) return false
+                written.append(delta)
+                return true
+            }
+            "response.completed", "response.incomplete" -> response = event["response"].obj()
+            "response.failed" -> failure = event["response"].obj()?.get("error").obj() ?: JsonObject(emptyMap())
+            "error" -> failure = event["error"].obj() ?: event
+        }
+        return false
     }
 }
 
@@ -451,6 +588,105 @@ $INTO_VIETNAMESE
 
     /** The meaning check's field. Its name sorts after "translation", so the model writes the translation first. */
     const val MEANING_KEY = "translation_back_vi"
+
+    /**
+     * The translation in the answer's JSON as far as it has been written, and whether its closing
+     * quote has come (the meaning check, when asked for, comes after it). Null until it has begun.
+     */
+    fun partialTranslation(json: String): Pair<String, Boolean>? {
+        val (value, complete) = partialString("translation", json) ?: return null
+        return (if (complete) value.trim() else value) to complete
+    }
+
+    /**
+     * The string field `key` of a JSON object still being written: its value so far, and whether it
+     * is whole. Null until its value has begun, or when the text is not such an object.
+     */
+    fun partialString(key: String, json: String): Pair<String, Boolean>? {
+        val n = json.length
+        var i = 0
+        fun skipSpace() {
+            while (i < n && (json[i] == ' ' || json[i] == '\n' || json[i] == '\r' || json[i] == '\t')) i++
+        }
+        fun hex(start: Int): Int? {
+            if (start + 4 > n) return null
+            var value = 0
+            for (k in start until start + 4) {
+                val digit = Character.digit(json[k], 16)
+                if (digit < 0) return null
+                value = value * 16 + digit
+            }
+            return value
+        }
+        // A string from just after its opening quote: its text so far, and whether it closed. An escape
+        // not yet whole is left for the next time.
+        fun string(): Pair<String, Boolean> {
+            val out = StringBuilder()
+            while (i < n) {
+                val c = json[i]
+                if (c == '"') {
+                    i++
+                    return out.toString() to true
+                }
+                if (c != '\\') {
+                    out.append(c)
+                    i++
+                    continue
+                }
+                if (i + 1 >= n) break
+                when (val escaped = json[i + 1]) {
+                    'n' -> out.append('\n')
+                    't' -> out.append('\t')
+                    'r' -> out.append('\r')
+                    'b' -> out.append('\b')
+                    'f' -> out.append('\u000C')
+                    'u' -> {
+                        val value = hex(i + 2) ?: return out.toString() to false
+                        if (value in 0xD800..0xDBFF) {
+                            // A pair of escapes for one character beyond the first 65,536.
+                            if (i + 12 > n) return out.toString() to false
+                            val low = if (json[i + 6] == '\\' && json[i + 7] == 'u') hex(i + 8) else null
+                            if (low != null && low in 0xDC00..0xDFFF) {
+                                out.append(value.toChar()).append(low.toChar())
+                                i += 12
+                            } else {
+                                out.append('\uFFFD')
+                                i += 6
+                            }
+                            continue
+                        }
+                        out.append(if (value in 0xDC00..0xDFFF) '\uFFFD' else value.toChar())
+                        i += 6
+                        continue
+                    }
+                    else -> out.append(escaped)
+                }
+                i += 2
+            }
+            return out.toString() to false
+        }
+        skipSpace()
+        if (i >= n || json[i] != '{') return null
+        i++
+        while (true) {
+            skipSpace()
+            if (i >= n || json[i] != '"') return null
+            i++
+            val (name, named) = string()
+            skipSpace()
+            if (!named || i >= n || json[i] != ':') return null
+            i++
+            skipSpace()
+            // Only string fields are asked for.
+            if (i >= n || json[i] != '"') return null
+            i++
+            val (value, closed) = string()
+            if (name == key) return value to closed
+            skipSpace()
+            if (!closed || i >= n || json[i] != ',') return null
+            i++
+        }
+    }
 
     /** Only the translation (and, when asked, its meaning back in Vietnamese). */
     fun schema(meaning: Boolean): JsonObject = buildJsonObject {

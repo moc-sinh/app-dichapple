@@ -271,14 +271,23 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
     }
 
     /**
+     * The history as last read or saved, with the JSON it was read from or saved as: up to 300 items
+     * are not read again while the JSON is the same (each translation and each screen read them all).
+     */
+    private var historyCache: Pair<String, List<HistoryItem>>? = null
+
+    /**
      * Null when saved history cannot be read, so the writers below leave it untouched instead of
      * replacing it with an empty list. One item that cannot be read is left out.
      */
     @Synchronized
     private fun storedHistory(): List<HistoryItem>? {
         val raw = string(Key.HISTORY) ?: return emptyList()
+        historyCache?.let { (json, items) -> if (json === raw || json == raw) return items }
         val array = runCatching { Json.parseToJsonElement(raw).jsonArray }.getOrNull() ?: return null
-        return array.mapNotNull { element -> runCatching { historyItem(element.jsonObject) }.getOrNull() }
+        val items = array.mapNotNull { element -> runCatching { historyItem(element.jsonObject) }.getOrNull() }
+        historyCache = raw to items
+        return items
     }
 
     @Synchronized
@@ -299,7 +308,9 @@ class Settings(val store: KeyValueStore, private val clock: () -> Long = System:
 
     @Synchronized
     fun saveHistory(items: List<HistoryItem>) {
-        store.set(Key.HISTORY, JsonArray(items.map { historyJson(it) }).toString())
+        val json = JsonArray(items.map { historyJson(it) }).toString()
+        store.set(Key.HISTORY, json)
+        historyCache = json to items.toList()
     }
 
     @Synchronized

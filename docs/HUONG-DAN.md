@@ -49,11 +49,11 @@ Bàn phím báo **Cần API key** dù đã dán key trong app: app và bàn phí
 
 **Trả lời đối tác**
 1. Trong Zalo, WhatsApp, WeChat, Messenger…, chạm quả địa cầu để chuyển sang bàn phím MSTrans (có logo Mộc Sinh ở góc trái), gõ tiếng Việt (kiểu Telex).
-2. Bấm **Dịch** (nút xanh): cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, bàn phím tự trả lời đúng ngôn ngữ đối tác đang dùng.
-3. Một dòng hiện lên trên thanh Dịch với **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc. Gõ tiếp là dòng này ẩn đi: lúc bình thường bàn phím chỉ có thanh Dịch.
+2. Bấm **Dịch** (nút xanh): cả đoạn đổi sang ngôn ngữ đối tác. Để **Tự động**, bàn phím tự trả lời đúng ngôn ngữ đối tác đang dùng. Bản dịch vào ô ngay khi AI viết xong nó, không chờ phần dịch ngược.
+3. Một dòng hiện lên trên thanh Dịch: "Đã dịch sang …", rồi một lát sau đổi thành **Nghĩa** (dấu tích xanh): câu đối tác sẽ đọc, dịch ngược lại tiếng Việt. Chạm vào để xem đầy đủ, hoặc bấm **Hoàn tác** để lấy lại câu gốc. Gõ tiếp là dòng này ẩn đi: lúc bình thường bàn phím chỉ có thanh Dịch.
 
 **Đọc tin đối tác** (biểu tượng màu cam)
-- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Tự dịch tin vừa sao chép** (mặc định): bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, phím vẫn hiện đủ để gõ trả lời; tin dài thì **chạm vào dòng đó** để đọc cả bản dịch, bấm **Xong** để quay lại phím. Đã tắt: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt. Thứ vừa sao chép trông như mật khẩu, mã, link hay email thì bàn phím không tự gửi đi dịch, chỉ hiện dòng “chạm để dịch”. Dịch lỗi (mất mạng) thì gõ tiếp một phím là dòng “chạm để dịch” hiện lại để thử lần nữa.
+- Nhấn giữ tin › **Sao chép**, rồi chạm vào ô trả lời. Đã bật **Tự dịch tin vừa sao chép** (mặc định): bản dịch tiếng Việt hiện ngay trên dòng trên cùng của bàn phím, chạy dần từng chữ khi AI đang viết (không chờ viết xong cả tin), phím vẫn hiện đủ để gõ trả lời; tin dài thì **chạm vào dòng đó** để đọc cả bản dịch, bấm **Xong** để quay lại phím. Đã tắt: dòng trên cùng hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Tin nào sao chép cũng được dịch sang tiếng Việt, kể cả tin có tên người Việt. Thứ vừa sao chép trông như mật khẩu, mã, link hay email thì bàn phím không tự gửi đi dịch, chỉ hiện dòng “chạm để dịch”. Dịch lỗi (mất mạng) thì gõ tiếp một phím là dòng “chạm để dịch” hiện lại để thử lần nữa.
 - Chạm **logo MSTrans** bất cứ lúc nào để xem cùng lúc: tin đối tác vừa dịch, câu bạn vừa gửi (kèm nghĩa) và các tin đang dùng làm ngữ cảnh. Nút **Cuộc mới** xóa ngữ cảnh khi chuyển sang nói chuyện với người khác.
 
 **Không thấy MSTrans trong một app (ví dụ Zalo)**
@@ -136,7 +136,7 @@ Nếu thông báo “chưa đọc được tin đã sao chép”: mở phím t�
 
 Gõ tiếp cho đến khi lỗi hiện ra. Sau đó mở app MSTrans › Cài đặt › **Chẩn đoán bàn phím**, bấm **Sao chép nhật ký gõ** và gửi cho người hỗ trợ. Nhật ký ghi từng phím, chữ bàn phím đã sửa và chữ app báo lại, nên có đoạn cuối những gì vừa gõ. Chữ số luôn được thay bằng `#` (số điện thoại, số tài khoản, mã), và ô email, mật khẩu, mã, số thẻ chỉ ghi dấu `•`. Nó chỉ nằm trên iPhone này, và **Xóa nhật ký gõ** xóa nó đi.
 
-Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), chạm bị iOS giữ lại tới lúc nhấc tay (⌛ … iOS giữ lại), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms · việc bàn phím đang làm lúc đó, ví dụ phím, kiểm tra ô, thanh dịch; “không rõ” là lúc đó không có việc nào của MSTrans được ghi tên: iOS tự làm, hoặc vẽ lại), rung lâu (⏱ rung mất … ms), và lúc app chat báo lại chữ (⌛ app báo lại chữ chậm nhất sau … ms; nhiều app chỉ thỉnh thoảng mới báo, nên đây không hẳn là lúc chữ hiện). Nhờ vậy biết chậm do bàn phím hay do app đang chat. Mỗi lần Dịch có một dòng ⇄ ghi số ký tự và thời gian từng phần: đọc ô, OpenAI, thay ô (tin đối tác: thời gian OpenAI, hoặc “đã dịch trước đó”), nên biết Dịch chậm ở đâu.
+Nhật ký cũng ghi chỗ chậm: phím đến bàn phím trễ (⌛ … đến trễ), chạm bị iOS giữ lại tới lúc nhấc tay (⌛ … iOS giữ lại), bàn phím bị nghẽn quá một khung hình (⏱ bàn phím bận … ms · việc bàn phím đang làm lúc đó, ví dụ phím, kiểm tra ô, thanh dịch; “không rõ” là lúc đó không có việc nào của MSTrans được ghi tên: iOS tự làm, hoặc vẽ lại), rung lâu (⏱ rung mất … ms), và lúc app chat báo lại chữ (⌛ app báo lại chữ chậm nhất sau … ms; nhiều app chỉ thỉnh thoảng mới báo, nên đây không hẳn là lúc chữ hiện). Nhờ vậy biết chậm do bàn phím hay do app đang chat. Mỗi lần Dịch có một dòng ⇄ ghi số ký tự và thời gian từng phần: đọc ô, OpenAI (tới lúc bản dịch viết xong; “gửi ngay lúc bấm” là đã gửi đi trong lúc bàn phím còn đọc ô), thay ô, tổng; rồi dòng “⇄ Nghĩa đến sau bản dịch … ms”. Tin đối tác: thời gian OpenAI và “chữ đầu sau … ms” (lúc chữ đầu tiên hiện), hoặc “đã dịch trước đó”. Nhờ vậy biết Dịch chậm ở đâu.
 
 Chữ bị mất cũng có dấu vết: ngón tay trượt từ phím vừa gõ sang phím khác mà không nhấc lên (↝ d trượt sang a, không gõ a), hay giữ phím lâu nên hiện bảng dấu (… giữ d: bảng dấu, rồi … bảng dấu đóng). Không có dòng nào cho chữ bị mất thì iOS đã không chuyển cú chạm đó cho bàn phím.
 
@@ -160,7 +160,8 @@ Chọn MSTrans mà iPhone tự quay về bàn phím Apple:
 - **Nhanh**: GPT-6 Luna, rẻ hơn khoảng 20 lần, dùng khi cần tiết kiệm.
 - Mỗi tin của đối tác chỉ dịch một lần; app nhớ bản dịch nên không gọi lại.
 - Gửi kèm tối đa 10 tin gần nhất làm ngữ cảnh (tin dài thì giữ phần cuối). OpenAI không lưu tin vào tài khoản của bạn (`store: false`).
-- Bản dịch kèm nghĩa dịch ngược: AI viết bản dịch trước rồi mới dịch ngược chính bản đó, nên dòng **Nghĩa** đúng là câu đối tác sẽ đọc. Tin quá dài bị cắt thì bàn phím báo lỗi, không bao giờ chèn nửa bản dịch vào ô chat.
+- Bản dịch kèm nghĩa dịch ngược: AI viết bản dịch trước rồi mới dịch ngược chính bản đó, nên dòng **Nghĩa** đúng là câu đối tác sẽ đọc. App nhận câu trả lời từng phần trong lúc AI viết, nên bản dịch vào ô ngay khi viết xong, nghĩa đến sau. Tin quá dài bị cắt giữa bản dịch thì bàn phím báo lỗi, không bao giờ chèn nửa bản dịch vào ô chat; bị cắt hay mất mạng giữa phần dịch ngược thì bản dịch vẫn dùng được, chỉ thiếu dòng Nghĩa.
+- Kết nối tới OpenAI được mở sẵn khi bàn phím hiện và giữ mở trong lúc gõ, nên bấm Dịch không phải chờ bắt tay mạng (thường 0,2–0,5 giây trên 4G).
 
 ## Cách app giữ nhẹ
 
@@ -190,3 +191,4 @@ App hết hạn sau 1 năm thay vì 7 ngày, cài được qua TestFlight, và A
 3. Tab **Hội thoại** dùng y như trên iPhone (xem mục "Họp, nói chuyện trực tiếp" ở trên): Soniox, lời đối phương chỉ hiện chữ, cho họp 4–5 người, mỗi câu ghi Người 1, Người 2…, GPT dịch lại từng câu với ngữ cảnh, **⋯ › Chủ đề cuộc họp**, **⋯ › Sao chép nhật ký tốc độ**. Lần đầu bấm nút tròn, Android hỏi quyền micro: chọn **Cho phép**.
 4. Khi lời đối phương chỉ hiện chữ, micro nghe theo kiểu nhận giọng nói (nghe xa hơn); khi bật Đọc to lời đối phương và với Dịch liền, điện thoại chuyển sang kiểu cuộc gọi có khử tiếng vọng, tiếng đọc ra loa ngoài.
 5. Câu của bạn (Tôi nói) không còn phải xếp hàng sau các bản dịch của phòng: trước đây Android chỉ cho 5 yêu cầu tới OpenAI chạy cùng lúc, họp đông thì câu của bạn phải chờ.
+6. Bàn phím, tab Dịch và cửa sổ **Dịch bằng MSTrans** (bôi đen chữ › MSTrans) giống iPhone: bản dịch câu của bạn vào ô (hay được chép sẵn) ngay khi AI viết xong, nghĩa dịch ngược hiện sau một lát; bản dịch tin đối tác chạy dần từng chữ; kết nối tới OpenAI được mở sẵn khi bàn phím hiện và trong lúc gõ.

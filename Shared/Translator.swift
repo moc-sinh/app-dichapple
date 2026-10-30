@@ -102,13 +102,20 @@ struct Translator {
         return URLSession(configuration: config)
     }
 
+    /// The translation as far as it has been written while the answer streams in, and whether it
+    /// is whole (all that comes after it is the meaning check). Called off the main thread.
+    typealias Progress = @Sendable (_ text: String, _ complete: Bool) -> Void
+
     /// Translates `text` into `target`. Into Vietnamese means a message from the partner;
     /// anything else means the user's own message, optionally with a back-translation.
-    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false) async throws -> Translation {
+    /// With `progress`, the answer is streamed: the translation can be shown, or put in the chat,
+    /// as it comes, before the meaning check after it is written.
+    func translate(_ text: String, to target: Language, context: [ChatLine] = [], checkMeaning: Bool = false,
+                   progress: Progress? = nil) async throws -> Translation {
         let outgoing = target.code != Language.vietnamese.code
         let instructions = outgoing ? Prompt.outgoing(target: target) : Prompt.incoming()
         return try await request(instructions: instructions, input: Prompt.input(text: text, context: context), target: target,
-                                 meaning: outgoing && checkMeaning)
+                                 meaning: outgoing && checkMeaning, progress: progress)
     }
 
     /// Speech from a meeting or a talk, recognised automatically (Hội thoại): translated with who
@@ -122,7 +129,8 @@ struct Translator {
                                  target: target, meaning: false)
     }
 
-    private func request(instructions: String, input: String, target: Language, meaning withMeaning: Bool) async throws -> Translation {
+    private func request(instructions: String, input: String, target: Language, meaning withMeaning: Bool,
+                         progress: Progress? = nil) async throws -> Translation {
         var body: [String: Any] = [
             "model": model.rawValue,
             "instructions": instructions,
@@ -140,6 +148,9 @@ struct Translator {
             "schema": Prompt.schema(meaning: withMeaning),
         ]
         body["text"] = ["format": format] as [String: Any]
+        #if !canImport(FoundationNetworking)
+        if let progress { return try await streamed(body, target: target, progress: progress) }
+        #endif
 
         let json: [String: Any]
         do {
@@ -148,6 +159,11 @@ struct Translator {
             body["text"] = nil
             json = try await send(body)
         }
+        return try translation(from: json, target: target, structured: body["text"] != nil)
+    }
+
+    /// The translation in OpenAI's answer, or why there is none.
+    private func translation(from json: [String: Any], target: Language, structured: Bool) throws -> Translation {
         // Cut off (too long): half a translation, or the start of its JSON, must never replace the message.
         if json["status"] as? String == "incomplete" {
             throw TranslateError.server("Tin quá dài, bản dịch bị cắt. Chia tin ra rồi dịch lại.")
@@ -156,13 +172,96 @@ struct Translator {
             if Self.refused(json) { throw TranslateError.server("OpenAI từ chối dịch tin này.") }
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
-        guard var translation = Self.parse(output, language: target, structured: body["text"] != nil),
+        guard var translation = Self.parse(output, language: target, structured: structured),
               !translation.text.isEmpty else {
             throw TranslateError.server("Không nhận được bản dịch. Thử lại.")
         }
         translation.usage = TokenUsage.from(json)
         return translation
     }
+
+    #if !canImport(FoundationNetworking)
+    /// As `request`, with the answer streamed: `progress` hears the translation as it is written,
+    /// and as soon as it is whole, while the meaning check after it is still being written. Once
+    /// the translation is whole, whatever goes wrong after it costs only the meaning check.
+    private func streamed(_ body: [String: Any], target: Language, progress: Progress) async throws -> Translation {
+        var body = body
+        body["stream"] = true
+        var whole: String?
+        var retried = false
+        while true {
+            let structured = body["text"] != nil
+            do {
+                let json = try await streamOnce(body) { output in
+                    guard whole == nil else { return }
+                    guard structured else { return progress(output.trimmingCharacters(in: .whitespacesAndNewlines), false) }
+                    guard let partial = Prompt.partialTranslation(output) else { return }
+                    if partial.complete { whole = partial.text }
+                    progress(partial.text, partial.complete)
+                }
+                do {
+                    return try translation(from: json, target: target, structured: structured)
+                } catch {
+                    // The meaning check was cut off, or came unreadable: the translation came whole.
+                    guard let whole else { throw error }
+                    return Translation(text: whole, meaning: nil, note: nil, language: target, usage: TokenUsage.from(json))
+                }
+            } catch TranslateError.formatUnsupported where structured {
+                body["text"] = nil
+            } catch let error as TranslateError where error.isTransient && !retried && whole == nil {
+                // One quick retry, as `send`, while nothing has been used yet.
+                retried = true
+                try await Task.sleep(nanoseconds: 700_000_000)
+            } catch {
+                if let whole, !(error is CancellationError) {
+                    return Translation(text: whole, meaning: nil, note: nil, language: target)
+                }
+                throw error
+            }
+        }
+    }
+
+    /// One streamed request: `heard` gets the answer's text so far each time it grows; returns the
+    /// whole response, as a request without streaming returns it.
+    private func streamOnce(_ body: [String: Any], heard: (String) -> Void) async throws -> [String: Any] {
+        var request = URLRequest(url: Config.endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+
+        var stream = ResponseStream()
+        do {
+            let (bytes, response) = try await (spare ? Self.spareSession : Self.session).bytes(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            var refusal = ""
+            for try await line in bytes.lines {
+                // Refused: the body is OpenAI's error, as JSON.
+                guard status == 200 else {
+                    refusal += line + "\n"
+                    continue
+                }
+                if stream.feed(line) { heard(stream.text) }
+            }
+            guard status == 200 else {
+                let json = (try? JSONSerialization.jsonObject(with: Data(refusal.utf8))) as? [String: Any] ?? [:]
+                throw failure(status: status, json: json, body: body)
+            }
+        } catch let error as TranslateError {
+            throw error
+        } catch {
+            let code = (error as? URLError)?.code
+            if code == .cancelled || error is CancellationError { throw CancellationError() }
+            if code == .timedOut { throw TranslateError.server("OpenAI trả lời quá lâu. Thử lại, hoặc chia tin ngắn hơn.") }
+            throw TranslateError.network
+        }
+        if let error = stream.failure { throw streamFailure(error) }
+        // Ended without its last event: the connection dropped.
+        guard let response = stream.response else { throw TranslateError.network }
+        return response
+    }
+    #endif
 
     /// A plain written answer (the summary of a meeting): no translation format.
     func write(instructions: String, input: String) async throws -> (text: String, usage: TokenUsage?) {
@@ -229,18 +328,30 @@ struct Translator {
         let (data, response) = result
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard status == 200 else {
-            let error = json["error"] as? [String: Any]
-            let message = error?["message"] as? String ?? ""
-            if status == 400, body["text"] != nil,
-               ["text.format", "json_schema", "response_format"].contains(where: { message.contains($0) }) {
-                throw TranslateError.formatUnsupported
-            }
-            if (500...599).contains(status) { throw TranslateError.busy }
-            throw TranslateError.server(Self.explain(status: status, code: error?["code"] as? String ?? "", message: message,
-                                                     model: body["model"] as? String ?? model.rawValue))
-        }
+        guard status == 200 else { throw failure(status: status, json: json, body: body) }
         return json
+    }
+
+    /// What a request answered with another status than 200 means.
+    private func failure(status: Int, json: [String: Any], body: [String: Any]) -> TranslateError {
+        let error = json["error"] as? [String: Any]
+        let message = error?["message"] as? String ?? ""
+        if status == 400, body["text"] != nil,
+           ["text.format", "json_schema", "response_format"].contains(where: { message.contains($0) }) {
+            return .formatUnsupported
+        }
+        if (500...599).contains(status) { return .busy }
+        return .server(Self.explain(status: status, code: error?["code"] as? String ?? "", message: message,
+                                    model: body["model"] as? String ?? model.rawValue))
+    }
+
+    /// An error OpenAI sent in the middle of a streamed answer.
+    private func streamFailure(_ error: [String: Any]) -> TranslateError {
+        let code = error["code"] as? String ?? ""
+        let message = error["message"] as? String ?? ""
+        if code == "server_error" || code.isEmpty && message.isEmpty { return .busy }
+        return .server(Self.explain(status: code == "rate_limit_exceeded" ? 429 : 400, code: code, message: message,
+                                    model: model.rawValue))
     }
 
     private static func outputText(_ json: [String: Any]) -> String? {
@@ -307,6 +418,37 @@ struct Translator {
             }
             return "Lỗi \(status)" + (message.isEmpty ? ". Thử lại." : ": \(message)")
         }
+    }
+}
+
+/// The Responses API's answer streamed as server-sent events: its text as it grows, then the whole
+/// response (as a request without streaming returns it), or what went wrong.
+struct ResponseStream {
+    private(set) var text = ""
+    private(set) var response: [String: Any]?
+    /// An `error` event, or the error of a failed response.
+    private(set) var failure: [String: Any]?
+
+    /// One line of the stream; true when the text grew.
+    mutating func feed(_ line: String) -> Bool {
+        guard line.hasPrefix("data:") else { return false }
+        let payload = line.dropFirst(5).drop { $0 == " " }
+        guard let event = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any] else { return false }
+        switch event["type"] as? String {
+        case "response.output_text.delta":
+            guard let delta = event["delta"] as? String, !delta.isEmpty else { return false }
+            text += delta
+            return true
+        case "response.completed", "response.incomplete":
+            response = event["response"] as? [String: Any]
+        case "response.failed":
+            failure = (event["response"] as? [String: Any])?["error"] as? [String: Any] ?? [:]
+        case "error":
+            failure = event["error"] as? [String: Any] ?? event
+        default:
+            break
+        }
+        return false
     }
 }
 
@@ -471,6 +613,95 @@ enum Prompt {
     /// The meaning check's field. Its name sorts after "translation" (the request's keys are sorted),
     /// so the model writes the translation first and then translates that back.
     static let meaningKey = "translation_back_vi"
+
+    /// The translation in the answer's JSON as far as it has been written, and whether its closing
+    /// quote has come (the meaning check, when asked for, comes after it). Nil until it has begun.
+    static func partialTranslation(_ json: String) -> (text: String, complete: Bool)? {
+        guard let partial = partialString("translation", in: json) else { return nil }
+        return (partial.complete ? partial.value.trimmingCharacters(in: .whitespacesAndNewlines) : partial.value, partial.complete)
+    }
+
+    /// The string field `key` of a JSON object still being written: its value so far, and whether it
+    /// is whole. Nil until its value has begun, or when the text is not such an object.
+    static func partialString(_ key: String, in json: String) -> (value: String, complete: Bool)? {
+        let scalars = Array(json.unicodeScalars)
+        var i = 0
+        func skipSpace() {
+            while i < scalars.count, scalars[i] == " " || scalars[i] == "\n" || scalars[i] == "\r" || scalars[i] == "\t" { i += 1 }
+        }
+        func hex(_ start: Int) -> UInt32? {
+            guard start + 4 <= scalars.count else { return nil }
+            return UInt32(String(String.UnicodeScalarView(scalars[start..<start + 4])), radix: 16)
+        }
+        // A string from just after its opening quote: its text so far, and whether it closed. An
+        // escape not yet whole is left for the next time.
+        func string() -> (String, Bool) {
+            var out = String.UnicodeScalarView()
+            while i < scalars.count {
+                let c = scalars[i]
+                if c == "\"" {
+                    i += 1
+                    return (String(out), true)
+                }
+                guard c == "\\" else {
+                    out.append(c)
+                    i += 1
+                    continue
+                }
+                guard i + 1 < scalars.count else { break }
+                let escaped = scalars[i + 1]
+                switch escaped {
+                case "n": out.append("\n")
+                case "t": out.append("\t")
+                case "r": out.append("\r")
+                case "b": out.append("\u{8}")
+                case "f": out.append("\u{C}")
+                case "u":
+                    guard let value = hex(i + 2) else { return (String(out), false) }
+                    if (0xD800...0xDBFF).contains(value) {
+                        // A pair of escapes for one character beyond the first 65,536.
+                        guard i + 12 <= scalars.count else { return (String(out), false) }
+                        if scalars[i + 6] == "\\", scalars[i + 7] == "u", let low = hex(i + 8), (0xDC00...0xDFFF).contains(low),
+                           let scalar = Unicode.Scalar(0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00)) {
+                            out.append(scalar)
+                            i += 12
+                        } else {
+                            out.append("\u{FFFD}")
+                            i += 6
+                        }
+                        continue
+                    }
+                    out.append(Unicode.Scalar(value) ?? "\u{FFFD}")
+                    i += 6
+                    continue
+                default: out.append(escaped)
+                }
+                i += 2
+            }
+            return (String(out), false)
+        }
+        skipSpace()
+        guard i < scalars.count, scalars[i] == "{" else { return nil }
+        i += 1
+        while true {
+            skipSpace()
+            guard i < scalars.count, scalars[i] == "\"" else { return nil }
+            i += 1
+            let (name, named) = string()
+            skipSpace()
+            guard named, i < scalars.count, scalars[i] == ":" else { return nil }
+            i += 1
+            skipSpace()
+            // Only string fields are asked for.
+            guard i < scalars.count, scalars[i] == "\"" else { return nil }
+            i += 1
+            let (value, closed) = string()
+            if name == key { return (value, closed) }
+            skipSpace()
+            guard closed, i < scalars.count, scalars[i] == "," else { return nil }
+            i += 1
+        }
+    }
 
     /// Only the translation (and, when asked, its meaning back in Vietnamese): the user reads the
     /// translation, not notes about it, which also made every answer longer to wait for.

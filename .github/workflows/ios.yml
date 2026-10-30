@@ -53,6 +53,14 @@ jobs:
             Tests/Language/main.swift -o language-tests
           ./language-tests
 
+      # A translation streamed from OpenAI: the events read as they come, and the translation read out
+      # of its JSON while it is written (Tests/StreamLinux runs whole requests against a scripted OpenAI).
+      - name: Streaming tests
+        run: |
+          swiftc -O Shared/Config.swift Shared/SharedStore.swift Shared/History.swift Shared/Translator.swift \
+            Tests/Stream/main.swift -o stream-tests
+          ./stream-tests
+
       # The Hội thoại tab's parts that need no microphone: sentence cutting, phantom text, echo,
       # live translation events, the speech services' forms.
       - name: Conversation tests
@@ -80,7 +88,11 @@ jobs:
             | tee build/xcodebuild.log | tail -40
           # The compiler's warnings for the app's own code, so none goes into a release unseen.
           echo "Warnings:"
-          grep -E ": warning: " build/xcodebuild.log | grep -E "/(App|Keyboard|Shared)/" | sed "s|$PWD/||" | sort -u | head -80 || true
+          grep -E ": warning: " build/xcodebuild.log | grep -E "/(App|Keyboard|Shared)/" | sed "s|$PWD/||" | sort -u | head -80 \
+            > build/warnings.txt || true
+          cat build/warnings.txt
+          # Also as annotations: on the run's page, and readable through GitHub's API without the log.
+          sed 's/^/::warning::/' build/warnings.txt
 
       # A free Apple ID can install this IPA with AltStore or SideStore, which re-sign it. Not Sideloadly or
       # Feather: on iOS 26 their re-signed keyboard lacks the main-binary flag and is killed at launch.

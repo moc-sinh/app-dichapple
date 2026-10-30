@@ -48,7 +48,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     private var lastOutgoing: (translation: Translation, original: String)?
     private var lastIncoming: (source: String, translation: Translation)?
     private var task: Task<Void, Never>?
+    /// The Dịch under way (`translateDraft`), until its meaning check has come.
+    private var outgoing: Outgoing?
     private var incomingTask: Task<Void, Never>?
+    /// The partner's message being translated, and its translation so far (streamed to the info line).
+    private var incomingStream: (source: String, text: String)?
+    private var incomingRedraw = false
+    /// The partner's message the panel shows, while its translation may still be coming.
+    private var panelIncoming: String?
+    /// When the connection to OpenAI was last opened ahead (`keepWarm`).
+    private var warmedAt: CFTimeInterval = 0
     private var pollTimer: Timer?
     private var checkingPasteboard = false
     /// The clipboard already read (or asked about) in instant mode, so iOS isn't asked twice.
@@ -246,7 +255,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         info = .idle
         checkPasteboard(waitForTyping: false)
         // Setting up the network session takes a moment: not on the main thread as the keys appear.
-        if fullAccess, SharedStore.apiKey != nil { Self.store.async { Translator.warmUp() } }
+        if fullAccess, SharedStore.apiKey != nil {
+            warmedAt = CACurrentMediaTime()
+            Self.store.async { Translator.warmUp() }
+        }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
     }
@@ -300,7 +312,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         pollTimer?.invalidate()
         pollTimer = nil
         task?.cancel()
+        outgoing = nil
         incomingTask?.cancel()
+        incomingStream = nil
         walkGeneration += 1
         walking = 0
         heldKeys = []
@@ -363,6 +377,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             if mode == .busy {
                 // The text being translated was read from the other field: it must not replace this one.
                 task?.cancel()
+                outgoing = nil
                 mode = .failed(Self.fieldSwitched)
             }
             composer.forget()
@@ -388,6 +403,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
 
     @objc private func poll() {
         checkPasteboard(waitForTyping: true)
+        keepWarm()
+    }
+
+    /// While a message is being typed, the connection to OpenAI is kept open, so Dịch does not
+    /// wait for DNS and TLS again: an idle connection is closed after a while.
+    private func keepWarm() {
+        let now = CACurrentMediaTime()
+        guard fullAccess, now - lastKeyAt < 5, now - warmedAt > 40, SharedStore.apiKey != nil else { return }
+        warmedAt = now
+        Self.store.async { Translator.warmUp() }
     }
 
     // MARK: Keys
@@ -574,6 +599,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             // The translation would replace the field, these keys with it.
             TypingLog.add("▭ gõ tiếp: hủy dịch")
             task?.cancel()
+            outgoing = nil
             mode = .normal
         case .done, .failed:
             // After this key's frame: building the bar again held up the first key after a translation.
@@ -670,6 +696,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             bar.addArrangedSubview(status("Đang dịch sang \(activeTarget?.name ?? "ngôn ngữ đích")…", spinner: true))
             bar.addArrangedSubview(pill("Hủy") { [weak self] in
                 self?.task?.cancel()
+                self?.outgoing = nil
                 self?.mode = .normal
             })
         case .done:
@@ -996,6 +1023,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         panelButton.configuration?.title = button
         panelAction = action
         panelDone = done
+        panelIncoming = nil
         mode = .panel(title)
     }
 
@@ -1065,14 +1093,28 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         showPanel("Kiểm tra bản dịch", parts, button: "Hoàn tác, lấy lại câu gốc") { [weak self] in self?.undo() }
     }
 
-    /// Only the translation: the partner's message is right above in the chat.
+    /// Only the translation: the partner's message is right above in the chat. Opened while the
+    /// translation is still coming, the panel follows it.
     private func presentIncoming(source: String, translation: Translation) {
         let parts = [(translation.text, false)]
-        showPanel("Tin đối tác → Tiếng Việt", parts, button: "Sao chép bản dịch") { [weak self] in
-            UIPasteboard.general.string = translation.text
+        showPanel(Self.incomingTitle, parts, button: "Sao chép bản dịch") { [weak self] in
+            guard let self else { return }
+            let text = self.lastIncoming?.source == source ? self.lastIncoming?.translation.text : self.incomingStream?.text
+            UIPasteboard.general.string = text ?? translation.text
             SharedStore.handledPasteboard = UIPasteboard.general.changeCount
-            self?.panelButton.configuration?.title = "Đã sao chép"
+            self.panelButton.configuration?.title = "Đã sao chép"
         }
+        panelIncoming = source
+    }
+
+    private static let incomingTitle = "Tin đối tác → Tiếng Việt"
+
+    private func updateIncomingPanel(source: String, text: String) {
+        guard panelIncoming == source, mode == .panel(Self.incomingTitle) else { return }
+        let offset = panelText.contentOffset
+        panelText.attributedText = NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 17),
+                                                                                 .foregroundColor: UIColor.label])
+        panelText.setContentOffset(offset, animated: false)
     }
 
     // MARK: Translating the user's message
@@ -1124,6 +1166,38 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         Language.target(code: targetCode, context: context)
     }
 
+    /// A Dịch under way: the text sent to be translated, and what has come back of it.
+    @MainActor private final class Outgoing {
+        let text: String
+        let target: Language
+        let field: UUID?
+        let tapped: CFTimeInterval
+        let started = CACurrentMediaTime()
+        var task: Task<Void, Never>?
+        /// The field was read in full, and holds exactly `text`.
+        var confirmed = false
+        var read: CFTimeInterval = 0
+        /// The translation once whole, and when it came; the meaning check may still be coming.
+        var translation: String?
+        var answered: CFTimeInterval = 0
+        /// OpenAI's whole answer, its meaning check included.
+        var result: Translation?
+        var replacing = false
+        var replaced = false
+        var history: HistoryItem?
+
+        init(text: String, target: Language, field: UUID?, tapped: CFTimeInterval) {
+            self.text = text
+            self.target = target
+            self.field = field
+            self.tapped = tapped
+        }
+    }
+
+    /// Translating starts at once on the text the field shows around the cursor (usually the whole
+    /// message), while the field is read in full; if the read finds more, it starts again on that.
+    /// The translation goes into the field as soon as it is whole, before the meaning check that is
+    /// written after it; the meaning comes up on the info line a moment later.
     private func translateDraft() {
         // The cursor is still walking the field for an undo (the panel's Xong brings Dịch back
         // meanwhile): a second walk over the same field would read it half deleted.
@@ -1135,51 +1209,138 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         activeTarget = target
         mode = .busy
         task?.cancel()
+        outgoing = nil
         // Where the time of a Dịch goes (reading the field, OpenAI, replacing the text), for the log.
         let tapped = CACurrentMediaTime()
+        let field = currentField
+        let proxy = textDocumentProxy
+        let shown = (proxy.documentContextBeforeInput ?? "") + (proxy.selectedText ?? "") + (proxy.documentContextAfterInput ?? "")
+        if !shown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            startOutgoing(shown, target: target, context: context, apiKey: apiKey, field: field, tapped: tapped)
+        }
         readDocument { [weak self] text in
             guard let self, self.mode == .busy, self.view.window != nil else { return }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.task?.cancel()
+                self.outgoing = nil
                 self.mode = .failed(TranslateError.empty.errorDescription ?? "")
                 return
             }
-            let read = CACurrentMediaTime()
-            let field = self.currentField
-            self.task = Task { [weak self] in
-                do {
-                    let result = try await Translator(apiKey: apiKey)
-                        .translate(text, to: target, context: context, checkMeaning: SharedStore.checkMeaning)
-                    let answered = CACurrentMediaTime()
-                    guard let self, !Task.isCancelled else { return }
-                    // Another text field has the keyboard now: its text is not the one translated.
-                    guard self.currentField == field else {
-                        self.mode = .failed(Self.fieldSwitched)
-                        return
-                    }
-                    self.original = text
-                    // In the history first: hidden while the field is being replaced, the keyboard
-                    // stops, and the translation is still there to copy from the app.
-                    let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
-                                           meaning: result.meaning, note: result.note)
-                    Self.store.async { SharedStore.addHistory(item) }
-                    self.replaceDocument(with: result.text, current: text) { [weak self] in
-                        TypingLog.mark("kết quả dịch")
-                        TypingLog.add("⇄ Dịch \(text.count)→\(result.text.count) ký tự: đọc ô \(Int((read - tapped) * 1000))ms"
-                                      + " · OpenAI \(Int((answered - read) * 1000))ms · thay ô \(Int((CACurrentMediaTime() - answered) * 1000))ms")
-                        let line = ChatLine(side: .me, text: result.text, date: Date())
-                        Self.store.async { SharedStore.remember(line) }
-                        self?.pasteboardAtOutgoing = self?.seenPasteboard
-                        self?.refreshPillTarget()
-                        self?.lastOutgoing = (result, text)
-                        self?.mode = .done
-                        self?.info = .outgoing(result, original: text)
-                    }
-                } catch is CancellationError {
-                } catch {
-                    TypingLog.add("⇄ Dịch lỗi sau \(Int((CACurrentMediaTime() - tapped) * 1000))ms: \(error.localizedDescription)")
-                    self?.mode = .failed(error.localizedDescription)
-                }
+            if self.outgoing?.text != text {
+                // The field holds more than it showed (another paragraph): translated in full.
+                self.task?.cancel()
+                self.startOutgoing(text, target: target, context: context, apiKey: apiKey, field: field, tapped: tapped)
             }
+            guard let job = self.outgoing else { return }
+            job.confirmed = true
+            job.read = CACurrentMediaTime()
+            self.advance(job)
+        }
+    }
+
+    private func startOutgoing(_ text: String, target: Language, context: [ChatLine], apiKey: String, field: UUID?,
+                               tapped: CFTimeInterval) {
+        let job = Outgoing(text: text, target: target, field: field, tapped: tapped)
+        outgoing = job
+        let checkMeaning = SharedStore.checkMeaning
+        job.task = Task { [weak self] in
+            do {
+                let result = try await Translator(apiKey: apiKey)
+                    .translate(text, to: target, context: context, checkMeaning: checkMeaning) { [weak self] translation, whole in
+                        guard whole else { return }
+                        DispatchQueue.main.async { [weak self] in self?.translated(job, translation) }
+                    }
+                guard !Task.isCancelled else { return }
+                self?.answered(job, result)
+            } catch is CancellationError {
+            } catch {
+                self?.failed(job, error)
+            }
+        }
+        task = job.task
+    }
+
+    /// The translation is whole (its meaning check is still being written).
+    private func translated(_ job: Outgoing, _ translation: String) {
+        guard outgoing === job, job.translation == nil else { return }
+        job.translation = translation
+        job.answered = CACurrentMediaTime()
+        advance(job)
+    }
+
+    private func answered(_ job: Outgoing, _ result: Translation) {
+        guard outgoing === job else { return }
+        job.result = result
+        if job.translation == nil {
+            job.translation = result.text
+            job.answered = CACurrentMediaTime()
+        }
+        // Saved in the history before its meaning check came.
+        if var item = job.history, item.meaning != result.meaning {
+            item.meaning = result.meaning
+            job.history = item
+            Self.store.async { SharedStore.updateHistory(item) }
+        }
+        guard job.replaced else { return advance(job) }
+        // In the chat already: the meaning check has come.
+        outgoing = nil
+        TypingLog.add("⇄ Nghĩa đến sau bản dịch \(Int((CACurrentMediaTime() - job.answered) * 1000))ms")
+        let shown = Translation(text: job.translation ?? result.text, meaning: result.meaning, note: result.note,
+                                language: job.target, usage: result.usage)
+        lastOutgoing = (shown, job.text)
+        // Still on the info line (no key typed since): the meaning takes its place there.
+        if case .outgoing(_, let original) = info, original == job.text {
+            info = .outgoing(shown, original: job.text)
+        }
+    }
+
+    private func failed(_ job: Outgoing, _ error: Error) {
+        guard outgoing === job else { return }
+        outgoing = nil
+        TypingLog.add("⇄ Dịch lỗi sau \(Int((CACurrentMediaTime() - job.tapped) * 1000))ms: \(error.localizedDescription)")
+        // Only the meaning check failed: the translation stays in the chat.
+        guard !job.replacing else { return }
+        mode = .failed(error.localizedDescription)
+    }
+
+    /// Once the field is known to hold the text translated and the translation is whole: into the field.
+    private func advance(_ job: Outgoing) {
+        guard outgoing === job, job.confirmed, let translation = job.translation, !job.replacing else { return }
+        // Another text field has the keyboard now: its text is not the one translated.
+        guard currentField == job.field else {
+            task?.cancel()
+            outgoing = nil
+            mode = .failed(Self.fieldSwitched)
+            return
+        }
+        job.replacing = true
+        original = job.text
+        // In the history first: hidden while the field is being replaced, the keyboard stops, and the
+        // translation is still there to copy from the app. Its meaning check follows when it comes.
+        let item = HistoryItem(side: .me, source: job.text, translation: translation, languageCode: job.target.code,
+                               meaning: job.result?.meaning, note: job.result?.note)
+        job.history = item
+        Self.store.async { SharedStore.addHistory(item) }
+        let replacing = CACurrentMediaTime()
+        replaceDocument(with: translation, current: job.text) { [weak self] in
+            guard let self else { return }
+            TypingLog.mark("kết quả dịch")
+            let ms = { (seconds: CFTimeInterval) in Int(seconds * 1000) }
+            TypingLog.add("⇄ Dịch \(job.text.count)→\(translation.count) ký tự: đọc ô \(ms(job.read - job.tapped))ms"
+                          + " · OpenAI \(ms(job.answered - job.started))ms\(job.started - job.tapped < 0.05 ? " (gửi ngay lúc bấm)" : "")"
+                          + " · thay ô \(ms(CACurrentMediaTime() - replacing))ms · tổng \(ms(CACurrentMediaTime() - job.tapped))ms")
+            let line = ChatLine(side: .me, text: translation, date: Date())
+            Self.store.async { SharedStore.remember(line) }
+            self.pasteboardAtOutgoing = self.seenPasteboard
+            self.refreshPillTarget()
+            job.replaced = true
+            let shown = job.result.map {
+                Translation(text: translation, meaning: $0.meaning, note: $0.note, language: job.target, usage: $0.usage)
+            } ?? Translation(text: translation, meaning: nil, note: nil, language: job.target)
+            if job.result != nil, self.outgoing === job { self.outgoing = nil }
+            self.lastOutgoing = (shown, job.text)
+            self.mode = .done
+            self.info = .outgoing(shown, original: job.text)
         }
     }
 
@@ -1190,6 +1351,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         // tap started a second walk, and both put the original back ("câu gốc câu gốc").
         guard walking == 0 else { return }
         panelButton.configuration?.title = "Đang lấy lại…"
+        // A meaning check still coming is for a translation no longer sent.
+        outgoing?.task?.cancel()
+        outgoing = nil
         let sent = lastOutgoing?.translation.text
         if let sent {
             Self.store.async { SharedStore.forgetLast(sent) }
@@ -1316,7 +1480,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                 }
             }
         }
-        moveToEnd(clear)
+        // Still at the end of the text read (the read ends there, and a key typed since would have
+        // stopped the Dịch): no need to step past the end and wait to see the field not move.
+        let before = proxy.documentContextBeforeInput ?? ""
+        if (proxy.documentContextAfterInput ?? "").isEmpty, !before.isEmpty, current.hasSuffix(before) {
+            clear()
+        } else {
+            moveToEnd(clear)
+        }
     }
 
     /// After moving the cursor: runs `work` once the field reports other text around the cursor (the
@@ -1392,7 +1563,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         if CACurrentMediaTime() - lastKeyAt < 1.5 { return }
         switch info {
         case .idle, .incoming, .outgoing:
-            guard fresh else { return }
+            // The partner's message still coming in on the info line: as `incomingBusy`.
+            guard fresh, incomingStream == nil else { return }
             // The meaning of the message just translated stays: only something copied after it
             // takes its place.
             if case .outgoing = info, changeCount == pasteboardAtOutgoing { return }
@@ -1464,15 +1636,22 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
     }
 
     /// The copy counts as handled once translated: one that failed (no network) is offered again.
+    /// The translation comes up on the info line as it is written.
     private func translateIncoming(_ text: String, context: [ChatLine], changeCount: Int) {
         guard let apiKey = SharedStore.apiKey else { return }
         info = .incomingBusy
         incomingTask?.cancel()
+        incomingStream = (text, "")
         let started = CACurrentMediaTime()
+        let firstWords = FirstWords()
         incomingTask = Task { [weak self] in
             do {
-                let result = try await Translator(apiKey: apiKey).translate(text, to: .vietnamese, context: context)
-                TypingLog.add("⇄ Tin đối tác \(text.count)→\(result.text.count) ký tự: OpenAI \(Int((CACurrentMediaTime() - started) * 1000))ms")
+                let result = try await Translator(apiKey: apiKey).translate(text, to: .vietnamese, context: context) { [weak self] partial, _ in
+                    firstWords.heard()
+                    DispatchQueue.main.async { [weak self] in self?.streamed(incoming: text, partial) }
+                }
+                let first = firstWords.at.map { " (chữ đầu sau \(Int(($0 - started) * 1000))ms)" } ?? ""
+                TypingLog.add("⇄ Tin đối tác \(text.count)→\(result.text.count) ký tự: OpenAI \(Int((CACurrentMediaTime() - started) * 1000))ms" + first)
                 // Language detection and the history's JSON: not on the main thread, where the user
                 // may already be typing the reply.
                 let translation = result.text, note = result.note
@@ -1488,18 +1667,58 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
             } catch is CancellationError {
             } catch {
                 TypingLog.add("⇄ Tin đối tác lỗi sau \(Int((CACurrentMediaTime() - started) * 1000))ms: \(error.localizedDescription)")
-                self?.info = .message(error.localizedDescription)
+                guard let self, self.incomingStream?.source == text else { return }
+                self.incomingStream = nil
+                self.info = .message(error.localizedDescription)
             }
         }
+    }
+
+    /// The translation of the partner's message so far, on the info line (and the panel, if open
+    /// on it). Drawn again at most every 50 ms, and not while keys are being typed.
+    private func streamed(incoming source: String, _ partial: String) {
+        guard incomingStream?.source == source, !partial.isEmpty else { return }
+        incomingStream?.text = partial
+        guard !incomingRedraw else { return }
+        incomingRedraw = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.redrawIncoming() }
+    }
+
+    private func redrawIncoming() {
+        incomingRedraw = false
+        guard let stream = incomingStream, !stream.text.isEmpty else { return }
+        if CACurrentMediaTime() - lastKeyAt < 0.3 {
+            incomingRedraw = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.redrawIncoming() }
+            return
+        }
+        switch info {
+        case .incomingBusy: break
+        case .incoming(let source, _) where source == stream.source: break
+        default: return
+        }
+        TypingLog.mark("tin đối tác đang đến")
+        info = .incoming(source: stream.source, translation: Translation(text: stream.text, meaning: nil, note: nil, language: .vietnamese))
+        updateIncomingPanel(source: stream.source, text: stream.text)
     }
 
     /// On the info line; a long one is read in full with a tap on it. It never opens over the keys
     /// by itself: a keyboard that came up with no keys, a translation in their place, was taken for broken.
     private func show(incoming source: String, translation: Translation) {
         TypingLog.mark("tin đối tác")
+        if incomingStream?.source == source { incomingStream = nil }
         lastIncoming = (source, translation)
         info = .incoming(source: source, translation: translation)
+        updateIncomingPanel(source: source, text: translation.text)
     }
+}
+
+/// When the first words of a translation came (it streams in off the main thread), for the typing log.
+private final class FirstWords: @unchecked Sendable {
+    private let lock = NSLock()
+    private var first: CFTimeInterval?
+    var at: CFTimeInterval? { lock.withLock { first } }
+    func heard() { lock.withLock { if first == nil { first = CACurrentMediaTime() } } }
 }
 
 /// Lets keys play the standard keyboard click.

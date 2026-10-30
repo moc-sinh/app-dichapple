@@ -69,9 +69,36 @@ extension SharedStore {
     /// Throws when saved history cannot be read, so the writers below leave it untouched
     /// instead of replacing it with an empty list. One item that cannot be read is left out
     /// rather than costing the whole list (and every translation saved after it).
+    /// Read again only when it changed: decoding a few hundred items each time the Dịch tab came
+    /// back, or a translation was saved, held up the screen.
     private static func storedHistory() throws -> [HistoryItem] {
         guard let data = defaults.data(forKey: historyKey) else { return [] }
-        return try JSONDecoder().decode([LossyItem].self, from: data).compactMap(\.item)
+        if let items = decoded.items(for: data) { return items }
+        let items = try JSONDecoder().decode([LossyItem].self, from: data).compactMap(\.item)
+        decoded.keep(items, for: data)
+        return items
+    }
+
+    /// The history as last decoded, with the bytes it came from (the keyboard writes it too).
+    private static let decoded = DecodedHistory()
+
+    private final class DecodedHistory: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data: Data?
+        private var items: [HistoryItem] = []
+
+        func items(for data: Data) -> [HistoryItem]? {
+            lock.lock()
+            defer { lock.unlock() }
+            return data == self.data ? items : nil
+        }
+
+        func keep(_ items: [HistoryItem], for data: Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.data = data
+            self.items = items
+        }
     }
 
     private struct LossyItem: Decodable {
@@ -91,7 +118,9 @@ extension SharedStore {
     }
 
     static func saveHistory(_ items: [HistoryItem]) {
-        defaults.set(try? JSONEncoder().encode(items), forKey: historyKey)
+        let data = try? JSONEncoder().encode(items)
+        defaults.set(data, forKey: historyKey)
+        if let data { decoded.keep(items, for: data) }
     }
 
     static func updateHistory(_ item: HistoryItem) {

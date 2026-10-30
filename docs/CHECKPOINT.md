@@ -1,4 +1,4 @@
-# Checkpoint — 27/10/2026
+# Checkpoint — 30/10/2026
 
 Điểm dừng để phiên mới (có thể ở tài khoản khác) làm tiếp. Mọi mã đã được push lên nhánh
 `claude/funny-gates-s6pl2c` (PR #1 nháp vào `claude/stoic-hopper-f60iid`) của repo `moc-sinh/app-dichapple`.
@@ -12,12 +12,18 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
    - Hội thoại: `SWIFT_BIN=<toolchain>/usr/bin bash Tests/ConversationSim/run.sh` chạy `Tests/Conversation`
      (250 kiểm tra) và mô phỏng cuộc họp (model thật, Soniox/Dịch liền/âm thanh/OpenAI giả trong
      `Tests/ConversationSim/Stubs.swift`). Thêm tình huống mới vào `Tests/ConversationSim/main.swift`.
+   - Dịch truyền từng phần (1.17.0): bước "Streaming tests" của `ios.yml` (`Tests/Stream`, 1.301 kiểm tra), và
+     `SWIFT_BIN=<toolchain>/usr/bin bash Tests/StreamLinux/run.sh` (23 kiểm tra: cả yêu cầu với OpenAI giả).
+   - Android: `bash ci/android-local-check.sh` chạy kiểm thử `core` (45) rồi biên dịch mã app với framework Android
+     lấy từ Maven Central (máy cloud không tải được Android SDK; Maven Central trả 429 nên dùng mirror của Google).
+     Chỉ còn 2 cảnh báo cũ ở `MainActivity.kt`.
 3. Push lên `claude/funny-gates-s6pl2c` (fetch và gộp trước), xem CI ở tab Actions, gửi link IPA
    `https://github.com/moc-sinh/app-dichapple/actions/runs/<run>/artifacts/<id>` (artifact `MSTrans-ipa` của job `build`).
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.16.3 và Android 1.5.3 (Dịch đoạn dài không còn để sót chữ Việt trước bản dịch; xem mục 1.16.3). Trước đó
+- **Bản mới nhất:** iPhone 1.17.0 và Android 1.6.0 (tối ưu tốc độ toàn bộ: bản dịch truyền từng phần, vào ô trước khi có nghĩa;
+  xem mục 1.17.0). Trước đó iPhone 1.16.3 và Android 1.5.3 (Dịch đoạn dài không còn để sót chữ Việt trước bản dịch; xem mục 1.16.3). Trước đó
   iPhone 1.16.2 và Android 1.5.2 (bản dịch dài không còn tự mở che phím; xem mục 1.16.2). Trước đó iPhone 1.16.1
   và Android 1.5.1 (bàn phím tự dịch tin vừa sao chép, bật sẵn; xem mục 1.16.1). Trước đó
   iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
@@ -505,6 +511,33 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   bản dài hơn giữa hai cách đọc. Chưa thử trên máy thật; nếu còn sót, xin nhật ký gõ (dòng "▤ thay ô").
   Commit 7076f70: Android run 12 xanh (`android-1.5.3-12`), iOS run 84 build xanh (IPA
   `https://github.com/moc-sinh/app-dichapple/actions/runs/41106692727/artifacts/13000919629`); đã gửi cả hai link.
+
+- **1.17.0 + Android 1.6.0: tối ưu tốc độ toàn bộ (30/10).** Người dùng: "tối ưu hết cỡ toàn bộ tất cả mọi chức năng… vẫn giữ chất
+  lượng hoàn hảo", rồi "tạo bảng để so sánh những thay đổi tối ưu" (bảng gửi kèm trong thread). Hội thoại giữ nguyên (đã tối ưu ở
+  1.11–1.15). Chất lượng dịch không đổi: cùng model, cùng lời nhắc, cùng schema.
+  - **Truyền từng phần** (`stream: true`, chỉ khi có `progress`): `Translator` đọc sự kiện SSE (`ResponseStream`), đọc bản dịch ra
+    từ JSON đang viết (`Prompt.partialTranslation`: khoá `translation` đứng trước `translation_back_vi` nên bản dịch xong trước
+    phần dịch ngược). Bản dịch đủ (gặp dấu `"` đóng) là dùng được ngay. Thử lại 1 lần (lỗi mạng/5xx/`response.failed`) chỉ khi
+    chưa có bản dịch đủ; sau đó mất mạng hay bị cắt (`incomplete`) chỉ mất phần nghĩa. Bị cắt giữa bản dịch vẫn báo "Tin quá dài",
+    không chèn nửa bản dịch. Model không có JSON format: hỏi lại không format, chữ là bản dịch, chỉ dùng khi xong hẳn.
+  - **Bàn phím iPhone:** bấm Dịch là gửi ngay phần ô đang cho thấy (thường là cả tin) trong lúc đi đọc cả ô; đọc thấy khác thì gửi
+    lại cái đọc được. Bản dịch vào ô ngay khi đủ; nghĩa đến sau, cập nhật dòng thông tin (nếu chưa gõ phím) và lịch sử. Thay ô bỏ
+    bước dò cuối ô khi con trỏ đã ở cuối phần vừa đọc (−100 ms). Tin đối tác chạy dần từng chữ trên dòng thông tin (vẽ lại tối đa
+    20 lần/giây, hoãn khi đang gõ); bảng đọc tin đang mở thì chạy theo. Kết nối OpenAI giữ ấm trong lúc gõ (HEAD mỗi ≥40 s).
+    Nhật ký: `⇄ Dịch N→M ký tự: đọc ô · OpenAI (gửi ngay lúc bấm) · thay ô · tổng`, `⇄ Nghĩa đến sau bản dịch X ms`,
+    `⇄ Tin đối tác … (chữ đầu sau X ms)`.
+  - **App iPhone:** tab Dịch hiện bản dịch dần, sao chép được ngay khi đủ; lịch sử và nhận diện ngôn ngữ ra khỏi luồng chính;
+    lịch sử chỉ giải mã lại khi dữ liệu đổi (`History.swift`, `DecodedHistory`); mở kết nối khi bắt đầu gõ.
+  - **Android:** cùng cách ở `core/Translator.kt` (`Call.lines` đọc từng dòng trên luồng OkHttp). Bàn phím: chèn khi bản dịch đủ, nghĩa
+    sau (ẩn bàn phím sau lúc đã chèn thì vẫn chờ nghĩa để lưu lịch sử); tin đối tác chạy dần; mở kết nối khi bàn phím hiện và trong lúc
+    gõ; dòng thông tin chỉ vẽ lại icon khi đổi và chỉ đo 300 ký tự đầu. Tab Dịch: thẻ bản dịch đang chạy, chép được khi đủ; lịch sử
+    ra khỏi luồng chính. Cửa sổ "Dịch bằng MSTrans": tin đối tác chạy dần; câu của bạn chép sẵn khi đủ và lưu lịch sử ngay (đóng
+    cửa sổ trước khi có nghĩa không mất gì). `Settings` nhớ lịch sử đã giải mã (`historyCache`). Lớp chung `ui/StreamedText.kt`.
+  - **Kiểm thử:** iOS `Tests/Stream` (vào CI), `Tests/StreamLinux` (Linux), `Tests/Field` thêm ca hai đoạn giống nhau; Android
+    `TranslatorStreamTest` (14: đọc dần, đủ trước nghĩa, thử lại sau 500/rớt mạng/failed, rớt hay cắt trong phần nghĩa giữ bản dịch,
+    cắt giữa bản dịch báo lỗi, không format, 401, sự kiện lỗi, không truyền khi không có progress) và `historyIsReadAgainOnlyWhenItChanges`.
+    CI iOS in cảnh báo trình biên dịch thành annotation (đọc được qua API: `check-runs/<id>/annotations`).
+  - Chưa thử trên máy thật. Nếu chậm hay lỗi, xin nhật ký gõ (dòng ⇄) trước khi sửa.
 
 ## Việc tiếp theo (theo thứ tự)
 

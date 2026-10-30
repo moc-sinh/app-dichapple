@@ -53,6 +53,7 @@ import vn.mocsinh.mstrans.core.telex.Composer
 import vn.mocsinh.mstrans.core.telex.TypedText
 import vn.mocsinh.mstrans.ui.Colors
 import vn.mocsinh.mstrans.ui.PillStyle
+import vn.mocsinh.mstrans.ui.StreamedText
 import vn.mocsinh.mstrans.ui.TextSize
 import vn.mocsinh.mstrans.ui.copyText
 import vn.mocsinh.mstrans.ui.dp
@@ -95,6 +96,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         /** Something new was copied; translating it waits for a tap unless instant mode is on. */
         object Copied : Info()
         object IncomingBusy : Info()
+        /** Shown as it is written, then whole. */
         data class Incoming(val source: String, val translation: String) : Info()
         data class Outgoing(val translation: Translation, val original: String) : Info()
         data class Message(val text: String) : Info()
@@ -103,6 +105,16 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
     private enum class Caps { NONE, WORDS, SENTENCES, CHARACTERS }
 
     private class Typed(val before: String?, val edits: List<Composer.Edit>)
+
+    /**
+     * The user's message being translated. The translation goes into the field as soon as it is whole,
+     * before the meaning check written after it; the meaning comes up on the info line a moment later.
+     */
+    private class Outgoing(val text: String, val target: Language, val field: String?) {
+        /** In the field; only its meaning check may still be coming. */
+        var inserted: Translation? = null
+        var history: HistoryItem? = null
+    }
 
     private val settings: Settings get() = MSTransApp.of(this).settings
     private val scope = MainScope()
@@ -146,7 +158,16 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
     private var lastOutgoing: Pair<Translation, String>? = null
     private var lastIncoming: Pair<String, String>? = null
     private var task: Job? = null
+    private var outgoing: Outgoing? = null
     private var incomingTask: Job? = null
+    /** The partner's message being translated, and its translation as far as it has been written. */
+    private var incomingStream: Pair<String, StreamedText>? = null
+    /** The partner's message whose translation the panel shows (it follows the translation as it comes). */
+    private var panelIncoming: String? = null
+    /** The info line's icon as drawn last (drawn again only when it changes). */
+    private var infoIcon: Pair<Int, Int>? = null
+    /** An API key is set: the connection to OpenAI is kept open while the user types. */
+    private var canTranslate = false
     /** The clipboard already translated by itself in instant mode, so it is not sent twice. */
     private var attemptedClip: Int? = null
     /** The clipboard at the last look, and when the user's message was last translated. */
@@ -223,6 +244,9 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         val sameField = key == fieldKey
         fieldKey = key
         targetCode = settings.targetCode
+        // The connection to OpenAI opened now (DNS, TLS), not when Dịch is tapped.
+        canTranslate = settings.apiKey != null
+        if (canTranslate) Translator.warmUp()
         keys.hapticsEnabled = settings.haptics
         keys.clicksEnabled = settings.keySounds
         keys.typesOnTouchDown = settings.typesOnTouchDown
@@ -255,10 +279,16 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         shown = false
-        // The text being translated was read from this field: it must not replace another one.
+        // The text being translated was read from this field: it must not replace another one. A
+        // translation already in it waits only for its meaning check, which still goes in the history.
         if (mode == Mode.Busy) switchedWhileBusy = true
-        task?.cancel()
+        if (outgoing?.inserted == null) {
+            task?.cancel()
+            outgoing = null
+        }
         incomingTask?.cancel()
+        incomingStream?.second?.stopped = true
+        incomingStream = null
         clipboard?.removePrimaryClipChangedListener(clipListener)
         main.removeCallbacks(check)
         main.removeCallbacks(clipRetry)
@@ -333,6 +363,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         root = FrameLayout(this).apply { setBackgroundColor(kc.background) }
         val column = vertical()
 
+        infoIcon = null
         infoLine = label("", TextSize.SUBHEADLINE, c.text).oneLine().apply {
             setPadding(dp(12), 0, dp(12), 0)
             background = pressable(null, 0f)
@@ -396,6 +427,8 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         lastKeyAt = now
         checkedSinceKey = false
         typedSinceAppear = true
+        // Kept open while the user types (a HEAD every 45 s at most), so Dịch does not wait for it.
+        if (canTranslate) Translator.warmUp()
         val before = composer.before
         var typed = false
         var edits: List<Composer.Edit> = emptyList()
@@ -684,6 +717,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
             Mode.Busy -> {
                 // The translation would replace the field, these keys with it.
                 task?.cancel()
+                outgoing = null
                 mode = Mode.Normal
             }
             Mode.Done, is Mode.Failed -> main.post { if (mode == Mode.Done || mode is Mode.Failed) mode = Mode.Normal }
@@ -735,6 +769,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
                 bar.addView(status("Đang dịch sang ${activeTarget?.name ?: "ngôn ngữ đích"}…", spinner = true), weighted())
                 bar.addView(pill("Hủy") {
                     task?.cancel()
+                    outgoing = null
                     mode = Mode.Normal
                 })
             }
@@ -860,9 +895,15 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
             )
             is Info.Message -> Triple(i.text, R.drawable.ic_error, c.red)
         }
-        infoLine.text = text.replace('\n', ' ')
+        // One line: a long translation (redrawn as it comes) is not measured in full each time.
+        var end = minOf(text.length, INFO_CHARACTERS)
+        if (end < text.length && text[end - 1].isHighSurrogate()) end--
+        infoLine.text = text.substring(0, end).replace('\n', ' ')
         infoLine.setTextColor(if (info == Info.IncomingBusy) c.secondary else c.text)
-        infoLine.leading(iconId, tint, 16, 7)
+        if (infoIcon != iconId to tint) {
+            infoIcon = iconId to tint
+            infoLine.leading(iconId, tint, 16, 7)
+        }
         infoLine.contentDescription = if (info is Info.Incoming) "Tin đối tác, bằng tiếng Việt: $text" else text
         infoLine.visibility = View.VISIBLE
     }
@@ -872,7 +913,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
             Info.Idle, is Info.Message -> openOverview()
             Info.Copied -> translateCopied()
             Info.IncomingBusy -> Unit
-            is Info.Incoming -> presentIncoming(i.translation)
+            is Info.Incoming -> presentIncoming(i.source, i.translation)
             is Info.Outgoing -> openOutgoingCheck()
         }
     }
@@ -900,6 +941,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         panelButton.text = button
         panelAction = action
         panelDone = done
+        panelIncoming = null
         mode = Mode.Panel(title)
     }
 
@@ -965,12 +1007,28 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         showPanel("Kiểm tra bản dịch", parts, "Hoàn tác, lấy lại câu gốc") { undo() }
     }
 
-    /** Only the translation: the partner's message is right above in the chat. */
-    private fun presentIncoming(translation: String) {
-        showPanel("Tin đối tác → Tiếng Việt", listOf(translation to false), "Sao chép bản dịch") {
-            copyText(translation)
+    /**
+     * Only the translation: the partner's message is right above in the chat. Opened while the
+     * translation is still coming, the panel follows it.
+     */
+    private fun presentIncoming(source: String, translation: String) {
+        showPanel(INCOMING_TITLE, listOf(translation to false), "Sao chép bản dịch") {
+            val latest = lastIncoming?.takeIf { it.first == source }?.second
+                ?: incomingStream?.takeIf { it.first == source }?.second?.text
+            copyText(latest ?: translation)
             panelButton.text = "Đã sao chép"
         }
+        panelIncoming = source
+    }
+
+    private fun updateIncomingPanel(source: String, translation: String) {
+        if (panelIncoming != source || mode != Mode.Panel(INCOMING_TITLE)) return
+        val text = SpannableStringBuilder(translation)
+        val flags = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        text.setSpan(AbsoluteSizeSpan(17, true), 0, text.length, flags)
+        text.setSpan(ForegroundColorSpan(c.text), 0, text.length, flags)
+        // Where the user scrolled to stays.
+        panelText.text = text
     }
 
     // Translating the user's message
@@ -1008,40 +1066,81 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         }
         mode = Mode.Busy
         task?.cancel()
-        val field = fieldKey
+        val job = Outgoing(text, target, fieldKey)
+        outgoing = job
         val checkMeaning = settings.checkMeaning
         task = scope.launch {
             try {
-                val result = Translator(apiKey, settings.model, settings).translate(text, target, context, checkMeaning)
-                if (mode != Mode.Busy) return@launch
-                // Another text field has the keyboard now: its text is not the one translated.
-                if (fieldKey != field || !shown) {
-                    mode = Mode.Failed(FIELD_SWITCHED)
-                    return@launch
+                val result = Translator(apiKey, settings.model, settings).translate(text, target, context, checkMeaning) { translation, whole ->
+                    // On OkHttp's thread: into the field at once, while the meaning check is still being written.
+                    if (whole) main.post { if (outgoing === job) insert(job, Translation(translation, null, target)) }
                 }
-                original = text
-                // In the history first: the translation is still there to copy from the app if
-                // replacing the field goes wrong.
-                val item = HistoryItem(side = ChatLine.Side.ME, source = text, translation = result.text, languageCode = target.code,
-                    meaning = result.meaning)
-                launch(store) { settings.addHistory(item) }
-                replaceWholeField(result.text)
-                launch(store) { settings.remember(ChatLine(ChatLine.Side.ME, result.text, System.currentTimeMillis())) }
-                clipAtOutgoing = seenClip
-                refreshPillTarget()
-                lastOutgoing = result to text
-                mode = Mode.Done
-                info = Info.Outgoing(result, text)
+                if (outgoing === job) answered(job, result)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (mode == Mode.Busy) mode = Mode.Failed(e.message ?: "Không dịch được. Thử lại.")
+                if (outgoing !== job) return@launch
+                outgoing = null
+                if (job.inserted == null && mode == Mode.Busy) mode = Mode.Failed(e.message ?: "Không dịch được. Thử lại.")
             }
         }
     }
 
+    /** The translation is whole: into the field (its meaning check may still be coming). */
+    private fun insert(job: Outgoing, translation: Translation) {
+        if (job.inserted != null || mode != Mode.Busy) return
+        // Another text field has the keyboard now: its text is not the one translated.
+        if (fieldKey != job.field || !shown) {
+            task?.cancel()
+            outgoing = null
+            mode = Mode.Failed(FIELD_SWITCHED)
+            return
+        }
+        job.inserted = translation
+        original = job.text
+        // In the history first: the translation is still there to copy from the app if replacing the
+        // field goes wrong. Its meaning check follows when it comes.
+        val item = HistoryItem(side = ChatLine.Side.ME, source = job.text, translation = translation.text,
+            languageCode = job.target.code, meaning = translation.meaning)
+        job.history = item
+        scope.launch(store) { settings.addHistory(item) }
+        replaceWholeField(translation.text)
+        scope.launch(store) { settings.remember(ChatLine(ChatLine.Side.ME, translation.text, System.currentTimeMillis())) }
+        clipAtOutgoing = seenClip
+        refreshPillTarget()
+        lastOutgoing = translation to job.text
+        mode = Mode.Done
+        info = Info.Outgoing(translation, job.text)
+    }
+
+    /** OpenAI's whole answer: the translation, if it did not come whole before, and its meaning check. */
+    private fun answered(job: Outgoing, result: Translation) {
+        val inserted = job.inserted
+        if (inserted == null) {
+            insert(job, result)
+            if (outgoing === job) outgoing = null
+            return
+        }
+        outgoing = null
+        if (result.meaning == null) return
+        val checked = inserted.copy(meaning = result.meaning, usage = result.usage)
+        job.history?.let { item ->
+            val updated = item.copy(meaning = result.meaning)
+            job.history = updated
+            scope.launch(store) { settings.updateHistory(updated) }
+        }
+        if (lastOutgoing?.second == job.text) lastOutgoing = checked to job.text
+        // Still on the info line (no key typed since): the meaning takes its place there.
+        if ((info as? Info.Outgoing)?.original == job.text) info = Info.Outgoing(checked, job.text)
+    }
+
     private fun undo() {
         panelButton.text = "Đang lấy lại…"
+        // A meaning check still coming is for a translation no longer sent.
+        if (outgoing != null) {
+            task?.cancel()
+            outgoing = null
+        }
         lastOutgoing?.first?.text?.let { sent ->
             scope.launch(store) { settings.forgetLast(sent) }
             refreshPillTarget()
@@ -1129,7 +1228,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         val fresh = !text.isNullOrEmpty() && hash != settings.handledClipboard
         when (info) {
             Info.Idle, is Info.Incoming, is Info.Outgoing -> {
-                if (!fresh) return
+                if (!fresh || incomingStream != null) return
                 // The meaning of the message just translated stays: only something copied after it takes its place.
                 if (info is Info.Outgoing && hash == clipAtOutgoing) return
                 if (settings.instantIncoming && attemptedClip != hash && !clipIsSensitive()) {
@@ -1181,14 +1280,20 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         }
     }
 
-    /** The copy counts as handled once translated: one that failed (no network) is offered again. */
+    /**
+     * The copy counts as handled once translated: one that failed (no network) is offered again. The
+     * translation comes up on the info line as it is written.
+     */
     private fun translateIncoming(text: String, context: List<ChatLine>, hash: Int) {
         val apiKey = settings.apiKey ?: return
         info = Info.IncomingBusy
         incomingTask?.cancel()
+        incomingStream?.second?.stopped = true
+        val stream = StreamedText { drawIncoming(text, it.text.trim()) }
+        incomingStream = text to stream
         incomingTask = scope.launch {
             try {
-                val result = Translator(apiKey, settings.model, settings).translate(text, Language.vietnamese, context)
+                val result = Translator(apiKey, settings.model, settings).translate(text, Language.vietnamese, context, progress = stream::heard)
                 launch(store) {
                     settings.cacheIncoming(text, result.text)
                     settings.addHistory(HistoryItem(side = ChatLine.Side.PARTNER, source = text, translation = result.text,
@@ -1199,9 +1304,24 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (incomingStream?.second !== stream) return@launch
+                stream.stopped = true
+                incomingStream = null
                 info = Info.Message(e.message ?: "Không dịch được tin đối tác. Thử lại.")
             }
         }
+    }
+
+    /** The translation of the partner's message so far, on the info line (and the panel, if open on it). */
+    private fun drawIncoming(source: String, text: String) {
+        if (incomingStream?.first != source || text.isEmpty()) return
+        when (val i = info) {
+            Info.IncomingBusy -> Unit
+            is Info.Incoming -> if (i.source != source) return
+            else -> return
+        }
+        info = Info.Incoming(source, text)
+        updateIncomingPanel(source, text)
     }
 
     /**
@@ -1209,8 +1329,13 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
      * keyboard that came up with no keys, a translation in their place, was taken for broken.
      */
     private fun show(source: String, translation: String) {
+        if (incomingStream?.first == source) {
+            incomingStream?.second?.stopped = true
+            incomingStream = null
+        }
         lastIncoming = source to translation
         info = Info.Incoming(source, translation)
+        updateIncomingPanel(source, translation)
     }
 
     companion object {
@@ -1223,6 +1348,9 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         /** Pieces of a field deleted at most: 50 × 20,000 characters on each side of the cursor. */
         private const val CLEAR_ROUNDS = 50
         private const val FIELD_SWITCHED = "Đã sang ô nhập khác. Bấm Dịch lại."
+        private const val INCOMING_TITLE = "Tin đối tác → Tiếng Việt"
+        /** What the one-line info line shows of a long translation at most. */
+        private const val INFO_CHARACTERS = 300
 
         /**
          * A password, a code, a link or an e-mail address: one word of plain letters with digits or

@@ -50,7 +50,9 @@ final class Field {
 /// The keyboard's side, as `replaceDocument` drives it.
 func replace(_ field: Field, with new: String, current: String, checked: Bool = false) {
     var eraser = FieldEraser(expected: current)
-    field.moveToEnd()
+    // At the end of the text read already: no step past the end first.
+    let start = field.read()
+    if !(start.after.isEmpty && !start.before.isEmpty && current.hasSuffix(start.before)) { field.moveToEnd() }
     func waitMove(_ before: String, _ after: String, _ ticks: Int) {
         for _ in 0..<ticks {
             let r = field.read()
@@ -145,6 +147,15 @@ for lag in [0, 3, 8] {
     let empty = Field("", lag: lag)
     replace(empty, with: "xin chào", current: "")
     expect(empty.whole == "xin chào", "empty field")
+}
+
+// The cursor was put at the end of a paragraph just like the last one: taken for the end, the
+// text after it stays, and the read afterwards finds it and erases it again.
+for lag in [0, 3] {
+    let twice = "Giá 3,2 đô.\nGiá 3,2 đô."
+    let f = Field(twice, cursor: 11, lag: lag)
+    replace(f, with: translation, current: twice)
+    expect(f.whole == translation, "cursor at a paragraph like the last, lag \(lag): \(f.whole.debugDescription)")
 }
 
 // leftover: only when the field holds the new text and more.
