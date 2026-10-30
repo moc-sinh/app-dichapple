@@ -503,6 +503,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   lần nhìn, có/không trống tạm, cắt 40 ký tự: cách cũ sót chữ 200/360 ô, cách mới 0 (733 kiểm tra). Android: `replaceWholeField`
   trước chỉ tin độ dài ô app đưa một lần (`getExtractedText`); giờ xóa tiếp quanh con trỏ tới khi trống, và `readWholeField` lấy
   bản dài hơn giữa hai cách đọc. Chưa thử trên máy thật; nếu còn sót, xin nhật ký gõ (dòng "▤ thay ô").
+  Commit 7076f70: Android run 12 xanh (`android-1.5.3-12`), iOS run 84 build xanh (IPA
+  `https://github.com/moc-sinh/app-dichapple/actions/runs/41106692727/artifacts/13000919629`); đã gửi cả hai link.
 
 ## Việc tiếp theo (theo thứ tự)
 
