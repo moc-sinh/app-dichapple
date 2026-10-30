@@ -14,6 +14,8 @@ enum SharedStore {
 
     enum Key {
         static let apiKey = "apiKey"
+        static let sonioxKey = "sonioxKey"
+        static let googleKey = "googleKey"
         static let model = "model"
         static let targetCode = "targetCode"
         static let lastPartnerCode = "lastPartnerCode"
@@ -23,7 +25,8 @@ enum SharedStore {
         static let gender = "gender"
         static let glossary = "glossary"
         static let checkMeaning = "checkMeaning"
-        static let instantIncoming = "instantIncoming"
+        /// A new key: a copied message is translated by itself unless turned off (the user wants it on).
+        static let instantIncoming = "autoTranslateCopied"
         static let haptics = "haptics"
         static let memory = "memory"
         static let incomingCache = "incomingCache"
@@ -32,6 +35,11 @@ enum SharedStore {
         static let keyboardStage = "keyboardStage"
         static let keyboardStageAt = "keyboardStageAt"
         static let contextClearedAt = "contextClearedAt"
+        static let typingLog = "typingLog"
+        static let typesOnTouchDown = "typesOnTouchDown"
+        static let keySounds = "keySounds"
+        static let keyPopups = "keyPopups"
+        static let keyboardSize = "keyboardSize"
     }
 
     // MARK: Settings
@@ -43,6 +51,24 @@ enum SharedStore {
             return key.isEmpty ? nil : key
         }
         set { defaults.set(newValue, forKey: Key.apiKey) }
+    }
+
+    /// The Soniox key (the Hội thoại tab's cheapest live translation), on this iPhone only.
+    static var sonioxKey: String? {
+        get {
+            let key = defaults.string(forKey: Key.sonioxKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return key.isEmpty ? nil : key
+        }
+        set { defaults.set(newValue, forKey: Key.sonioxKey) }
+    }
+
+    /// The Google Cloud key (Google's voices in the Hội thoại tab), on this iPhone only.
+    static var googleKey: String? {
+        get {
+            let key = defaults.string(forKey: Key.googleKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return key.isEmpty ? nil : key
+        }
+        set { defaults.set(newValue, forKey: Key.googleKey) }
     }
 
     static var model: TranslationModel {
@@ -70,8 +96,20 @@ enum SharedStore {
     static var checkMeaning: Bool { defaults.object(forKey: Key.checkMeaning) as? Bool ?? true }
     /// Read the copied message as the keyboard opens, no tap. Needs paste permission set to
     /// "Allow" for MSTrans, or iOS asks every time.
-    static var instantIncoming: Bool { defaults.bool(forKey: Key.instantIncoming) }
+    static var instantIncoming: Bool { defaults.object(forKey: Key.instantIncoming) as? Bool ?? true }
     static var haptics: Bool { defaults.object(forKey: Key.haptics) as? Bool ?? true }
+    /// Keys type as the finger lands (see `KeyboardLayoutView.typesOnTouchDown`); off, as the
+    /// finger lifts, like the Apple keyboard.
+    static var typesOnTouchDown: Bool { defaults.object(forKey: Key.typesOnTouchDown) as? Bool ?? true }
+    /// Key sounds. With Full Access the keyboard plays them itself, so iOS's keyboard sound
+    /// setting does not reach it; this one does (and the silent switch mutes them).
+    static var keySounds: Bool { defaults.object(forKey: Key.keySounds) as? Bool ?? true }
+    /// The enlarged letter above a pressed key (see `KeyboardLayoutView.showsPopups`); off by
+    /// default, the key lights up instead, like the Apple keyboard with Character Preview off.
+    static var keyPopups: Bool { defaults.bool(forKey: Key.keyPopups) }
+    static var keyboardSize: KeyboardSize {
+        KeyboardSize(rawValue: defaults.object(forKey: Key.keyboardSize) as? Int ?? KeyboardSize.medium.rawValue) ?? .medium
+    }
 
     // MARK: State
 
@@ -96,6 +134,12 @@ enum SharedStore {
         set { defaults.set(newValue, forKey: Key.handledPasteboard) }
     }
 
+    /// The keyboard's recent typing events (see `TypingLog`), for the app's diagnostics.
+    static var typingLog: [String] {
+        get { defaults.stringArray(forKey: Key.typingLog) ?? [] }
+        set { defaults.set(newValue.isEmpty ? nil : newValue, forKey: Key.typingLog) }
+    }
+
     // MARK: Context
 
     /// Lines the keyboard saw: messages the user copied and translations it inserted.
@@ -105,22 +149,32 @@ enum SharedStore {
         save(Array(lines.suffix(Config.contextLimit)), Key.memory)
     }
 
-    /// What the keyboard remembers of the chat, trimmed for a request.
+    /// What the keyboard remembers of the chat, trimmed for a request: the newest lines within the
+    /// character budget. A line longer than what is left keeps its end (where the question usually
+    /// is): one long message from the partner used to leave the reply with no context at all.
     static func context() -> [ChatLine] {
-        let lines = recentMemory()
-        // Keep the newest lines within the character budget.
         var kept: [ChatLine] = []
-        var characters = 0
-        for line in lines.suffix(Config.contextLimit).reversed() {
-            characters += line.text.count
-            if characters > Config.contextCharacterLimit { break }
+        var room = Config.contextCharacterLimit
+        for var line in recentMemory().suffix(Config.contextLimit).reversed() where room > 0 {
+            if line.text.count > room { line.text = "…" + line.text.suffix(room) }
+            room -= line.text.count
             kept.insert(line, at: 0)
         }
         return kept
     }
 
+    /// Takes back the line remembered last, if it is `text`: a translation undone was never sent.
+    static func forgetLast(_ text: String) {
+        var lines = recentMemory()
+        guard lines.last?.text == text else { return }
+        lines.removeLast()
+        save(lines, Key.memory)
+    }
+
+    /// "Cuộc mới": a new conversation, with nothing from the one before.
     static func clearContext() {
         defaults.removeObject(forKey: Key.memory)
+        defaults.removeObject(forKey: Key.incomingCache)
         defaults.set(Date(), forKey: Key.contextClearedAt)
     }
 
@@ -135,10 +189,17 @@ enum SharedStore {
     }
 
     static func cacheIncoming(_ text: String, translation: String) {
+        // Partner messages are not kept on the phone when history is off.
+        guard keepHistory else { return }
         let key = cacheKey(text)
         var pairs = incomingCache().filter { $0.first != key }
         pairs.append([key, translation])
         defaults.set(Array(pairs.suffix(40)), forKey: Key.incomingCache)
+    }
+
+    /// The glossary or the user's details changed: a message copied again is translated again.
+    static func clearIncomingCache() {
+        defaults.removeObject(forKey: Key.incomingCache)
     }
 
     private static func incomingCache() -> [[String]] {

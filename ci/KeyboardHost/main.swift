@@ -27,6 +27,11 @@ final class ViewController: UIViewController {
         center.addObserver(forName: UITextInputMode.currentInputModeDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.report("inputModeDidChange")
         }
+        // Every change, so CI can check what the typing benchmark typed.
+        center.addObserver(forName: UITextField.textDidChangeNotification, object: field, queue: .main) { [weak self] _ in
+            print("FIELD_TEXT=\(self?.field.text ?? "")")
+            fflush(stdout)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -39,6 +44,12 @@ final class ViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
             guard let self else { return }
             print("KEYBOARD_HEIGHT=\(Int(keyboardHeight))")
+            print("FIELD_TEXT=\(field.text ?? "")")
+            fflush(stdout)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self else { return }
+            print("FIELD_TEXT=\(field.text ?? "")")
             fflush(stdout)
         }
     }

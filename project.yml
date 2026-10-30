@@ -12,14 +12,16 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0.0"
+    MARKETING_VERSION: "1.17.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
     DEAD_CODE_STRIPPING: YES
   configs:
     Release:
-      SWIFT_OPTIMIZATION_LEVEL: "-Osize"
+      # Speed over size: every key runs Telex and the key handling on the main thread, and code
+      # pages are read from the app, not counted in the keyboard's memory budget.
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
       SWIFT_COMPILATION_MODE: wholemodule
       GCC_OPTIMIZATION_LEVEL: s
       STRIP_INSTALLED_PRODUCT: YES
@@ -48,6 +50,9 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
+        # Hội thoại: the microphone hears the meeting, and keeps listening with the screen locked.
+        NSMicrophoneUsageDescription: "MSTrans nghe cuộc họp, cuộc nói chuyện để dịch lời mọi người sang tiếng Việt, và nghe câu bạn nói khi bạn bấm Tôi nói để dịch sang tiếng đối tác."
+        UIBackgroundModes: [audio]
     entitlements:
       path: Support/MSTrans.entitlements
       properties:
@@ -72,6 +77,8 @@ targets:
         CFBundleDisplayName: MSTrans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # 120 Hz iPhones may show a key's pop-up on the next 120 Hz frame instead of a 60 Hz one.
+        CADisableMinimumFrameDurationOnPhone: true
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController

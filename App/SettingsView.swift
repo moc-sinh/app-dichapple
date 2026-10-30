@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(SharedStore.Key.apiKey, store: SharedStore.defaults) private var apiKey = ""
+    @AppStorage(SharedStore.Key.sonioxKey, store: SharedStore.defaults) private var sonioxKey = ""
+    @AppStorage(SharedStore.Key.googleKey, store: SharedStore.defaults) private var googleKey = ""
     @AppStorage(SharedStore.Key.model, store: SharedStore.defaults) private var model = TranslationModel.sol.rawValue
     @AppStorage(SharedStore.Key.targetCode, store: SharedStore.defaults) private var targetCode = Language.autoCode
     @AppStorage(SharedStore.Key.tone, store: SharedStore.defaults) private var tone = Tone.polite.rawValue
@@ -9,8 +11,12 @@ struct SettingsView: View {
     @AppStorage(SharedStore.Key.gender, store: SharedStore.defaults) private var gender = 0
     @AppStorage(SharedStore.Key.addressing, store: SharedStore.defaults) private var addressing = ""
     @AppStorage(SharedStore.Key.profile, store: SharedStore.defaults) private var profile = ""
-    @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = false
+    @AppStorage(SharedStore.Key.instantIncoming, store: SharedStore.defaults) private var instantIncoming = true
     @AppStorage(SharedStore.Key.haptics, store: SharedStore.defaults) private var haptics = true
+    @AppStorage(SharedStore.Key.typesOnTouchDown, store: SharedStore.defaults) private var typesOnTouchDown = true
+    @AppStorage(SharedStore.Key.keySounds, store: SharedStore.defaults) private var keySounds = true
+    @AppStorage(SharedStore.Key.keyPopups, store: SharedStore.defaults) private var keyPopups = false
+    @AppStorage(SharedStore.Key.keyboardSize, store: SharedStore.defaults) private var keyboardSize = KeyboardSize.medium.rawValue
     @AppStorage(SharedStore.keepHistoryKey, store: SharedStore.defaults) private var keepHistory = true
     @Environment(\.scenePhase) private var scenePhase
     @State private var setup = SetupStatus.current
@@ -23,6 +29,8 @@ struct SettingsView: View {
             Form {
                 setupSection
                 openAISection
+                sonioxSection
+                googleSection
                 outgoingSection
                 aboutYouSection
                 incomingSection
@@ -53,7 +61,7 @@ struct SettingsView: View {
                     detail: "Chạm MSTrans trong danh sách bàn phím rồi bật. Cần để gửi câu bạn bấm Dịch tới OpenAI.")
             StepRow(done: setup.hasKey, title: "Dán API key OpenAI", detail: "Ở mục OpenAI ngay bên dưới.")
             StepRow(done: nil, title: "Cho phép dán (nên bật)",
-                    detail: "Cài đặt › MSTrans › Dán từ ứng dụng khác › Cho phép: iOS không hỏi lại, và bạn bật được “Dịch ngay khi mở bàn phím” ở mục Tin đối tác gửi.")
+                    detail: "Cài đặt › MSTrans › Dán từ ứng dụng khác › Cho phép: iOS không hỏi lại mỗi lần bàn phím tự dịch tin vừa sao chép.")
             Button("Mở Cài đặt iPhone", action: openSystemSettings)
             NavigationLink {
                 DiagnosticsView()
@@ -129,11 +137,15 @@ struct SettingsView: View {
         } footer: {
             Text("Giúp bản dịch xưng hô đúng và dùng đúng tiểu từ lịch sự (tiếng Thái, tiếng Nhật…). Thuật ngữ ngành: thêm ở tab Thuật ngữ.")
         }
+        // A partner message copied again is translated again, with these details.
+        .onChange(of: gender) { _, _ in SharedStore.clearIncomingCache() }
+        .onChange(of: addressing) { _, _ in SharedStore.clearIncomingCache() }
+        .onChange(of: profile) { _, _ in SharedStore.clearIncomingCache() }
     }
 
     private var incomingSection: some View {
         Section {
-            Toggle("Dịch ngay khi mở bàn phím", isOn: $instantIncoming)
+            Toggle("Tự dịch tin vừa sao chép", isOn: $instantIncoming)
             if instantIncoming {
                 Button("Cho phép dán trong Cài đặt iPhone", action: openSystemSettings)
             }
@@ -143,7 +155,7 @@ struct SettingsView: View {
             if instantIncoming {
                 Text("Sao chép tin rồi chạm vào ô trả lời: bản dịch hiện ngay ở dòng trên cùng của bàn phím, không cần chạm thêm. Để iOS không hỏi mỗi lần, đặt Cài đặt iPhone › MSTrans › Dán từ ứng dụng khác › Cho phép.")
             } else {
-                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Bật “Dịch ngay” để bỏ cả cái chạm đó.")
+                Text("Nhấn giữ tin của đối tác › Sao chép, rồi chạm vào ô trả lời: dòng trên cùng của bàn phím hiện “Có tin vừa sao chép · chạm để dịch”, chạm một lần. Bật “Tự dịch tin vừa sao chép” để bỏ cả cái chạm đó.")
             }
         }
     }
@@ -173,10 +185,16 @@ struct SettingsView: View {
     private var keyboardSection: some View {
         Section {
             Toggle("Rung khi gõ", isOn: $haptics)
+            Toggle("Âm thanh khi gõ", isOn: $keySounds)
+            Toggle("Ra chữ ngay khi chạm phím", isOn: $typesOnTouchDown)
+            Toggle("Chữ nổi khi bấm phím", isOn: $keyPopups)
+            Picker("Cỡ bàn phím", selection: $keyboardSize) {
+                ForEach(KeyboardSize.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+            }
         } header: {
             Text("Bàn phím")
         } footer: {
-            Text("Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
+            Text("Âm thanh khi gõ: tiếng click của MSTrans, tắt được ở đây (gạt nút im lặng của iPhone cũng tắt). Ra chữ ngay khi chạm: chữ vào ô nhập lúc ngón tay vừa chạm phím, không chờ nhấc tay, nên gõ nhanh thấy chữ hiện tức thì. Tắt để giống bàn phím Apple (chữ vào khi nhấc tay, trượt sang phím khác trước khi nhấc để đổi chữ). Chữ nổi khi bấm phím: chữ to hiện phía trên phím đang bấm, như bàn phím Apple khi bật Xem trước ký tự; tắt thì phím chỉ sáng lên, không che các phím bên cạnh. Cỡ bàn phím: mặc định mỗi phím nằm đúng chỗ như bàn phím iPhone, nên ngón tay quen tay bấm trúng; hai cỡ còn lại cho phím cao hơn. Đổi xong, mở lại bàn phím là thấy. Giữ một nguyên âm để chọn dấu. Giữ phím cách rồi kéo để di chuyển con trỏ. Chạm 2 lần Shift để khóa chữ hoa, 2 lần phím cách để thêm dấu chấm. Chạm logo MSTrans trên bàn phím để xem tin đối tác, câu vừa dịch và ngữ cảnh.")
         }
     }
 
@@ -191,7 +209,7 @@ struct SettingsView: View {
         } header: {
             Text("Dữ liệu")
         } footer: {
-            Text("Ngữ cảnh là vài tin gần nhất gửi kèm để dịch đúng xưng hô; tự hết hạn sau 45 phút. Lịch sử và key chỉ lưu trên iPhone này; OpenAI không lưu nội dung.")
+            Text("Ngữ cảnh là vài tin gần nhất gửi kèm để dịch đúng xưng hô; tự hết hạn sau 45 phút. Lịch sử và key chỉ lưu trên iPhone này; OpenAI không lưu tin vào tài khoản của bạn.")
         }
     }
 
@@ -209,6 +227,8 @@ struct SettingsView: View {
                 }
             }
             .accessibilityElement(children: .combine)
+        } footer: {
+            Text("Bộ gõ Telex: TelexCore của VietTelex, © 2026 Phil Trinh, dùng theo giấy phép MIT (github.com/ptrinh/viettelex). Vị trí phím theo số đo bàn phím iPhone của VietTelex.")
         }
     }
 
@@ -221,6 +241,36 @@ struct SettingsView: View {
 
     // MARK: Actions
 
+    private var sonioxSection: some View {
+        Section {
+            SecureField("Key Soniox", text: $sonioxKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let console = URL(string: "https://console.soniox.com") {
+                Link("Lấy key ở console.soniox.com", destination: console)
+            }
+        } header: {
+            Text("Soniox")
+        } footer: {
+            Text("Cho tab Hội thoại, Cách dịch “Soniox”: chữ và bản dịch chạy ngay khi mọi người đang nói, khoảng 0,2 USD mỗi giờ (Dịch liền của OpenAI khoảng 2 USD). Không có key OpenAI thì đọc bằng giọng iPhone. Key chỉ lưu trên iPhone này.")
+        }
+    }
+
+    private var googleSection: some View {
+        Section {
+            SecureField("Key Google Cloud", text: $googleKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let console = URL(string: "https://console.cloud.google.com/apis/library/texttospeech.googleapis.com") {
+                Link("Bật Cloud Text-to-Speech API và tạo key", destination: console)
+            }
+        } header: {
+            Text("Giọng Google")
+        } footer: {
+            Text("Cho giọng đọc Aoede (nữ) và Charon (nam) ở tab Hội thoại, menu ⋯ › Giọng đọc: tiếng Việt tự nhiên, khoảng nửa giây một câu. Miễn phí 1 triệu ký tự mỗi tháng (khoảng 20 giờ đọc), quá thì 30 USD cho 1 triệu ký tự. Dự án Google cần gắn thanh toán. Key chỉ lưu trên iPhone này.")
+        }
+    }
+
     private func refresh() {
         setup = .current
         contextCleared = false
@@ -229,16 +279,20 @@ struct SettingsView: View {
     private func test() {
         testing = true
         testResult = nil
+        let tested = apiKey
         let translator = Translator(apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                                     model: TranslationModel(rawValue: model) ?? .sol)
         Task {
+            let outcome: (ok: Bool, text: String)
             do {
                 let result = try await translator.translate("Anh gửi giúp em báo giá trước thứ Sáu nhé.",
                                                             to: Language.named("en") ?? Language.all[0], checkMeaning: true)
-                testResult = (true, "Kết nối ổn: \(result.text)")
+                outcome = (true, "Kết nối ổn: \(result.text)")
             } catch {
-                testResult = (false, error.localizedDescription)
+                outcome = (false, error.localizedDescription)
             }
+            // A key pasted meanwhile is not the one this answer is about.
+            if apiKey == tested { testResult = outcome }
             testing = false
         }
     }

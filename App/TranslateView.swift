@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 
 /// Translate anything here; the keyboard does the same inside chat apps.
@@ -19,11 +20,16 @@ struct TranslateView: View {
     @State private var resultLanguage = ""
     @State private var error: String?
     @State private var busy = false
+    /// The translation as it is written, shown before it is whole.
+    @State private var streaming = StreamingText()
     @State private var task: Task<Void, Never>?
     @State private var copied = false
     @State private var setup = SetupStatus.current
     @State private var recent: [HistoryItem] = []
     @State private var selected: HistoryItem?
+    /// The partner's language, for "Tự động": worked out in `refresh`, not in `body`, which runs
+    /// again on every key typed here (language detection on each key made typing lag).
+    @State private var partnerLanguage: Language?
 
     init(showSettings: @escaping () -> Void, showHistory: @escaping () -> Void) {
         self.showSettings = showSettings
@@ -37,7 +43,9 @@ struct TranslateView: View {
                     if !setup.done { setupCard }
                     directionBar
                     inputCard
-                    if busy { busyCard }
+                    if busy {
+                        if streaming.text.isEmpty { busyCard } else { streamingCard }
+                    }
                     if let error { errorCard(error) }
                     if let result { resultCard(result) }
                     if result == nil && error == nil && !busy {
@@ -63,11 +71,21 @@ struct TranslateView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refresh() }
         }
+        // While a message is being written here, the connection to OpenAI is opened ahead, so
+        // Dịch does not wait for DNS and TLS.
+        .onChange(of: editing) { _, now in
+            if now, SharedStore.apiKey != nil { DispatchQueue.global(qos: .utility).async { Translator.warmUp() } }
+        }
     }
 
     private func refresh() {
         setup = .current
         recent = Array(SharedStore.history().prefix(3))
+        partnerLanguage = Self.partnerLanguage()
+    }
+
+    private static func partnerLanguage() -> Language {
+        LanguageDetector.partnerLanguage(in: SharedStore.context()) ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
     }
 
     // MARK: Direction
@@ -116,6 +134,8 @@ struct TranslateView: View {
     private var swapButton: some View {
         Button {
             withAnimation(.snappy) { direction = direction == .outgoing ? .incoming : .outgoing }
+            task?.cancel()
+            busy = false
             result = nil
             error = nil
         } label: {
@@ -134,8 +154,7 @@ struct TranslateView: View {
     /// "Tự động" answers in the partner's language, as on the keyboard.
     private var resolvedTarget: Language {
         if targetCode == Language.autoCode {
-            return LanguageDetector.partnerLanguage(in: SharedStore.context())
-                ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
+            return partnerLanguage ?? Language.named(SharedStore.lastPartnerCode) ?? Language.all[0]
         }
         return Language.named(targetCode) ?? Language.all[0]
     }
@@ -157,6 +176,14 @@ struct TranslateView: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 112)
                     .accessibilityLabel(direction == .outgoing ? "Tin bạn muốn gửi" : "Tin của đối tác")
+                    // The text changed: a translation of the text before (shown, or still on its way)
+                    // must not be copied for it.
+                    .onChange(of: text) { _, _ in
+                        guard result != nil || busy else { return }
+                        task?.cancel()
+                        busy = false
+                        result = nil
+                    }
             }
             HStack(spacing: 10) {
                 // One coloured control at a time: Paste while empty, then Translate.
@@ -214,6 +241,42 @@ struct TranslateView: View {
                     busy = false
                 }
             }
+        }
+    }
+
+    /// The translation so far; once it is whole (the meaning check is still coming), it can be copied.
+    private var streamingCard: some View {
+        Card(accent: direction == .outgoing ? ChatLine.Side.me.color : ChatLine.Side.partner.color) {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text(streaming.whole && direction == .outgoing && checkMeaning ? "Đang kiểm tra nghĩa…" : "Đang dịch…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if streaming.whole {
+                    Button {
+                        Clipboard.copy(streaming.text)
+                        copied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            copied = false
+                        }
+                    } label: {
+                        Label(copied ? "Đã chép" : "Sao chép", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                } else {
+                    Button("Hủy") {
+                        task?.cancel()
+                        busy = false
+                    }
+                }
+            }
+            Text(streaming.text)
+                .font(.title3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -338,23 +401,33 @@ struct TranslateView: View {
         }
         editing = false
         let outgoing = direction == .outgoing
+        if outgoing, targetCode == Language.autoCode { partnerLanguage = Self.partnerLanguage() }
         let target = outgoing ? resolvedTarget : Language.vietnamese
-        let sourceLanguage = outgoing ? nil : LanguageDetector.language(of: source)
         let context = SharedStore.context()
         busy = true
         error = nil
         result = nil
         task?.cancel()
+        // A new one for each translation: one cancelled may still be writing to the one before.
+        let streaming = StreamingText()
+        self.streaming = streaming
         task = Task {
             do {
                 let translation = try await Translator(apiKey: apiKey)
-                    .translate(source, to: target, context: context, checkMeaning: outgoing && checkMeaning)
+                    .translate(source, to: target, context: context, checkMeaning: outgoing && checkMeaning) { text, whole in
+                        DispatchQueue.main.async { streaming.show(text, whole: whole) }
+                    }
                 guard !Task.isCancelled else { return }
-                let item = HistoryItem(side: outgoing ? .me : .partner, source: source, translation: translation.text,
-                                       languageCode: outgoing ? target.code : sourceLanguage?.code ?? "",
-                                       meaning: translation.meaning, note: translation.note)
-                SharedStore.addHistory(item)
-                recent = Array(SharedStore.history().prefix(3))
+                // Language detection and the history's JSON: off the main thread, as the result comes up.
+                let (item, recent) = await Task.detached(priority: .userInitiated) {
+                    let item = HistoryItem(side: outgoing ? .me : .partner, source: source, translation: translation.text,
+                                           languageCode: outgoing ? target.code : LanguageDetector.language(of: source)?.code ?? "",
+                                           meaning: translation.meaning, note: translation.note)
+                    SharedStore.addHistory(item)
+                    return (item, Array(SharedStore.history().prefix(3)))
+                }.value
+                guard !Task.isCancelled else { return }
+                self.recent = recent
                 resultSide = item.side
                 resultLanguage = item.languageName
                 result = translation
@@ -362,7 +435,21 @@ struct TranslateView: View {
             } catch {
                 self.error = error.localizedDescription
             }
-            busy = false
+            // A cancelled translation leaves the one that replaced it busy.
+            if !Task.isCancelled { busy = false }
         }
+    }
+}
+
+/// A translation as it streams in, shown before it is whole.
+@MainActor @Observable
+final class StreamingText {
+    private(set) var text = ""
+    /// The translation is whole; only its meaning check is still coming.
+    private(set) var whole = false
+
+    func show(_ text: String, whole: Bool) {
+        self.text = text
+        self.whole = whole
     }
 }

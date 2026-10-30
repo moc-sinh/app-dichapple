@@ -93,7 +93,10 @@ run_phase() {
     sleep 1
     limit 60 xcrun simctl launch --terminate-running-process \
         --stdout="$PWD/$OUT/$name-host.log" --stderr="$PWD/$OUT/$name-host.err" "$UDID" "$HOST_ID"
-    sleep 8
+    # The typing benchmark runs for about 22 s once the keyboard is up. footprint pauses the
+    # keyboard to read its memory, and screenshots and the log load the machine: run them after,
+    # or they show up as slow keys.
+    if [ "$name" = typing ]; then sleep 30; else sleep 8; fi
     pid=$(keyboard_pid)
     if [ -n "$pid" ]; then
         echo "Keyboard process: running (pid $pid)"
@@ -183,7 +186,7 @@ if group_dir:
     values["apiKey"] = "sk-ci-smoke-test"
     # Instant mode reads the clipboard as the keyboard opens; iOS then asks for paste permission.
     # The keys must still draw while that prompt waits (the main thread stays free).
-    values["instantIncoming"] = True
+    values["autoTranslateCopied"] = True
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         plistlib.dump(values, f, fmt=plistlib.FMT_BINARY)
@@ -203,6 +206,39 @@ endgroup
 limit 30 xcrun simctl ui "$UDID" appearance dark
 run_phase dark
 limit 30 xcrun simctl ui "$UDID" appearance light
+
+# The keyboard types a sentence through its own key handling as fast as a quick typist and
+# records main-thread time per key, key layouts and late frames (Keyboard/TypingBenchmark.swift).
+# Key events slow while the keyboard's own CPU time stayed small mean the machine stalled (it
+# does, now and then, for a few hundred milliseconds): that is measured once more, and only the
+# second run counts. A slow keyboard is slow both times.
+for attempt in 1 2; do
+    group "Typing benchmark setup"
+    xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+    limit 120 xcrun simctl shutdown "$UDID"
+    python3 ci/typing-benchmark.py setup "$GROUP_DIR"
+    limit 180 xcrun simctl boot "$UDID"
+    limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
+    endgroup
+
+    run_phase typing
+
+    group "Typing benchmark"
+    # Done during the phase (it waited for the benchmark); the keyboard saves its log 1.6 s after.
+    sleep 2
+    xcrun simctl terminate "$UDID" "$HOST_ID" >/dev/null 2>&1
+    limit 120 xcrun simctl shutdown "$UDID"
+    python3 ci/typing-benchmark.py report "$GROUP_DIR" "$OUT/typing-host.log" $([ "$attempt" = 2 ] && echo last) \
+        | tee "$OUT/typing-benchmark-$attempt.txt"
+    status=${PIPESTATUS[0]}
+    endgroup
+    if [ "$status" = 2 ]; then
+        echo "Key events were slow while the keyboard's own work stayed small: measuring once more"
+        continue
+    fi
+    [ "$status" = 0 ] || FAILED=1
+    break
+done
 
 # Screenshots of each tab of the app, light and dark, with a few sample translations.
 group "App screens"
@@ -238,8 +274,9 @@ limit 180 xcrun simctl boot "$UDID"
 limit 300 xcrun simctl bootstatus "$UDID" -b >/dev/null
 for appearance in light dark; do
     limit 30 xcrun simctl ui "$UDID" appearance "$appearance"
-    for tab in translate history glossary settings; do
-        limit 60 xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" >/dev/null
+    # Hội thoại shows a sample meeting (-conversationDemo): the simulator has no microphone to listen with.
+    for tab in translate conversation history glossary settings; do
+        limit 60 xcrun simctl launch --terminate-running-process "$UDID" "$APP_ID" -initialTab "$tab" -conversationDemo YES >/dev/null
         sleep 4
         limit 30 xcrun simctl io "$UDID" screenshot "$OUT/app-$tab-$appearance.png" >/dev/null 2>&1 && echo "app-$tab-$appearance.png"
     done

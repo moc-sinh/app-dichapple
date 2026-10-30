@@ -17,19 +17,44 @@ struct TranslateCopiedIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         guard let apiKey = SharedStore.apiKey else { throw IntentFailure.message(TranslateError.noKey.errorDescription ?? "") }
         var source = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if source.isEmpty {
+        let fromClipboard = source.isEmpty
+        if fromClipboard {
             source = await MainActor.run { UIPasteboard.general.string ?? "" }.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         guard !source.isEmpty else {
             throw IntentFailure.message("Chưa đọc được tin đã sao chép. Sao chép lại; nếu vẫn vậy, trong app Phím tắt thêm thao tác “Lấy bảng tạm” trước thao tác MSTrans.")
         }
+        // Run again on the translation it just copied: that is the user's own message, not one
+        // from the partner to put into Vietnamese (and into the context as the partner's).
+        if fromClipboard, let last = SharedStore.context().last, last.side == .me, last.text == source {
+            return .result(value: source, dialog: IntentDialog(stringLiteral: "Bản dịch đã chép sẵn, dán vào ô chat:\n\(source)"))
+        }
+        let message = source
         let answer: (value: String, dialog: String)
-        if LanguageDetector.isVietnamese(source) {
-            answer = try await reply(source, apiKey: apiKey)
+        if LanguageDetector.isVietnamese(message) {
+            answer = try await withinTimeLimit { try await reply(message, apiKey: apiKey) }
         } else {
-            answer = try await read(source, apiKey: apiKey)
+            answer = try await withinTimeLimit { try await read(message, apiKey: apiKey) }
         }
         return .result(value: answer.value, dialog: IntentDialog(stringLiteral: answer.dialog))
+    }
+
+    /// Shortcuts stops an action that runs about 30 seconds and shows only that it failed: past
+    /// 25 seconds the action stops itself and says why.
+    private func withinTimeLimit(_ work: @escaping @Sendable () async throws -> (value: String, dialog: String))
+        async throws -> (value: String, dialog: String) {
+        try await withThrowingTaskGroup(of: (value: String, dialog: String).self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 25_000_000_000)
+                throw IntentFailure.message("OpenAI trả lời quá lâu. Thử lại, hoặc chia tin ngắn hơn.")
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else {
+                throw IntentFailure.message("Không nhận được bản dịch. Thử lại.")
+            }
+            return first
+        }
     }
 
     /// The partner's message, in Vietnamese.

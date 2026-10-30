@@ -131,6 +131,14 @@ enum Clipboard {
         UIPasteboard.general.string = text
         SharedStore.handledPasteboard = UIPasteboard.general.changeCount
     }
+
+    /// For the diagnostics (the end of recent typing): this iPhone only, not the user's other
+    /// Apple devices, and gone from the clipboard after a quarter of an hour.
+    static func copyPrivately(_ text: String) {
+        UIPasteboard.general.setItems([["public.utf8-plain-text": text]],
+                                      options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(15 * 60)])
+        SharedStore.handledPasteboard = UIPasteboard.general.changeCount
+    }
 }
 
 func openSystemSettings() {
