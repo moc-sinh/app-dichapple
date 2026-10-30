@@ -43,6 +43,9 @@ jobs:
           # Key positions against Apple's keyboard.
           swiftc Keyboard/KeyMetrics.swift Tests/Keys/main.swift -o key-tests
           ./key-tests
+          # Replacing the whole field after Dịch, against fields that show only part of themselves, late.
+          swiftc -O Keyboard/FieldEraser.swift Tests/Field/main.swift -o field-tests
+          ./field-tests
 
       - name: Language detection tests
         run: |

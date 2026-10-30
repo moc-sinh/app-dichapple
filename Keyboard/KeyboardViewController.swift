@@ -1162,7 +1162,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
                     let item = HistoryItem(side: .me, source: text, translation: result.text, languageCode: target.code,
                                            meaning: result.meaning, note: result.note)
                     Self.store.async { SharedStore.addHistory(item) }
-                    self.replaceDocument(with: result.text) { [weak self] in
+                    self.replaceDocument(with: result.text, current: text) { [weak self] in
                         TypingLog.mark("kết quả dịch")
                         TypingLog.add("⇄ Dịch \(text.count)→\(result.text.count) ký tự: đọc ô \(Int((read - tapped) * 1000))ms"
                                       + " · OpenAI \(Int((answered - read) * 1000))ms · thay ô \(Int((CACurrentMediaTime() - answered) * 1000))ms")
@@ -1190,11 +1190,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         // tap started a second walk, and both put the original back ("câu gốc câu gốc").
         guard walking == 0 else { return }
         panelButton.configuration?.title = "Đang lấy lại…"
-        if let sent = lastOutgoing?.translation.text {
+        let sent = lastOutgoing?.translation.text
+        if let sent {
             Self.store.async { SharedStore.forgetLast(sent) }
             refreshPillTarget()
         }
-        replaceDocument(with: original) { [weak self] in
+        replaceDocument(with: original, current: sent ?? "") { [weak self] in
             self?.lastOutgoing = nil
             self?.mode = .normal
             self?.info = .idle
@@ -1272,27 +1273,48 @@ final class KeyboardViewController: UIInputViewController, KeyboardLayoutViewDel
         forward()
     }
 
-    /// Replaces the whole field: from the end, deletes a paragraph at a time until the field
-    /// says it is empty, then inserts.
-    private func replaceDocument(with text: String, completion: @escaping () -> Void) {
+    /// Replaces the whole field, whose text is `current` as last read: from the end, deletes all of
+    /// it and then whatever the field still shows (`FieldEraser`), then inserts. A long text is read
+    /// back afterwards, and what is left of the old one is erased again.
+    private func replaceDocument(with text: String, current: String, checked: Bool = false, completion: @escaping () -> Void) {
         let proxy = textDocumentProxy
-        var steps = 0
-        var emptyRounds = 0
+        var eraser = FieldEraser(expected: current)
         beginWalk()
         func clear() {
-            steps += 1
             let before = proxy.documentContextBeforeInput ?? ""
             let after = proxy.documentContextAfterInput ?? ""
-            emptyRounds = before.isEmpty && after.isEmpty ? emptyRounds + 1 : 0
-            guard proxy.hasText, emptyRounds < 3, steps < 80 else {
+            switch eraser.next(before: before, after: after, hasText: proxy.hasText) {
+            case .toEnd:
+                moveToEnd(clear)
+            case let .delete(count, wait):
+                for _ in 0..<count { proxy.deleteBackward() }
+                afterMove(from: before, after, waitingUpTo: wait) { _ in clear() }
+            case .wait:
+                afterMove(from: before, after, waitingUpTo: 4) { _ in clear() }
+            case .done:
                 proxy.insertText(text)
                 // The field is read again before the next key.
                 composer.forget()
-                completion()
-                return endWalk()
+                TypingLog.add("▤ thay ô: \(current.count)→\(text.count) ký tự, \(eraser.steps) bước")
+                guard !checked, FieldEraser.worthChecking(current, text) else {
+                    completion()
+                    return endWalk()
+                }
+                // The app takes a moment to show the new text.
+                afterMove(from: before, after, waitingUpTo: 8) { _ in
+                    self.readDocument { found in
+                        guard let left = FieldEraser.leftover(found: found, inserted: text) else {
+                            completion()
+                            return self.endWalk()
+                        }
+                        TypingLog.add("▤ thay ô còn sót \(left.count - text.count) ký tự: thay lại")
+                        self.replaceDocument(with: text, current: left, checked: true) {
+                            completion()
+                            self.endWalk()
+                        }
+                    }
+                }
             }
-            for _ in 0..<max(1, before.count) { proxy.deleteBackward() }
-            tick(clear)
         }
         moveToEnd(clear)
     }

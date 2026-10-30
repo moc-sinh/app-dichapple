@@ -17,7 +17,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 ## Tình trạng
 
-- **Bản mới nhất:** iPhone 1.16.2 và Android 1.5.2 (bản dịch dài không còn tự mở che phím; xem mục 1.16.2). Trước đó iPhone 1.16.1
+- **Bản mới nhất:** iPhone 1.16.3 và Android 1.5.3 (Dịch đoạn dài không còn để sót chữ Việt trước bản dịch; xem mục 1.16.3). Trước đó
+  iPhone 1.16.2 và Android 1.5.2 (bản dịch dài không còn tự mở che phím; xem mục 1.16.2). Trước đó iPhone 1.16.1
   và Android 1.5.1 (bàn phím tự dịch tin vừa sao chép, bật sẵn; xem mục 1.16.1). Trước đó
   iPhone 1.16.0 và Android 1.5.0 (bộ thuật ngữ xuất nhập khẩu đông lạnh, hoa quả cho Soniox và GPT; xem mục
   1.16.0). Trước đó iPhone 1.15.0 và Android 1.4.0 (Tôi nói không phải chờ việc dịch của phòng, chữ gọn hơn gộp theo người
@@ -491,6 +492,17 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
   gặp bàn phím trống, xin người dùng Cài đặt › Chẩn đoán bàn phím › Sao chép nhật ký gõ / báo cáo (bước "1 khởi động… 4 đã hiện").
   Commit 85ad8b2: Android run 11 xanh (`android-1.5.2-11`), iOS run 83 build xanh (IPA
   `https://github.com/moc-sinh/app-dichapple/actions/runs/40713318685/artifacts/12827397461`); đã gửi cả hai link.
+
+- **1.16.3 + Android 1.5.3: Dịch đoạn dài để sót chữ Việt (30/10).** Người dùng: dịch một đoạn dài bằng bàn phím thì ô vẫn giữ
+  chữ Việt kèm bản dịch. Đọc mã: `replaceDocument` xóa từ cuối ô theo phần ô cho thấy quanh con trỏ (thường chỉ đoạn hiện tại) và coi
+  ô là trống sau 3 lần nhìn cách nhau 25 ms không thấy chữ. Zalo/WeChat báo chậm sau một lần xóa lớn, hoặc con trỏ đứng ở dòng trống,
+  là đủ 3 lần đó trong khi các đoạn trên chưa xóa: bản dịch chèn sau phần còn sót. Sửa: `Keyboard/FieldEraser.swift` (không UIKit)
+  xóa hết số ký tự đã đọc từ ô dù ô cho thấy ít, chờ ô báo thay đổi (tới 1 s) thay vì 25 ms, đi về cuối nếu còn chữ sau con trỏ, chỉ
+  coi là trống khi ô nói `hasText` = false (hoặc sau 4 lần nhìn). Bản dài (>150 ký tự hoặc nhiều đoạn) được đọc lại sau khi chèn,
+  còn sót thì thay lại một lần. Hoàn tác dùng cùng đường. `Tests/Field` (vào CI): ô giả chỉ cho thấy đoạn hiện tại, báo chậm 0–8
+  lần nhìn, có/không trống tạm, cắt 40 ký tự: cách cũ sót chữ 200/360 ô, cách mới 0 (733 kiểm tra). Android: `replaceWholeField`
+  trước chỉ tin độ dài ô app đưa một lần (`getExtractedText`); giờ xóa tiếp quanh con trỏ tới khi trống, và `readWholeField` lấy
+  bản dài hơn giữa hai cách đọc. Chưa thử trên máy thật; nếu còn sót, xin nhật ký gõ (dòng "▤ thay ô").
 
 ## Việc tiếp theo (theo thứ tự)
 

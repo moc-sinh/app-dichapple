@@ -1054,33 +1054,43 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
 
     // The whole text field
 
-    /** The field's whole text: as the app hands it over in one piece, else around the cursor. */
+    /**
+     * The field's whole text: as the app hands it over in one piece, else around the cursor. Some
+     * apps hand over only part of a long text in one piece: then the longer of the two.
+     */
     private fun readWholeField(): String {
         val ic = currentInputConnection ?: return ""
         val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
-        val whole = extracted?.text
-        if (whole != null && extracted.startOffset == 0) return whole.toString()
+        val whole = extracted?.takeIf { it.startOffset == 0 }?.text?.toString()
         val before = ic.getTextBeforeCursor(FIELD_LIMIT, 0) ?: ""
         val selected = ic.getSelectedText(0) ?: ""
         val after = ic.getTextAfterCursor(FIELD_LIMIT, 0) ?: ""
-        return "$before$selected$after"
+        val around = "$before$selected$after"
+        return if (whole != null && whole.length >= around.length) whole else around
     }
 
-    /** Replaces the field's whole text; the keyboard reads the field again before the next key. */
+    /**
+     * Replaces the field's whole text; the keyboard reads the field again before the next key.
+     * Up to 1.5.2 the field was taken to be as long as the app said in one piece, and an app that
+     * said less of a long text kept the rest in front of the translation. Now whatever is left
+     * around the cursor is deleted too, until the field says it is empty.
+     */
     private fun replaceWholeField(text: String) {
         val ic = currentInputConnection ?: return
         ic.beginBatchEdit()
+        ic.finishComposingText()
         val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
         val whole = extracted?.text
-        if (whole != null && extracted.startOffset == 0 && ic.setSelection(0, whole.length)) {
-            ic.commitText(text, 1)
-        } else {
-            ic.commitText("", 1)
+        if (whole != null && extracted.startOffset == 0) ic.setSelection(0, whole.length)
+        ic.commitText("", 1)
+        var rounds = 0
+        while (rounds++ < CLEAR_ROUNDS) {
             val before = ic.getTextBeforeCursor(FIELD_LIMIT, 0)?.length ?: 0
             val after = ic.getTextAfterCursor(FIELD_LIMIT, 0)?.length ?: 0
+            if (before == 0 && after == 0) break
             ic.deleteSurroundingText(before, after)
-            ic.commitText(text, 1)
         }
+        ic.commitText(text, 1)
         ic.endBatchEdit()
         composer.forget()
         expected.clear()
@@ -1210,6 +1220,8 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
         private const val KEEP = 300
         private const val AFTER = 64
         private const val FIELD_LIMIT = 20_000
+        /** Pieces of a field deleted at most: 50 × 20,000 characters on each side of the cursor. */
+        private const val CLEAR_ROUNDS = 50
         private const val FIELD_SWITCHED = "Đã sang ô nhập khác. Bấm Dịch lại."
 
         /**
