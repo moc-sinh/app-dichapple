@@ -538,10 +538,15 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
     cắt giữa bản dịch báo lỗi, không format, 401, sự kiện lỗi, không truyền khi không có progress) và `historyIsReadAgainOnlyWhenItChanges`.
     CI iOS in cảnh báo trình biên dịch thành annotation (đọc được qua API: `check-runs/<id>/annotations`).
   - Chưa thử trên máy thật. Nếu chậm hay lỗi, xin nhật ký gõ (dòng ⇄) trước khi sửa.
+  - Commit 389a193: Android run 13 xanh (`android-1.6.0-13`), iOS run 85 build xanh (IPA
+    `https://github.com/moc-sinh/app-dichapple/actions/runs/41119404940/artifacts/13007232966`; annotation chỉ có cảnh báo Node 20 của
+    GitHub, không có cảnh báo trình biên dịch trong mã app). `keyboard-smoke` xếp hàng chờ máy macOS arm64 (ở run 83, 84 job này bị huỷ sau 15 phút chờ).
+    Bảng so sánh trước/sau (Claude Doc): `https://claude.ai/artifact/Vo41rFdkNmpEAzJ8X6UKst`. Đã gửi người dùng link IPA, APK và bảng.
 
 ## Việc tiếp theo (theo thứ tự)
 
-0. Đã gửi link IPA 1.16.0 (run 81) và APK 1.5.0 (`android-1.5.0-9`). Chờ người dùng họp thử rồi gửi nhật ký tốc độ và biên
+0. Đã gửi link IPA 1.17.0 (run 85), APK 1.6.0 (`android-1.6.0-13`) và bảng so sánh. Chờ người dùng thử; nếu Dịch hay tin đối tác còn
+   chậm hoặc lỗi, xin nhật ký gõ iPhone (dòng ⇄: `tổng`, `Nghĩa đến sau bản dịch`, `chữ đầu sau`) rồi mới sửa. Trước đó: đã gửi link IPA 1.16.0 (run 81) và APK 1.5.0 (`android-1.5.0-9`). Chờ người dùng họp thử rồi gửi nhật ký tốc độ và biên
    bản có đánh dấu câu dịch sai; đọc chúng trước khi sửa tiếp (thuật ngữ thiếu thì thêm vào `Trade`, cả hai tệp). Người dùng muốn Soniox + Luna (không Sol), ngành đông lạnh, hoa quả, tiếng Trung và Anh.
    Trước đó: gửi link IPA 1.15.0 và APK 1.4.0. Người dùng thử: Tôi nói có còn trễ không (nhật ký: dòng "GPT Sol X s" của câu Tôi nói,
    "bỏ đọc: câu của bạn đọc trước"), chữ gọn có dễ đọc không. Nếu Tôi nói vẫn chậm: câu của bạn dịch bằng model của Cài đặt
