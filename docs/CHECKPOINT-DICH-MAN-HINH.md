@@ -1,14 +1,15 @@
 # Checkpoint: MSTrans Android 1.7.0, tự động dịch màn hình
 
-Cập nhật lúc 25/11/2026, khoảng 23:45 giờ Việt Nam. Nhánh `mstrans/auto-screen-translate`.
+Cập nhật lúc 26/11/2026 (máy tính Windows có Android SDK). Nhánh `mstrans/auto-screen-translate`.
 Người yêu cầu: Minh (Mộc Sinh). Đặc tả gốc là tin nhắn "NHIỆM VỤ: NÂNG CẤP MSTRANS ANDROID — AUTO
 SCREEN TRANSLATION" ngày 25/11/2026, tóm tắt ở mục 2.
 
 ## 0. Đọc trước khi làm tiếp
 
-- **Trạng thái:** đã xong audit, nghiên cứu mã nguồn mở, chốt kiến trúc, sửa CI để nhánh thử nghiệm
-  không phát hành công khai. **Chưa viết dòng mã nào của tính năng dịch màn hình.** Phiên cloud dừng
-  ở đây vì Minh chuyển việc sang máy tính có Android SDK. Làm tiếp từ mục 10.
+- **Trạng thái 26/11/2026:** đã viết xong mã của tính năng (mục 10, bước 1 đến 6 phần build/lint), test lõi xanh,
+  APK 1.7.0 build được, lint không thêm lỗi. **Chưa thử trên điện thoại hay emulator nào** (máy tính chưa có
+  điện thoại cắm vào, Windows chưa bật ảo hoá cho emulator): cả 20 tình huống ở mục 11 vẫn **chưa kiểm**. Chưa push
+  các commit mới (CI chưa chạy với ML Kit). Xem mục 13.
 - **Quy tắc của Minh:** trả lời bằng tiếng Việt dễ hiểu; chạy test trước mỗi lần push; một phiên một
   nhánh (phiên cloud đã ngừng đẩy lên nhánh này); không merge, không phát hành công khai; không đổi
   khóa ký; không ghi tên model AI vào commit, PR hay mã; `git fetch` trước khi push; không báo
@@ -374,3 +375,49 @@ Cũng chưa kiểm: lần chạy CI có ML Kit, Android Lint với mã mới, c�
 - Tải mô hình dịch cần mạng tới máy chủ Google (khoảng vài chục MB mỗi ngôn ngữ, cần đo).
 - Pin: OCR là phần tốn nhất; chỉ chạy khi nội dung đổi. Cần số đo thật trước khi hứa.
 - Khóa ký đã lộ (mục 8).
+
+## 13. Tiến độ ngày 26/11/2026 (máy tính Windows)
+
+Máy: Windows 11, i7-12700H, 32 GB RAM. JDK 21 (Temurin) chạy Gradle, mã vẫn biên dịch cho Java 17. Android SDK
+cài vào `%LOCALAPPDATA%\Android\Sdk` từ gói command-line tools chính thức (`commandlinetools-win-13114758`,
+SHA-256 `98b565cb…a3505b003` khớp), cùng `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`.
+
+| Commit | Nội dung |
+|---|---|
+| `c9affc5` | ML Kit `text-recognition-chinese:16.0.1`, `translate:17.0.3`, `kotlinx-coroutines-play-services:1.10.2` (đã kiểm là bản mới nhất trên Google Maven / Maven Central ngày 26/11/2026); `android.useAndroidX=true`; chỉ ARM (`MSTRANS_ABIS` thêm `x86_64` cho emulator); thư viện máy nén trong APK |
+| `30928db` | Lõi `core/screen` theo mục 6, 58 test mới (tổng 103 test core đều xanh) |
+| `62e012e` | Phần app: dịch vụ, chụp màn hình, ML Kit, lớp phủ, nút nổi, trang Cài đặt › Dịch màn hình, manifest, xml; versionName 1.7.0 |
+
+**Kích thước APK (bản release, đo thật):** 1.6.0 = 2.031.014 byte. Thêm ML Kit với 3 kiến trúc CPU và thư viện máy
+không nén = 81.207.479 byte. Chỉ ARM + nén = 27.041.751 byte. Bản 1.7.0 đủ tính năng = 27.127.423 byte. Phần lớn là
+`libtranslate_jni.so` và `libmlkit_google_ocr_pipeline.so`. Gói dịch zh/vi tải về sau khi cài (chưa đo dung lượng).
+
+**Bản build cục bộ** (`MSTRANS_BUILD=15`): `vn.mocsinh.mstrans`, versionCode 15, versionName 1.7.0, ký v2, chứng thư
+`ff13e1b4…994a6eb9` (trùng 1.6.0). SHA-256 của APK thay đổi theo mỗi lần build. Quyền trong APK: 4 quyền cũ +
+`ACCESS_NETWORK_STATE` (ML Kit) + `vn.mocsinh.mstrans.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (AndroidX, quyền nội bộ
+chỉ app này có). Không có SYSTEM_ALERT_WINDOW, không có quyền bộ nhớ.
+
+**Lint:** 1 lỗi (`MissingPermission` cũ ở `AndroidAudio.kt`), 13 cảnh báo, đúng như mốc 1.6.0. Đã tắt có ghi lý do:
+`UseCompatLoadingForDrawables` (xuất hiện do bật AndroidX, app không dùng AppCompat), `ChromeOsAbiSupport` (chỉ
+build cho điện thoại), `UnusedAttribute` trong `screen_translation_service.xml` (`canTakeScreenshot` 11+,
+`isAccessibilityTool` 12+, máy cũ tự bỏ qua). Các thuộc tính `android:` của xml và manifest đã đối chiếu với
+`android.R$attr` của SDK 35.
+
+**Quyết định thêm khi viết mã (khác hoặc chi tiết hơn mục 5):**
+- Từ điển chia hai: `TERMS` (30 thuật ngữ bắt buộc + thuật ngữ mua sắm đã rà) được thay cả trong câu dài trước khi
+  dịch; `LABELS` (từ thường như 确定, 删除, 价格) chỉ khớp nguyên dòng, vì trong câu chúng hay mang nghĩa khác.
+  Đã rà danh sách "đề xuất bổ sung" của mục 7 và đưa vào; 红包 dịch là "Lì xì".
+- Thuật ngữ người dùng đọc được cả hai chiều: `báo giá = 报价` cũng cho 报价 → "báo giá".
+- Bản dịch còn sót chữ Hán thì không tin (giữ chữ gốc). Dịch từng khúc thì thêm dấu cách và đổi dấu câu Trung
+  (，。：) sang kiểu Việt.
+- Từ khóa nhạy cảm chia hai mức: 支付密码, 付款码, 收款码, 安全键盘, 银行卡号, 身份证号, CVV… dừng ở mọi nơi; 密码,
+  验证码, 银行卡, 身份证 chỉ dừng khi màn hình có ô nhập chữ (trang Cài đặt của Taobao có dòng "修改密码", không nên
+  dừng ở đó).
+- Thay vì tính "chữ ký" khi mỗi sự kiện đổi nội dung tới, lần quét tự tính chữ ký (chữ Hán + vị trí); giống lần
+  trước thì không vẽ lại. Lần quét chờ màn hình yên nhưng không quá 1,5 giây (banner chạy liên tục không làm hoãn mãi).
+- OCR khi chỉ có nội dung đổi (không đổi trang, không cuộn) cách nhau tối thiểu 5 / 2,5 / 1,2 giây theo mức tốc độ.
+- Chữ của ô nhập (người dùng đang gõ) không bị phủ. `contentDescription` chỉ dùng khi nút không có chữ, không có con
+  và không phải ảnh.
+
+**Chưa kiểm (phải thử trên máy thật):** cả 20 tình huống mục 11; số đo RAM, CPU, pin, độ trễ; cài đè lên 1.6.0 (13);
+lần chạy CI có ML Kit; Taobao để lộ bao nhiêu chữ qua Trợ năng; kích thước gói dịch tải về; chữ có vừa khung không.
