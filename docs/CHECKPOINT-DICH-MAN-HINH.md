@@ -27,8 +27,8 @@ SCREEN TRANSLATION" ngày 25/11/2026, tóm tắt ở mục 2.
 Rollback: mọi thay đổi chỉ nằm trên nhánh này. Nhánh giao hàng `claude/funny-gates-s6pl2c` không bị
 đụng tới. Bỏ nhánh này là quay về 1.6.0 nguyên vẹn.
 
-**CI run Android #14** (commit `f985b9f`, bản 1.6.0 versionCode 14): đang chạy lúc viết. Kết quả được
-ghi ở mục 9 khi xong.
+**CI run Android #14** (commit `f985b9f`): xanh, đã xác nhận nhánh thử chỉ tạo Release nháp. Chi tiết
+và mốc Android Lint ở mục 9.
 
 ## 2. Tóm tắt yêu cầu
 
@@ -303,7 +303,18 @@ X条评价 = X đánh giá · 券后X = Sau phiếu giảm X.
 - Lấy APK từ Release nháp: `gh release download test-android-<version>-<run> -R moc-sinh/app-dichapple -p MSTrans.apk`
   (cần quyền ghi repo), rồi gửi Minh qua kênh riêng kèm SHA-256. Dọn bản nháp sau khi Minh cài:
   `gh release delete test-android-<version>-<run> -R moc-sinh/app-dichapple -y`.
-- Run #14 (`f985b9f`): đang chạy lúc viết checkpoint.
+- Run #14 (`f985b9f`, https://github.com/moc-sinh/app-dichapple/actions/runs/45654585409) **xanh**: test core
+  đạt; APK `vn.mocsinh.mstrans`, versionCode 14, versionName 1.6.0, ký v2, chứng thư
+  `ff13e1b4…994a6eb9` (trùng 1.6.0 và khóa trong repo); SHA-256 của APK
+  `a4f34fb9fb42eb5704c2bd9291536eabe8565bfdc825546615331f5f7b9930d0`, 2.030.442 byte. Đã tạo Release nháp
+  `test-android-1.6.0-14` (draft, prerelease); bước phát hành công khai bị bỏ qua đúng ý; Release công khai mới
+  nhất vẫn là `android-1.6.0-13`. Bản nháp này chỉ là 1.6.0 dựng lại để thử quy trình, không gửi cho Minh, xóa
+  được.
+- **Mốc Android Lint của mã 1.6.0** (trước khi thêm tính năng): 1 lỗi `MissingPermission` ở
+  `app/src/main/kotlin/vn/mocsinh/mstrans/audio/AndroidAudio.kt:128` (có từ trước: gọi ghi âm mà không kiểm
+  quyền ngay tại chỗ) và 13 cảnh báo (DataExtractionRules 1, ObsoleteSdkInt 1, OldTargetApi 1, SetTextI18n 4,
+  UnusedResources 3, VectorPath 1, ViewConstructor 2). Mã mới không được thêm lỗi lint nào; lỗi cũ nên sửa
+  riêng (kiểm `checkSelfPermission` hoặc bắt `SecurityException` trước khi mở micro).
 
 ## 10. Việc tiếp theo (theo thứ tự)
 
