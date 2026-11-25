@@ -4,6 +4,11 @@
 `claude/funny-gates-s6pl2c` (PR #1 nháp vào `claude/stoic-hopper-f60iid`) của repo `moc-sinh/app-dichapple`.
 Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang được tài khoản khác: file này là bàn giao.
 
+> **Việc đang làm từ 25/11/2026:** Android 1.7.0 tự động dịch màn hình (Taobao, 1688…) trên nhánh riêng
+> `mstrans/auto-screen-translate`. Bàn giao riêng ở `docs/CHECKPOINT-DICH-MAN-HINH.md` (đọc file đó trước).
+> Chưa có mã của tính năng; nhánh giao hàng `claude/funny-gates-s6pl2c` chưa bị đổi. Trên nhánh mới, CI chỉ
+> tạo Release nháp (không công khai).
+
 ## Bắt đầu phiên mới
 
 1. Đọc hết file này, rồi `docs/HUONG-DAN.md` (phần Hội thoại) và `App/Conversation/ConversationModel.swift`.

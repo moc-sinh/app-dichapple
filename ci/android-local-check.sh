@@ -52,7 +52,7 @@ EOF
 cat > "$W/app/build.gradle.kts" <<EOF
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins { kotlin("jvm") version "2.2.0" }
-repositories { mavenCentral() }
+repositories { maven("https://maven-central.storage-download.googleapis.com/maven2/"); mavenCentral() }
 java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 sourceSets["main"].kotlin.srcDirs("$R/android/app/src/main/kotlin", "src/stub")
