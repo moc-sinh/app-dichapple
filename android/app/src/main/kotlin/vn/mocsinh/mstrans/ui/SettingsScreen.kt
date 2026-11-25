@@ -20,6 +20,7 @@ import vn.mocsinh.mstrans.core.Language
 import vn.mocsinh.mstrans.core.Tone
 import vn.mocsinh.mstrans.core.TranslationModel
 import vn.mocsinh.mstrans.core.Translator
+import vn.mocsinh.mstrans.screen.ScreenState
 
 class SettingsScreen(private val activity: MainActivity) : Screen {
     private val settings = activity.settings
@@ -57,6 +58,7 @@ class SettingsScreen(private val activity: MainActivity) : Screen {
         body.addView(aboutYouSection())
         body.addView(incomingSection())
         body.addView(everywhereSection())
+        body.addView(screenSection())
         body.addView(keyboardSection())
         body.addView(dataSection())
         body.addView(aboutSection())
@@ -206,6 +208,20 @@ class SettingsScreen(private val activity: MainActivity) : Screen {
                 "Giữ ngón tay trên tin để chọn chữ, rồi trong menu hiện ra chạm ⋮ (Thêm) › Dịch bằng MSTrans."),
             step(null, "Chia sẻ › MSTrans", "Ở app không cho chọn chữ: Chia sẻ tin › Dịch bằng MSTrans."),
         ))
+
+    /** Chinese on the screen of Taobao and other chosen apps, translated where it is. */
+    private fun screenSection(): View {
+        val screen = ScreenState.settings(activity)
+        val value = when {
+            !screen.enabled -> "Tắt"
+            !ScreenState.permitted(activity) -> "Thiếu quyền"
+            screen.paused -> "Tạm dừng"
+            else -> "Đang bật"
+        }
+        return activity.section("Dịch màn hình",
+            "Chữ Trung trong Taobao, 1688… tự hiện bản dịch tiếng Việt ngay trên màn hình, không cần bấm dịch.",
+            listOf(activity.row("Dịch màn hình", value) { ScreenTranslationPage(activity).open() }))
+    }
 
     private fun keyboardSection(): View {
         val sizes = listOf("Như bàn phím thường", "Cao hơn một chút", "Cao hơn")

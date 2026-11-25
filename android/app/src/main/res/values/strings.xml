@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_translation_label">MSTrans · Dịch màn hình</string>
+    <string name="screen_translation_description">Dịch chữ Trung sang tiếng Việt ngay trên màn hình của các app mua sắm bạn chọn trong MSTrans (mặc định Taobao). Khi bạn bật Dịch màn hình, MSTrans đọc chữ và vị trí chữ của các app đã chọn, và chụp màn hình của chúng để đọc chữ trong ảnh (Android 11 trở lên). MSTrans không đọc app khác, không đọc ô mật khẩu, không bấm, gõ hay cuộn thay bạn, không lưu ảnh chụp. Chế độ Ngoại tuyến không gửi gì ra mạng; chế độ AI nâng cao (chỉ khi bạn chọn) gửi chữ, không gửi ảnh, tới OpenAI.</string>
+</resources>

@@ -2,11 +2,15 @@ package vn.mocsinh.mstrans.core.screen
 
 import vn.mocsinh.mstrans.core.KeyValueStore
 
-/** How often the screen is read: the least time between two scans, and the wait after scrolling. */
-enum class Speed(val label: String, val minGapMs: Long, val settleMs: Long) {
-    SAVER("Tiết kiệm pin", 1_500, 450),
-    BALANCED("Cân bằng", 700, 400),
-    FAST("Nhanh", 300, 350),
+/**
+ * How often the screen is read: the least time between two scans, the wait after scrolling, and
+ * the least time between two readings of pictures when only the content changed (a moving banner
+ * would otherwise keep the costliest step running). A new page or a scroll reads pictures at once.
+ */
+enum class Speed(val label: String, val minGapMs: Long, val settleMs: Long, val imageGapMs: Long) {
+    SAVER("Tiết kiệm pin", 1_500, 450, 5_000),
+    BALANCED("Cân bằng", 700, 400, 2_500),
+    FAST("Nhanh", 300, 350, 1_200),
 }
 
 /** Cài đặt › Dịch màn hình, in the same store as the other settings. Off until the user turns it on. */
