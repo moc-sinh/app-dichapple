@@ -1,15 +1,15 @@
 # Checkpoint: MSTrans Android 1.7.0, tự động dịch màn hình
 
-Cập nhật lúc 26/11/2026 (máy tính Windows có Android SDK). Nhánh `mstrans/auto-screen-translate`.
+Cập nhật lúc 26/11/2026, 00:53 (máy tính Windows có Android SDK). Nhánh `mstrans/auto-screen-translate`.
 Người yêu cầu: Minh (Mộc Sinh). Đặc tả gốc là tin nhắn "NHIỆM VỤ: NÂNG CẤP MSTRANS ANDROID — AUTO
 SCREEN TRANSLATION" ngày 25/11/2026, tóm tắt ở mục 2.
 
 ## 0. Đọc trước khi làm tiếp
 
-- **Trạng thái 26/11/2026:** đã viết xong mã của tính năng (mục 10, bước 1 đến 6 phần build/lint), test lõi xanh,
-  APK 1.7.0 build được, lint không thêm lỗi. **Chưa thử trên điện thoại hay emulator nào** (máy tính chưa có
-  điện thoại cắm vào, Windows chưa bật ảo hoá cho emulator): cả 20 tình huống ở mục 11 vẫn **chưa kiểm**. Chưa push
-  các commit mới (CI chưa chạy với ML Kit). Xem mục 13.
+- **Trạng thái 26/11/2026, 00:45 (tạm dừng theo yêu cầu của Minh):** mã của tính năng đã viết xong (mục 10, bước 1
+  đến 6 phần build/lint), 103 test lõi xanh, APK 1.7.0 build được, lint không thêm lỗi. Đã có máy ảo Android 14, đã
+  cài đè 1.7.0 lên bản 1.6.0 đã phát hành (đạt) và tải xong gói dịch. **20 tình huống ở mục 11 vẫn chưa kiểm cái
+  nào.** Đã push lên nhánh này; CI chưa chạy với ML Kit. **Đọc mục 14 và 15 trước khi làm tiếp.**
 - **Quy tắc của Minh:** trả lời bằng tiếng Việt dễ hiểu; chạy test trước mỗi lần push; một phiên một
   nhánh (phiên cloud đã ngừng đẩy lên nhánh này); không merge, không phát hành công khai; không đổi
   khóa ký; không ghi tên model AI vào commit, PR hay mã; `git fetch` trước khi push; không báo
@@ -337,6 +337,8 @@ X条评价 = X đánh giá · 券后X = Sau phiếu giảm X.
 
 ## 11. Tình huống thử trên thiết bị: **chưa kiểm cái nào**
 
+Cài đè lên 1.6.0 (13) đã đạt trên máy ảo (mục 14); 20 tình huống dưới đây chưa chạy.
+
 | # | Tình huống | Kết quả mong đợi |
 |---|---|---|
 | 1 | Mở Taobao sau khi bật | Chữ Trung hiện bản dịch trong khoảng 1 giây, không phải bấm |
@@ -360,7 +362,8 @@ X条评价 = X đánh giá · 券后X = Sau phiếu giảm X.
 | 19 | Màn hình nhạy cảm, màn hình có FLAG_SECURE | Không dịch, không chụp |
 | 20 | RAM, CPU, pin, độ trễ | Có số đo thật để báo cáo |
 
-Cũng chưa kiểm: lần chạy CI có ML Kit, Android Lint với mã mới, cài đè thật lên 1.6.0 (13).
+Cũng chưa kiểm: lần chạy CI có ML Kit; cài đè lên 1.6.0 (13) trên điện thoại thật (trên máy ảo đã đạt, mục 14).
+Android Lint với mã mới đã chạy (mục 13).
 
 ## 12. Rủi ro và giới hạn đã biết
 
@@ -384,9 +387,11 @@ SHA-256 `98b565cb…a3505b003` khớp), cùng `platform-tools`, `platforms;andro
 
 | Commit | Nội dung |
 |---|---|
-| `c9affc5` | ML Kit `text-recognition-chinese:16.0.1`, `translate:17.0.3`, `kotlinx-coroutines-play-services:1.10.2` (đã kiểm là bản mới nhất trên Google Maven / Maven Central ngày 26/11/2026); `android.useAndroidX=true`; chỉ ARM (`MSTRANS_ABIS` thêm `x86_64` cho emulator); thư viện máy nén trong APK |
-| `30928db` | Lõi `core/screen` theo mục 6, 58 test mới (tổng 103 test core đều xanh) |
-| `62e012e` | Phần app: dịch vụ, chụp màn hình, ML Kit, lớp phủ, nút nổi, trang Cài đặt › Dịch màn hình, manifest, xml; versionName 1.7.0 |
+| `ff9a7fd` | ML Kit `text-recognition-chinese:16.0.1`, `translate:17.0.3`, `kotlinx-coroutines-play-services:1.10.2` (đã kiểm là bản mới nhất trên Google Maven / Maven Central ngày 26/11/2026); `android.useAndroidX=true`; chỉ ARM (`MSTRANS_ABIS` thêm `x86_64` cho emulator); thư viện máy nén trong APK |
+| `e0f0304` | Lõi `core/screen` theo mục 6, 58 test mới (tổng 103 test core đều xanh) |
+| `f3fd2bb` | Phần app: dịch vụ, chụp màn hình, ML Kit, lớp phủ, nút nổi, trang Cài đặt › Dịch màn hình, manifest, xml; versionName 1.7.0 |
+| `855610c` | Checkpoint sau khi viết mã `[skip ci]` |
+| `4fecc54` | App thử nghiệm `android/testshop` (chỉ build khi đặt `MSTRANS_TESTSHOP`) |
 
 **Kích thước APK (bản release, đo thật):** 1.6.0 = 2.031.014 byte. Thêm ML Kit với 3 kiến trúc CPU và thư viện máy
 không nén = 81.207.479 byte. Chỉ ARM + nén = 27.041.751 byte. Bản 1.7.0 đủ tính năng = 27.127.423 byte. Phần lớn là
@@ -419,5 +424,85 @@ build cho điện thoại), `UnusedAttribute` trong `screen_translation_service.
 - Chữ của ô nhập (người dùng đang gõ) không bị phủ. `contentDescription` chỉ dùng khi nút không có chữ, không có con
   và không phải ảnh.
 
-**Chưa kiểm (phải thử trên máy thật):** cả 20 tình huống mục 11; số đo RAM, CPU, pin, độ trễ; cài đè lên 1.6.0 (13);
+**Chưa kiểm:** cả 20 tình huống mục 11; số đo RAM, CPU, pin, độ trễ; cài đè lên 1.6.0 (13) trên điện thoại thật;
 lần chạy CI có ML Kit; Taobao để lộ bao nhiêu chữ qua Trợ năng; kích thước gói dịch tải về; chữ có vừa khung không.
+
+## 14. Điểm dừng 26/11/2026, 00:45
+
+**Máy ảo trên máy tính Windows**
+- Theo lựa chọn của Minh, đã cài driver tăng tốc "Android Emulator hypervisor driver" 2.2.0 (AEHD, dịch vụ
+  `aehd`) bằng quyền quản trị. Google ngừng driver này sau 31/12/2026 (lâu dài: Windows Hypervisor Platform). Gỡ:
+  PowerShell quyền quản trị, chạy `silent_install.bat -u` trong
+  `%LOCALAPPDATA%\Android\Sdk\extras\google\Android_Emulator_Hypervisor_Driver`.
+- Gói SDK thêm: `emulator`, `system-images;android-34;google_apis_playstore;x86_64`.
+- Máy ảo `mstrans34`: Pixel 7, Android 14, 4 GB RAM, `hw.keyboard=no` (hiện bàn phím ảo). Mở:
+  `& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd mstrans34 -no-snapshot-save`
+- **Chú ý:** máy tính này có phiên khác chạy máy ảo riêng. Lúc 00:44 một app của phiên đó bị cài nhầm vào
+  `mstrans34` (lệnh `adb` không chỉ định thiết bị); không gỡ vì không phải của MSTrans. Luôn dùng
+  `adb -s <serial>` (xem `adb devices`; `adb -s <serial> emu avd name` cho biết máy nào là `mstrans34`), và chỉ đo
+  RAM/CPU khi chỉ chạy một máy ảo.
+
+**Đã thử trên `mstrans34`**
+
+| Việc | Kết quả |
+|---|---|
+| Cài bản đã phát hành 1.6.0 (13), file tải từ Release `android-1.6.0-13` | SHA-256 khớp `0e89f6e8…2941012b`, chứng thư `ff13e1b4…` |
+| Cài đè 1.7.0 (15) bằng `adb install -r` (APK ARM, chạy qua dịch mã trên x86_64) | **Đạt:** versionCode 15, thuật ngữ thêm ở 1.6.0 vẫn còn, không crash |
+| Cài đặt › Dịch màn hình | Hiển thị đúng, mặc định tắt, báo chưa cấp quyền Trợ năng |
+| Tải gói dịch (bật "Chỉ tải qua Wi-Fi") | Tải xong trong chưa tới 3 phút (chưa đo chính xác, chưa đo dung lượng) |
+
+**Lỗi giao diện thấy được, chưa sửa:** dòng "Gói dịch Trung → Việt" bị ngắt hai dòng vì giá trị "Đã tải, dịch được
+khi mất mạng" quá dài. Cách sửa: giá trị chỉ ghi "Đã tải" (chú thích bên dưới đã nói chạy được khi mất mạng).
+
+**App thử nghiệm** `android/testshop` ("TestShop 测试商城", đã cài vào `mstrans34`): đặt `MSTRANS_TESTSHOP=1` rồi
+`.\gradlew.bat :testshop:assembleDebug`. Mở thẳng một màn:
+`adb -s emulator-5554 shell am start -n vn.mocsinh.testshop/.ShopActivity --es screen settings`
+(`home`, `detail`, `settings`, `image`, `search`, `password`, `secure`). Mỗi lần chạm ghi log tag `TestShop`.
+
+**Làm tiếp (theo thứ tự)**
+1. Hỏi Minh: có cho tự bật quyền Trợ năng của MSTrans trên máy ảo (và khi thử thì tắt/bật lại, tắt Wi-Fi ảo, xoay,
+   khoá màn hình) không. Đã hỏi khoảng 00:43, **chưa trả lời**: không bật khi chưa được đồng ý.
+2. Sửa dòng gói dịch ở trên.
+3. Trong MSTrans: thêm app TestShop, bật "Tự động dịch màn hình", chạy 20 tình huống ở mục 11, đo RAM, CPU, độ trễ
+   (log tag `MSTransScreen`), chạy lâu 30 phút.
+4. Taobao thật: Minh tự đăng nhập Google Play trên máy ảo để cài. Điện thoại thật vẫn cần cho "cài đặt bị hạn chế"
+   và các màn FLAG_SECURE của app thật.
+5. Chế độ AI trên máy: cần Minh tự nhập key OpenAI; mới test bằng máy chủ giả.
+6. Đã push ngày 26/11/2026 (mục 15). CI chưa chạy vì commit cuối có `[skip ci]`; muốn chạy (ra Release nháp) thì
+   `gh workflow run android.yml -R moc-sinh/app-dichapple --ref mstrans/auto-screen-translate`.
+
+## 15. Bàn giao sang tài khoản khác (26/11/2026, 00:53)
+
+Tài khoản mới **không thấy cuộc trò chuyện cũ** và không thừa hưởng sự đồng ý nào đã cho ở phiên trước.
+
+**Dán đoạn này vào phiên mới**
+
+```
+Mở repo moc-sinh/app-dichapple, nhánh mstrans/auto-screen-translate (PR nháp #3, không merge). Đọc
+docs/CHECKPOINT-DICH-MAN-HINH.md, nhất là mục 0, 14 và 15, rồi làm tiếp theo "Làm tiếp" ở mục 14. Trả lời bằng
+tiếng Việt dễ hiểu, báo đúng kết quả thật, mục nào chưa thử thì ghi rõ là chưa kiểm.
+```
+
+**Mã nằm ở đâu**
+- GitHub: nhánh `mstrans/auto-screen-translate` của `moc-sinh/app-dichapple`.
+- Trên máy tính Windows đã làm: `%USERPROFILE%\app-dichapple`. Sang máy khác thì clone, checkout nhánh, và phải
+  cài lại Android SDK, driver tăng tốc, máy ảo (mục 13 và 14).
+- Nhánh `backup/truoc-khi-sua-loi-commit` chỉ có trên máy cũ (bản trước khi sửa lời và email commit): **không
+  push**.
+
+**Môi trường trên máy đã làm** (PowerShell, thư mục `android`)
+- JDK 21 Temurin (`JAVA_HOME` đã đặt sẵn trong máy).
+- `$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"`
+- `$env:MSTRANS_BUILD = "15"` (CI mới chạy đến #14; CI chạy thêm thì dùng số run mới nhất + 1).
+- Test `.\gradlew.bat :core:test`, APK `.\gradlew.bat :app:assembleRelease`, lint `.\gradlew.bat :app:lintRelease`.
+- File tạm của phiên cũ (APK 1.6.0 đã tải, ảnh chụp máy ảo) có thể đã mất. Bản 1.6.0 tải lại từ Release
+  `android-1.6.0-13` (hỏi trước khi tải). Máy ảo `mstrans34` vẫn còn app đã cài và gói dịch đã tải.
+
+**Phải xin lại sự đồng ý của Minh** trước khi: bật quyền Trợ năng trên máy ảo, đổi Wi-Fi/xoay/khoá màn hình
+máy ảo (câu hỏi lần trước chưa được trả lời), tải file, sửa cài đặt Windows, push.
+
+**Commit**
+- Không ghi tên model AI vào commit, PR hay mã; công cụ gợi ý thêm dòng đồng tác giả thì bỏ. Các commit ngày
+  26/11 đã được viết lại để bỏ dòng này trước khi push; vài commit cũ hơn trên nhánh vẫn còn, không sửa vì đã push.
+- Repo công khai, còn cấu hình git trên máy đã làm dùng email công ty. Commit bằng địa chỉ noreply của tài khoản
+  `minhdn-del` (xem `git log`): `git -c user.email=<địa chỉ đó> commit ...`, trừ khi Minh bảo khác.

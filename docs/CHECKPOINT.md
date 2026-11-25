@@ -6,8 +6,8 @@ Không có thay đổi nào chưa commit. Lịch sử trò chuyện không sang 
 
 > **Việc đang làm từ 25/11/2026:** Android 1.7.0 tự động dịch màn hình (Taobao, 1688…) trên nhánh riêng
 > `mstrans/auto-screen-translate`. Bàn giao riêng ở `docs/CHECKPOINT-DICH-MAN-HINH.md` (đọc file đó trước).
-> 26/11/2026: đã có mã và test của tính năng (bản 1.7.0, build và lint được trên máy Windows có SDK), **chưa thử
-> trên điện thoại nào**. Nhánh giao hàng `claude/funny-gates-s6pl2c` chưa bị đổi. Trên nhánh mới, CI chỉ tạo Release
+> 26/11/2026, 00:45: đã có mã và test của tính năng (bản 1.7.0, build và lint được trên máy Windows có SDK), cài đè
+> lên 1.6.0 đã đạt trên máy ảo, **20 tình huống thử chưa chạy**. Bàn giao sang tài khoản khác: mục 14 và 15 của file đó. Nhánh giao hàng `claude/funny-gates-s6pl2c` chưa bị đổi. Trên nhánh mới, CI chỉ tạo Release
 > nháp (không công khai).
 
 ## Bắt đầu phiên mới
