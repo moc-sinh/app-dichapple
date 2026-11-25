@@ -32,4 +32,8 @@ rootProject.name = "MSTrans"
 
 include(":core")
 val androidSdk = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
-if (androidSdk != null && file(androidSdk).isDirectory) include(":app")
+if (androidSdk != null && file(androidSdk).isDirectory) {
+    include(":app")
+    // A made-up Chinese shop to try Dịch màn hình on a device (never released).
+    if (System.getenv("MSTRANS_TESTSHOP") != null) include(":testshop")
+}
