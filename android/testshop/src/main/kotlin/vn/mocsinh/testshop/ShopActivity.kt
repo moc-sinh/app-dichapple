@@ -5,12 +5,19 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.text.TextUtils
 import android.util.Log
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
@@ -23,7 +30,9 @@ import android.widget.TextView
 /**
  * Screens for the device tries, chosen with `--es screen <name>`: home (list, countdown),
  * detail, settings (every required term), image (Chinese only inside a picture), search (a
- * field, for the keyboard), password, secure (FLAG_SECURE). Every tap is logged (tag TestShop).
+ * field, for the keyboard), password, secure (FLAG_SECURE), taobao (laid out like a real Taobao
+ * product page: tabs, text in a picture, a grid, chips, small labels, buttons whose colour runs).
+ * Every tap is logged (tag TestShop).
  */
 class ShopActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
@@ -46,9 +55,19 @@ class ShopActivity : Activity() {
             "search" -> column.search()
             "password" -> column.password()
             "secure" -> column.secure()
+            "taobao" -> column.taobao()
             else -> column.home()
         }
-        setContentView(ScrollView(this).apply { addView(column) })
+        val scroll = ScrollView(this).apply { addView(column) }
+        if (screen == "taobao") {
+            setContentView(
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+                    addView(buyBar())
+                },
+            )
+        } else setContentView(scroll)
         Log.d(TAG, "screen $screen")
     }
 
@@ -167,6 +186,184 @@ class ShopActivity : Activity() {
         line("实付款 ¥39.00", 16f)
     }
 
+    // A page laid out like Taobao's
+
+    private fun LinearLayout.taobao() {
+        setBackgroundColor(Color.WHITE)
+        horizontal {
+            for ((i, tab) in listOf("宝贝", "评价", "详情", "推荐").withIndex()) {
+                addView(
+                    TextView(context).apply {
+                        text = tab
+                        textSize = 15f
+                        gravity = Gravity.CENTER
+                        setTextColor(if (i == 2) Color.BLACK else Color.GRAY)
+                        setPadding(0, dp(8), 0, dp(8))
+                        setOnClickListener { tap("tab $tab") }
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+            }
+        }
+        horizontal {
+            background = rounded(Color.WHITE, 20, ORANGE)
+            setPadding(dp(12), dp(4), dp(4), dp(4))
+            gravity = Gravity.CENTER_VERTICAL
+            addView(plain("anker充电头", 15f, Color.DKGRAY), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(plain("搜索", 14f, ORANGE).apply {
+                background = rounded(Color.rgb(255, 236, 224), 14)
+                setPadding(dp(12), dp(4), dp(12), dp(4))
+            })
+        }
+        space(8)
+        picture(1_000, 520, Color.rgb(96, 18, 26), Color.rgb(150, 44, 50)) { canvas, paint ->
+            paint.color = Color.WHITE
+            paint.textAlign = Paint.Align.CENTER
+            paint.isFakeBoldText = true
+            paint.textSize = 70f
+            canvas.drawText("65W更配苹果! AI屏显充", 500f, 120f, paint)
+            paint.isFakeBoldText = false
+            paint.textSize = 36f
+            canvas.drawText("表情互动 | 识别机型 | 控温系统", 500f, 190f, paint)
+            paint.textSize = 30f
+            canvas.drawText("低温快充中", 500f, 400f, paint)
+        }
+        horizontal {
+            gravity = Gravity.BOTTOM
+            addView(plain("¥198", 26f, ORANGE, bold = true))
+            addView(plain("  约 $ 29.96", 13f, Color.GRAY), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(plain("已售 16", 13f, Color.GRAY))
+        }
+        addView(plain("机乐堂智能数显65W氮化镓充电器typeC口AI智能充电头AVS协议适用iPhone18ProMax手机苹果华为小米", 17f, Color.BLACK, bold = true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        horizontal {
+            for (chip in listOf("店铺年销售超1万件 >", "近7天400+人逛过 >", "超200人加购 >")) {
+                addView(
+                    plain(chip, 12f, ORANGE).apply {
+                        background = rounded(Color.WHITE, 4, ORANGE)
+                        setPadding(dp(6), dp(3), dp(6), dp(3))
+                        maxLines = 1
+                    },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) },
+                )
+            }
+        }
+        space(10)
+        horizontal {
+            background = rounded(GREEN, 8)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            gravity = Gravity.CENTER_VERTICAL
+            addView(plain("淘宝官方物流", 17f, Color.WHITE, bold = true))
+            addView(plain("  官方跨境服务·丢损必赔", 12f, Color.WHITE))
+        }
+        horizontal {
+            setPadding(dp(12), dp(6), 0, 0)
+            addView(plain("官方直邮-陆运  ", 14f, Color.BLACK))
+            addView(plain("已享包邮", 14f, GREEN, bold = true))
+        }
+        addView(plain("预计发货后12-15日送达", 14f, Color.BLACK).apply { setPadding(dp(12), dp(2), 0, dp(8)) })
+        for (row in GRID.chunked(2)) horizontal {
+            for (card in row) {
+                addView(
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        picture(480, 300, Color.rgb(232, 236, 240), Color.rgb(205, 212, 222)) { canvas, paint ->
+                            paint.color = Color.rgb(30, 60, 110)
+                            paint.isFakeBoldText = true
+                            paint.textSize = 44f
+                            canvas.drawText(card[0], 40f, 90f, paint)
+                            paint.isFakeBoldText = false
+                            paint.color = Color.DKGRAY
+                            paint.textSize = 28f
+                            canvas.drawText(card[1], 40f, 140f, paint)
+                        }
+                        addView(plain(card[2], 14f, Color.BLACK).apply {
+                            maxLines = 2
+                            ellipsize = TextUtils.TruncateAt.END
+                        })
+                        horizontal {
+                            addView(plain(card[3], 12f, ORANGE))
+                            addView(plain("  满¥99包邮", 12f, GREEN))
+                        }
+                        horizontal {
+                            gravity = Gravity.BOTTOM
+                            addView(plain(card[4], 18f, ORANGE, bold = true))
+                            addView(plain("  " + card[5], 11f, Color.GRAY))
+                        }
+                        setOnClickListener { tap("card ${card[4]}") }
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8); bottomMargin = dp(12) },
+                )
+            }
+        }
+    }
+
+    /** The bar that stays at the bottom: three small labels under icons, two buttons in a run of colour. */
+    private fun buyBar() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Color.WHITE)
+        setPadding(dp(8), dp(6), dp(8), dp(6))
+        for (label in listOf("店铺", "客服", "收藏")) {
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    addView(View(context).apply { background = rounded(Color.WHITE, 6, Color.DKGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)))
+                    addView(plain(label, 10f, Color.GRAY))
+                    setOnClickListener { tap("bar $label") }
+                },
+                LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+        }
+        for ((label, colours) in listOf("加入购物车" to intArrayOf(Color.rgb(255, 200, 0), Color.rgb(255, 144, 0)), "立即购买" to intArrayOf(Color.rgb(255, 119, 0), Color.rgb(255, 73, 0)))) {
+            addView(
+                plain(label, 16f, Color.WHITE, bold = true).apply {
+                    gravity = Gravity.CENTER
+                    background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colours).apply {
+                        val round = dp(22).toFloat()
+                        cornerRadii = if (label == "立即购买") floatArrayOf(0f, 0f, round, round, round, round, 0f, 0f)
+                        else floatArrayOf(round, round, 0f, 0f, 0f, 0f, round, round)
+                    }
+                    setOnClickListener { tap("bar $label") }
+                },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
+            )
+        }
+    }
+
+    private fun plain(text: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        this.text = text
+        textSize = size
+        setTextColor(color)
+        if (bold) typeface = Typeface.DEFAULT_BOLD
+    }
+
+    private fun rounded(fill: Int, radius: Int, stroke: Int? = null) = GradientDrawable().apply {
+        setColor(fill)
+        cornerRadius = dp(radius).toFloat()
+        if (stroke != null) setStroke(dp(1), stroke)
+    }
+
+    private fun LinearLayout.space(height: Int) {
+        addView(View(context), ViewGroup.LayoutParams.MATCH_PARENT, dp(height))
+    }
+
+    /** A picture whose colour runs from top to bottom, with what `draw` writes in it. */
+    private fun LinearLayout.picture(width: Int, height: Int, top: Int, bottom: Int, draw: (Canvas, Paint) -> Unit) {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), top, bottom, Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+        paint.shader = null
+        draw(canvas, paint)
+        addView(ImageView(context).apply { setImageBitmap(bitmap); adjustViewBounds = true }, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
     // Views
 
     private fun column() = LinearLayout(this).apply {
@@ -207,6 +404,16 @@ class ShopActivity : Activity() {
 
     companion object {
         private const val TAG = "TestShop"
+        private val ORANGE = Color.rgb(255, 80, 0)
+        private val GREEN = Color.rgb(27, 167, 132)
+
+        /** Text in the picture (two lines), title, promotion, price, buyers. */
+        private val GRID = listOf(
+            listOf("66W极速闪充", "30分钟充86%", "【66W超级快充】小巧便携充电宝适用苹果华为", "超级立减50%", "¥158", "1000+人付款"),
+            listOf("PD 140W 充电器", "单口140W彩屏", "新款屏显氮化镓充电器十口桌面充电站全协议", "官方立减12%", "¥178", "300+人付款"),
+            listOf("67W氮化镓", "自带双1米伸缩线", "Divoom点音像素屏充电头67W氮化镓多口", "限时特价", "¥129", "60+人付款"),
+            listOf("桌面全能王", "六口同时快充", "470W带伸缩线数显桌面充电站USB多口快充", "超级立减50%", "¥188", "80+人付款"),
+        )
 
         private val PRODUCTS = listOf(
             listOf("秋季新款纯棉短袖T恤 男士宽松", "¥89.90", "-20%", "已售3000+  包邮"),

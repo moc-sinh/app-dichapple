@@ -14,6 +14,7 @@ import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import vn.mocsinh.mstrans.core.screen.Box
+import vn.mocsinh.mstrans.core.screen.ScreenBlocks
 import vn.mocsinh.mstrans.core.screen.ScreenText
 import vn.mocsinh.mstrans.core.screen.TextEngine
 
@@ -49,12 +50,35 @@ class MlKitEngines {
         checkModel()
     }
 
-    /** Lines of Chinese in `bitmap`, placed on the screen (`left`, `top` is the bitmap's corner). */
+    /**
+     * The text in `bitmap`, placed on the screen (`left`, `top` is the bitmap's corner): a wrapped
+     * sentence is one text, other lines one each (`ScreenBlocks`).
+     */
     suspend fun read(bitmap: Bitmap, left: Int, top: Int): List<ScreenText> {
         val text = recognizer().process(InputImage.fromBitmap(bitmap, 0)).await()
-        return text.textBlocks.flatMap { block -> block.lines }.mapNotNull { line ->
-            val r = line.boundingBox ?: return@mapNotNull null
-            ScreenText(line.text, Box(r.left, r.top, r.right, r.bottom).offset(left, top), fromImage = true)
+        return text.textBlocks.flatMap { block ->
+            ScreenBlocks.texts(
+                block.lines.mapNotNull { line ->
+                    val r = line.boundingBox ?: return@mapNotNull null
+                    line.text to Box(r.left, r.top, r.right, r.bottom).offset(left, top)
+                },
+            )
+        }
+    }
+
+    /**
+     * The translator and the reader of pictures load on their first use (most of a second each):
+     * done once, before a screen waits for them.
+     */
+    suspend fun warmUp() {
+        if (modelReady) runCatching { translator().translate("你好").await() }
+        runCatching {
+            val blank = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
+            try {
+                recognizer().process(InputImage.fromBitmap(blank, 0)).await()
+            } finally {
+                blank.recycle()
+            }
         }
     }
 

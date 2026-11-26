@@ -109,7 +109,7 @@ class ScreenTranslationPage(private val activity: MainActivity) {
         val state = when {
             downloading -> "Đang tải…"
             deleting -> "Đang xóa…"
-            ready == true -> "Đã tải, dịch được khi mất mạng"
+            ready == true -> "Đã tải"
             ready == false -> "Chưa tải"
             else -> "Đang kiểm tra…"
         }

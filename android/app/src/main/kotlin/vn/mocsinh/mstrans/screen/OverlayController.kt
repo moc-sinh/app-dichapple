@@ -15,9 +15,6 @@ class OverlayController(private val service: AccessibilityService) {
     private val windows = service.getSystemService(WindowManager::class.java)
     val view = OverlayView(service)
     private var attached = false
-    /** The scan whose translations are shown. */
-    private var shownGeneration = -1L
-
     /** The floating button's tap: the Chinese as it is, translations hidden. */
     var showingOriginal = false
         set(value) {
@@ -28,25 +25,13 @@ class OverlayController(private val service: AccessibilityService) {
     val isEmpty: Boolean get() = view.isEmpty
     val count: Int get() = view.count
 
-    /**
-     * Translations of scan `generation`: the first ones of a scan replace what was there (so an older
-     * page's translations go), later ones join them. `last`: the scan is done, even with nothing new.
-     */
-    fun show(generation: Long, items: List<OverlayView.Drawn>, last: Boolean = false) {
-        if (generation != shownGeneration) {
-            if (items.isEmpty() && !last) return
-            shownGeneration = generation
-            attach()
-            view.set(items)
-        } else {
-            view.add(items)
-        }
+    /** The translations of the screen as it is now, all at once. */
+    fun set(items: List<OverlayView.Drawn>) {
+        if (items.isNotEmpty()) attach()
+        view.set(items)
     }
 
-    fun clear() {
-        shownGeneration = -1L
-        view.clear()
-    }
+    fun clear() = view.clear()
 
     fun hideForCapture() {
         view.visibility = View.INVISIBLE

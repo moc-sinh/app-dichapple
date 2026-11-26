@@ -71,13 +71,16 @@ class ScreenCapture(private val service: AccessibilityService) {
     private fun failure(errorCode: Int): Shot =
         if (errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) Shot.Secure else Shot.Failed
 
-    /** Copied to an ordinary bitmap at once, the hardware buffer closed. */
+    /**
+     * Copied to an ordinary bitmap at once, the hardware buffer closed. The copy can be drawn on:
+     * text already read from the app is painted out before pictures are read.
+     */
     @RequiresApi(30)
     private fun image(result: AccessibilityService.ScreenshotResult, left: Int, top: Int): Shot {
         val buffer = result.hardwareBuffer
         return try {
             val hardware = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace) ?: return Shot.Failed
-            val copy = hardware.copy(Bitmap.Config.ARGB_8888, false)
+            val copy = hardware.copy(Bitmap.Config.ARGB_8888, true)
             hardware.recycle()
             if (copy == null) Shot.Failed else Shot.Image(copy, left, top)
         } finally {

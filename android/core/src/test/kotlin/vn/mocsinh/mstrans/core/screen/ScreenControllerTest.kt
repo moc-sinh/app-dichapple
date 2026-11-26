@@ -22,7 +22,7 @@ class ScreenControllerTest {
     fun openingTheAppScansSoon() {
         val actions = send(Event.WindowState("com.taobao.taobao"))
         assertTrue(Action.Clear in actions)
-        assertEquals(250L, scans(actions).single().delayMs)
+        assertEquals(150L, scans(actions).single().delayMs)
     }
 
     @Test
@@ -127,12 +127,55 @@ class ScreenControllerTest {
     }
 
     @Test
-    fun scansKeepTheirDistance() {
+    fun scansOfTheSamePageKeepTheirDistance() {
+        controller.speed = Speed.SAVER
+        val first = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(first.generation)
+        now += 100
+        val next = scans(send(Event.ContentChanged("com.taobao.taobao", null))).single()
+        assertEquals(Speed.SAVER.minGapMs - 100, next.delayMs)
+    }
+
+    @Test
+    fun aNewPageIsReadWithoutWaitingForThatDistance() {
         controller.speed = Speed.SAVER
         val first = scans(send(Event.WindowState("com.taobao.taobao"))).single()
         controller.scanStarted(first.generation)
         now += 100
         val next = scans(send(Event.WindowState("com.taobao.taobao"))).single()
-        assertEquals(Speed.SAVER.minGapMs - 100, next.delayMs)
+        assertEquals(150L, next.delayMs)
+        assertTrue(next.restart)
+    }
+
+    @Test
+    fun aChangeOnThePageKeepsTheScanThatIsRunning() {
+        val scan = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(scan.generation)
+        // A countdown ticks: the scan under way is still wanted, and one more comes after it.
+        val tick = scans(send(Event.ContentChanged("com.taobao.taobao", null))).single()
+        assertTrue(controller.isCurrent(scan.generation))
+        assertEquals(scan.generation, tick.generation)
+        // It does not move a scan already waiting to a later time.
+        assertFalse(tick.restart)
+    }
+
+    @Test
+    fun windowsComingAndGoingKeepTheScanThatIsRunning() {
+        val scan = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(scan.generation)
+        val windows = scans(send(Event.WindowsChanged(keyboard = false))).single()
+        assertTrue(controller.isCurrent(scan.generation))
+        assertFalse(windows.restart)
+    }
+
+    @Test
+    fun aScanAskedForWhileOneRunsComesAfterItAtTheUsualDistance() {
+        val scan = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(scan.generation)
+        now += 200
+        val again = controller.again()
+        assertEquals(scan.generation, again.generation)
+        assertEquals(Speed.BALANCED.minGapMs - 200, again.delayMs)
+        assertFalse(again.restart)
     }
 }

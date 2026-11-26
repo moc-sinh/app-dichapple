@@ -11,7 +11,11 @@ package vn.mocsinh.mstrans.core.screen
 class CommerceDictionary(
     private val terms: Map<String, String> = REQUIRED + TERMS,
     private val labels: Map<String, String> = LABELS,
+    private val required: Map<String, String> = REQUIRED,
 ) {
+    private val mustKeep: List<Pair<String, String>> =
+        required.entries.map { it.key to it.value }.sortedByDescending { it.first.length }
+
     private val byLength: List<Pair<String, String>> =
         terms.entries.map { it.key to it.value }.sortedByDescending { it.first.length }
 
@@ -21,6 +25,12 @@ class CommerceDictionary(
         if (key.isEmpty()) return null
         return terms[key] ?: labels[key] ?: pattern(key)
     }
+
+    /** A shorter word for a place too narrow for the usual one (a label under an icon); null: none. */
+    fun short(text: String): String? = SHORT[ChineseText.key(text)]
+
+    /** The terms a translation must keep word for word, longest first. */
+    fun required(): List<Pair<String, String>> = mustKeep
 
     /** Terms to replace inside a line, longest first ("加入购物车" before "购物车"). */
     fun terms(): List<Pair<String, String>> = byLength
@@ -94,6 +104,13 @@ class CommerceDictionary(
             "供应商" to "Nhà cung cấp", "厂家" to "Nhà sản xuất", "源头工厂" to "Xưởng gốc", "批发" to "Bán sỉ",
             "起订量" to "Số lượng đặt tối thiểu", "代发" to "Gửi hàng hộ", "定制" to "Đặt làm riêng", "询价" to "Hỏi giá",
             "发票" to "Hóa đơn", "开票" to "Xuất hóa đơn", "增值税" to "Thuế GTGT", "样品" to "Hàng mẫu", "拿样" to "Lấy mẫu",
+            // Offers and delivery (from real Taobao pages, 26/11/2026)
+            "全场包邮" to "Miễn phí vận chuyển toàn shop", "已享包邮" to "Đã được miễn phí vận chuyển", "到手价" to "Giá cuối",
+            "限时特价" to "Giá ưu đãi có hạn", "新品上市" to "Hàng mới ra mắt", "买二送一" to "Mua 2 tặng 1", "买一送一" to "Mua 1 tặng 1",
+            "官方物流" to "Vận chuyển chính hãng",
+            // Names of the shops themselves. Names of goods are left to the translator: tried on a
+            // phone, the more words are put into a product's title for it, the more of them it loses.
+            "淘宝" to "Taobao", "天猫" to "Tmall", "京东" to "JD", "拼多多" to "Pinduoduo",
         )
 
         /** Short everyday words: only a whole line ("确定" alone is the OK button). */
@@ -106,10 +123,17 @@ class CommerceDictionary(
             "宝贝" to "Sản phẩm", "商品" to "Sản phẩm", "评价" to "Đánh giá", "收藏" to "Lưu yêu thích",
             "关注" to "Theo dõi", "足迹" to "Đã xem", "结算" to "Thanh toán", "付款" to "Thanh toán", "数量" to "Số lượng",
             "我的" to "Của tôi", "消息" to "Tin nhắn", "客服" to "Chăm sóc khách hàng",
+            "约" to "Khoảng", "已售" to "Đã bán", "详情" to "Chi tiết",
         )
 
-        /** A number as written: sign, currency, digits with separators, 万, "+". */
-        private const val N = "([-−]?[¥￥$]?\\d+(?:[.,]\\d+)*(?:万|千)?\\+?)"
+        /** Shorter words for places too narrow for the usual ones: labels under icons, tabs. */
+        val SHORT: Map<String, String> = linkedMapOf(
+            "客服" to "CSKH", "收藏" to "Lưu", "店铺" to "Shop", "消息" to "Tin", "分类" to "Mục", "购物车" to "Giỏ",
+            "加入购物车" to "Thêm vào giỏ", "我的淘宝" to "Của tôi",
+        )
+
+        /** A number as written: sign, currency, digits with separators, 万, "+" or "%". */
+        private const val N = "([-−]?[¥￥$]?\\d+(?:[.,]\\d+)*(?:万|千)?[+%]?)"
 
         private val PATTERNS: List<Pair<Regex, String>> = listOf(
             "满${N}(?:元)?减${N}(?:元)?" to "Mua đủ {1} giảm {2}",
@@ -122,6 +146,18 @@ class CommerceDictionary(
             "共${N}件(?:商品)?" to "Tổng {1} sản phẩm",
             "${N}条评价" to "{1} đánh giá",
             "券后(?:价)?${N}(?:元)?" to "Sau phiếu giảm {1}",
+            "距结束(\\d{1,2}:\\d{2}(?::\\d{2})?)" to "Còn {1}",
+            "库存${N}(?:件)?" to "Tồn kho {1}",
+            "仅剩${N}(?:件)?" to "Chỉ còn {1}",
+            "预计发货后(\\d+)-(\\d+)日送达" to "Dự kiến giao sau {1}-{2} ngày kể từ khi gửi",
+            "超${N}人加购" to "Hơn {1} người thêm vào giỏ",
+            "${N}人加购" to "{1} người thêm vào giỏ",
+            "${N}人逛过" to "{1} người đã xem",
+            "满${N}(?:元)?包邮" to "Đủ {1} miễn phí vận chuyển",
+            "(?:超级)?立减${N}" to "Giảm ngay {1}",
+            "官方立减${N}" to "Giảm chính hãng {1}",
+            "到手价${N}(?:元)?" to "Giá cuối {1}",
+            "限时${N}" to "Ưu đãi có hạn {1}",
         ).map { (pattern, template) -> Regex(pattern) to template }
     }
 }

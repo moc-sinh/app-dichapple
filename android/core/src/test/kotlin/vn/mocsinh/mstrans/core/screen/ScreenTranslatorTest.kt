@@ -51,13 +51,13 @@ class ScreenTranslatorTest {
     @Test
     fun numbersSurviveOrTheLineIsTranslatedInPieces() = runBlocking {
         val engine = FakeEngine(mapOf(
-            "到手价¥1,299 限时-20%" to "Giá cuối ¥1.299 giảm 20% có thời hạn",
-            "到手价" to "Giá cuối cùng",
-            "限时" to "Có thời hạn",
+            "会员价¥1,299折后-20%" to "Giá hội viên ¥1.299 sau chiết khấu 20%",
+            "会员价" to "Giá hội viên",
+            "折后" to "Sau chiết khấu",
         ))
         val translator = ScreenTranslator(engine = engine)
-        val result = translator.translate("到手价¥1,299 限时-20%")
-        assertEquals("Giá cuối cùng ¥1,299 Có thời hạn -20%", result?.text)
+        val result = translator.translate("会员价¥1,299折后-20%")
+        assertEquals("Giá hội viên ¥1,299 Sau chiết khấu -20%", result?.text)
         assertEquals(ScreenTranslator.Source.CHUNKS, result?.source)
     }
 

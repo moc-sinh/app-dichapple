@@ -20,19 +20,28 @@ data class Box(val left: Int, val top: Int, val right: Int, val bottom: Int) {
     fun offset(dx: Int, dy: Int) = Box(left + dx, top + dy, right + dx, bottom + dy)
 }
 
-/** A piece of text on the screen: from the accessibility tree, or read in a picture. */
-data class ScreenText(val text: String, val bounds: Box, val fromImage: Boolean = false)
+/**
+ * A piece of text on the screen: from the accessibility tree, or read in a picture. `bounds` is its
+ * view (or the picture's line); `geometry`, where known, is where its letters really are.
+ */
+data class ScreenText(val text: String, val bounds: Box, val fromImage: Boolean = false, val geometry: TextGeometry? = null)
 
 /**
  * The text of one screen from both sources, each piece once: accessibility first (exact text and
  * place); a parent that only repeats its children goes; text read in pictures goes where the
  * accessibility tree already has it. Only Chinese text in the app's window, off the keyboard.
+ * `others`: where the app has text of its own without Chinese (a price, what the user typed): what
+ * the reader of pictures makes of it is not text of a picture ("¥178" read as "羊178").
  */
 object ScreenTextMerger {
-    fun merge(nodes: List<ScreenText>, ocr: List<ScreenText>, window: Box, excluded: List<Box> = emptyList()): List<ScreenText> {
+    fun merge(
+        nodes: List<ScreenText>, ocr: List<ScreenText>, window: Box, excluded: List<Box> = emptyList(), others: List<Box> = emptyList(),
+    ): List<ScreenText> {
         val visible = nodes.mapNotNull { place(it, window, excluded) }.distinct()
         val kept = withoutRepeats(visible)
-        val read = ocr.mapNotNull { place(it, window, excluded) }.distinct().filter { line -> kept.none { covers(it, line) } }
+        val read = ocr.mapNotNull { place(it, window, excluded) }.distinct().filter { line ->
+            kept.none { covers(it, line) } && others.none { (it.intersect(line.bounds)?.area ?: 0L) * 2 > line.bounds.area }
+        }
         return kept + read
     }
 

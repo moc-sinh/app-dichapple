@@ -2,8 +2,8 @@ package vn.mocsinh.mstrans.core.screen
 
 /**
  * When to read the screen, and when to take the overlay away. Events in, actions out; the service
- * carries the actions out. Each scan has a generation: a result from an older one is dropped, so the
- * page before never shows on the page after.
+ * carries the actions out. Each page has a generation (a new screen, a scroll, a turn start a new
+ * one): a result from an older one is dropped, so the page before never shows on the page after.
  */
 class ScreenController(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -34,8 +34,11 @@ class ScreenController(
         /** Forget translations kept in memory. */
         data object ClearCache : Action
         data object CancelScan : Action
-        /** Read the screen after `delayMs` (replacing a scan already waiting). */
-        data class Scan(val delayMs: Long, val generation: Long) : Action
+        /**
+         * Read the screen after `delayMs`. `restart`: the wait starts again (a new page, a scroll
+         * going on); if not, a scan already waiting keeps its time (a change on the page).
+         */
+        data class Scan(val delayMs: Long, val generation: Long, val restart: Boolean = true) : Action
     }
 
     @Volatile var generation = 0L
@@ -91,7 +94,9 @@ class ScreenController(
                 currentPackage = pkg
                 lastSignature = null
                 bump()
-                return if (keyboard) listOf(Action.Clear, Action.CancelScan) else listOf(Action.Clear, scan(250))
+                // A new page is read at once, whenever the page before was last read (the scan
+                // itself waits for a window still sliding into place).
+                return if (keyboard) listOf(Action.Clear, Action.CancelScan) else listOf(Action.Clear, Action.Scan(OPEN_MS, generation))
             }
             is Event.Scrolled -> {
                 if (!chosen(event.pkg)) return emptyList()
@@ -108,8 +113,9 @@ class ScreenController(
                     if (event.signature == lastSignature) return emptyList()
                     lastSignature = event.signature
                 }
-                bump()
-                return listOf(scan(speed.settleMs))
+                // The same page: what is being read and what is shown stay (a countdown would
+                // otherwise throw every scan away before it could draw).
+                return listOf(scan(speed.settleMs, restart = false))
             }
             is Event.WindowsChanged -> {
                 if (!inChosenApp()) return emptyList()
@@ -122,8 +128,9 @@ class ScreenController(
                 val wasUp = keyboard
                 if (event.keyboard == false) keyboard = false
                 if (keyboard) return emptyList()
+                if (!wasUp) return listOf(scan(speed.settleMs, restart = false))
                 bump()
-                return listOf(scan(if (wasUp) 250 else speed.settleMs))
+                return listOf(scan(250))
             }
             Event.Rotated -> {
                 if (!inChosenApp() || keyboard) return emptyList()
@@ -147,6 +154,10 @@ class ScreenController(
         if (generation == this.generation && signature != null) lastSignature = signature
     }
 
+    /** One more scan of the same page, after the one under way. */
+    @Synchronized
+    fun again(): Action.Scan = scan(0, restart = false)
+
     private fun stop(): List<Action> {
         bump()
         lastSignature = null
@@ -158,8 +169,13 @@ class ScreenController(
     }
 
     /** Not sooner than the speed allows after the scan before. */
-    private fun scan(requested: Long): Action.Scan {
+    private fun scan(requested: Long, restart: Boolean = true): Action.Scan {
         val gap = lastScanAt + speed.minGapMs - clock()
-        return Action.Scan(maxOf(requested, gap, 0), generation)
+        return Action.Scan(maxOf(requested, gap, 0), generation, restart)
+    }
+
+    private companion object {
+        /** A new page is read this long after it opens (its first content is there by then). */
+        const val OPEN_MS = 150L
     }
 }
