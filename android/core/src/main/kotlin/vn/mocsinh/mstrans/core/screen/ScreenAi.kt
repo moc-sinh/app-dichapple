@@ -35,15 +35,19 @@ class ScreenAi(
             (limitPer10Minutes - sent.size).coerceAtLeast(0)
         }
 
-    /** Chinese line → Vietnamese, for the lines the answer had. Throws `LimitReached` over the limit. */
-    suspend fun translate(texts: List<String>): Map<String, String> = mutex.withLock {
+    /**
+     * Chinese line → Vietnamese, for the lines the answer had. `screen`: the other lines of the same
+     * screen, sent along (not to be translated) so the product and its trade are known: 镜框 on a
+     * page of glasses is "gọng kính", not a picture frame. Throws `LimitReached` over the limit.
+     */
+    suspend fun translate(texts: List<String>, screen: List<String> = emptyList()): Map<String, String> = mutex.withLock {
         synchronized(sent) {
             val now = clock()
             drop(now)
             if (sent.size >= limitPer10Minutes) throw LimitReached()
             sent.addLast(now)
         }
-        val byId = parse(write(INSTRUCTIONS, input(texts)))
+        val byId = parse(write(INSTRUCTIONS, input(texts, screen)))
         texts.withIndex().mapNotNull { (i, text) -> byId[i]?.let { text to it } }.toMap()
     }
 
@@ -57,9 +61,14 @@ class ScreenAi(
         const val WINDOW_MS = 10 * 60_000L
 
         val INSTRUCTIONS = """
-            You translate Chinese text shown on a shopping app's screen (Taobao, 1688, Pinduoduo, JD, WeChat) into Vietnamese.
-            The input is JSON {"items":[{"id":0,"zh":"..."}]}. Answer only JSON {"items":[{"id":0,"vi":"..."}]}, one item per input id.
-            Short button and menu labels stay short. Keep every number, price, currency sign, %, minus sign, unit, size and
+            You are a professional Chinese to Vietnamese translator for cross-border shopping (Taobao, 1688, Pinduoduo, JD, WeChat).
+            Translate each item into natural, exact Vietnamese, the way a Vietnamese shop writes it, with the standard Vietnamese
+            term of the product's own trade (fashion, glasses, electronics, cosmetics, home, food, machinery, materials...).
+            The input is JSON {"items":[{"id":0,"zh":"..."}],"screen":["..."]}. "screen" is other text on the same screen: use it
+            only to know which product and trade this is; do not translate it.
+            Answer only JSON {"items":[{"id":0,"vi":"..."}]}, one item per input id.
+            Short button and menu labels stay short; a variant's name stays compact (镜框【颜色请备注】+1.56非球面 is
+            "Gọng kính [ghi chú màu] +1.56 phi cầu"). Brand names and model codes stay as written. Keep every number, price, currency sign, %, minus sign, unit, size and
             product code exactly as written. 注销 is deleting or closing the account (Xóa / Hủy), never logging out;
             退出登录 is logging out (Đăng xuất). Use these terms: ${CommerceDictionary.REQUIRED.entries.joinToString("; ") { "${it.key} = ${it.value}" }}.
             If unsure of an item, copy its Chinese unchanged.
@@ -83,7 +92,7 @@ class ScreenAi(
             return out
         }
 
-        fun input(texts: List<String>): String = buildJsonObject {
+        fun input(texts: List<String>, screen: List<String> = emptyList()): String = buildJsonObject {
             putJsonArray("items") {
                 texts.forEachIndexed { i, text ->
                     addJsonObject {
@@ -92,7 +101,15 @@ class ScreenAi(
                     }
                 }
             }
+            // Some of the rest of the screen, short: the product's name and what is around it.
+            val others = screen.distinct().filter { it !in texts && ChineseText.hasHan(it) }
+            var room = SCREEN_CHARS
+            val kept = others.takeWhile { line -> (room - line.length).also { room = it } >= 0 }.take(SCREEN_LINES)
+            if (kept.isNotEmpty()) putJsonArray("screen") { kept.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
         }.toString()
+
+        private const val SCREEN_LINES = 30
+        private const val SCREEN_CHARS = 800
 
         /** The answer's items by id; a fence or words around the JSON are skipped. */
         fun parse(output: String): Map<Int, String> {

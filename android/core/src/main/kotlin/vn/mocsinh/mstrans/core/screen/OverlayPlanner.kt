@@ -17,6 +17,8 @@ object OverlayPlanner {
         fun width(sizePx: Float, condensed: Boolean): Float
         fun lines(sizePx: Float, widthPx: Int, condensed: Boolean): Int
         fun lineHeight(sizePx: Float): Float
+        /** The widest single word: lines are never broken inside a word ("Frees / hip"). */
+        fun longestWord(sizePx: Float, condensed: Boolean): Float = 0f
     }
 
     /**
@@ -159,8 +161,10 @@ object OverlayPlanner {
         // More lines, where the background goes on above and below (or the original had them).
         val span = if (item.lines.size > 1 || spans.size == 1) spans[0] else spans.take(2).maxBy { it.width }
         val room = box.height + 2 * item.freeVertical
-        fun fits(level: Level): Int? =
-            measure.lines(size * level.scale, span.width, level.condensed).takeIf { it <= mostLines && it * measure.lineHeight(size * level.scale) <= room }
+        fun fits(level: Level): Int? {
+            if (measure.longestWord(size * level.scale, level.condensed) > span.width) return null
+            return measure.lines(size * level.scale, span.width, level.condensed).takeIf { it <= mostLines && it * measure.lineHeight(size * level.scale) <= room }
+        }
         /** The largest size from `low` (which fits) up to `high` that still fits. */
         fun largest(from: Float, to: Float): Plan {
             var low = from

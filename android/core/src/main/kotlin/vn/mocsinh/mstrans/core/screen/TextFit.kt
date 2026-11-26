@@ -148,39 +148,190 @@ object PictureText {
      * read, each letter with its place. A price is then a thing of its own, with no Chinese in it:
      * it is never translated, so a price read wrong (¥7.90 as 47.90) is never written over the real one.
      */
-    fun pieces(words: List<List<Pair<String, Box>>>): List<Pair<String, Box>> {
-        // Words, cut again where their own letters stand well apart.
-        val units = ArrayList<Pair<String, Box>>()
-        for (word in words) {
-            var text = StringBuilder()
-            var box: Box? = null
-            for ((letter, place) in word.sortedBy { it.second.left }) {
-                val before = box
-                if (before != null && place.left - before.right > maxOf(before.height, place.height) * WORD_GAP) {
-                    units.add(text.toString() to before)
-                    text = StringBuilder()
-                    box = null
-                }
-                text.append(letter)
-                box = box?.let { around(it, place) } ?: place
+    fun pieces(words: List<List<Pair<String, Box>>>, ink: ((Box) -> Int?)? = null, whole: (String) -> Boolean = { true }): List<Pair<String, Box>> {
+        // Every letter, left to right, with the word it was read in. A word the reader gave whole,
+        // with a bar in it ("Bạc|"), is cut into its letters, each its share of the word's width.
+        val letters = words.flatMapIndexed { w, word ->
+            word.filter { it.first.isNotBlank() }.flatMap { (text, box) -> lettersOf(text.trim(), box) }.map { Letter(it.first, it.second, w) }
+        }.sortedBy { it.box.left }
+        if (letters.isEmpty()) return emptyList()
+        // Where a new thing begins: a wide gap; either side of a bar; a price ending a thing.
+        val cut = BooleanArray(letters.size)
+        val drop = BooleanArray(letters.size)
+        for (i in 1 until letters.size) {
+            val before = letters[i - 1].box
+            val box = letters[i].box
+            if (box.left - before.right > maxOf(before.height, box.height) * WORD_GAP) cut[i] = true
+        }
+        for (i in letters.indices) {
+            if (!isBar(letters, i)) continue
+            drop[i] = true
+            cut[i] = true
+            if (i + 1 < letters.size) cut[i + 1] = true
+        }
+        // Another colour is another thing: a grey or orange price after a white name, even with
+        // nothing read between them (the "..." and the ¥ lost).
+        if (ink != null) {
+            val inks = letters.map { if (it.text.all { c -> c in DOTS }) null else ink(it.box) }
+            for (i in 1 until letters.size) {
+                val a = inks[i - 1] ?: continue
+                val b = inks[i] ?: continue
+                if (colourApart(a, b)) cut[i] = true
             }
-            box?.let { if (text.isNotBlank()) units.add(text.toString() to it) }
         }
+        // A name cut short ("0-300..") ends there: what follows on the line (its price, an arrow) is another thing.
+        for (i in 2 until letters.size) {
+            if (letters[i].text.all { it in DOTS }) continue
+            val before = letters[i - 1].text
+            if (before.all { it in DOTS } && (before.length > 1 || before == "…" || letters[i - 2].text.all { it in DOTS })) cut[i] = true
+        }
+        var start = 0
+        for (i in 1..letters.size) {
+            if (i < letters.size && !cut[i]) continue
+            priceAtEnd(letters, drop, start, i)?.let { cut[it] = true }
+            // Vietnamese next to Chinese (an address before "包邮"): two things, the Vietnamese
+            // never translated nor written over (the reader of Chinese misreads its letters).
+            val span = (start until i).filter { !drop[it] }
+            if (span.any { j -> ScreenTranslator.VIETNAMESE.containsMatchIn(letters[j].text) } && span.any { j -> ChineseText.hasHan(letters[j].text) }) {
+                for ((a, b) in span.zipWithNext()) if (ChineseText.hasHan(letters[a].text) != ChineseText.hasHan(letters[b].text)) cut[b] = true
+            }
+            start = i
+        }
+        val groups = ArrayList<List<Letter>>()
+        var group = ArrayList<Letter>()
+        for (i in letters.indices) {
+            if (cut[i] && group.isNotEmpty()) {
+                groups.add(group)
+                group = ArrayList()
+            }
+            if (!drop[i]) group.add(letters[i])
+        }
+        if (group.isNotEmpty()) groups.add(group)
         val out = ArrayList<Pair<String, Box>>()
-        var group = ArrayList<Pair<String, Box>>()
-        fun close() {
-            if (group.isEmpty()) return
-            out.add(line(group) to group.map { it.second }.reduce(::around))
-            group = ArrayList()
+        for (letters in groups) {
+            val text = text(letters)
+            // A number between two phrases, the whole not a known sentence ("平台加补后2211优惠前": a
+            // ¥ lost, a bar read as 1): the number is left as it is drawn, never written over read wrong.
+            if (!whole(text.first)) {
+                val parts = numbersApart(letters)
+                if (parts.size > 1) {
+                    parts.forEach { out.add(text(it)) }
+                    continue
+                }
+            }
+            out.add(text)
         }
-        for (unit in units.sortedBy { it.second.left }) {
-            val before = group.lastOrNull()?.second
-            if (before != null && unit.second.left - before.right > maxOf(before.height, unit.second.height) * WORD_GAP) close()
-            group.add(unit)
+        // The reader's boxes are a little wide: one piece's box never runs into the next one's
+        // (its background would cover the first letter of a price).
+        return out.sortedBy { it.second.left }.let { sorted ->
+            sorted.mapIndexed { i, (text, box) ->
+                val next = sorted.getOrNull(i + 1)?.second
+                if (next == null || next.left >= box.right || next.left <= box.left + 1) text to box
+                else text to Box(box.left, box.top, next.left - 1, box.bottom)
+            }
         }
-        close()
-        return out
     }
+
+    /** Two ink colours of different things (white and grey, white and orange), not one colour's shades. */
+    private fun colourApart(a: Int, b: Int): Boolean {
+        val dr = kotlin.math.abs((a shr 16 and 0xFF) - (b shr 16 and 0xFF))
+        val dg = kotlin.math.abs((a shr 8 and 0xFF) - (b shr 8 and 0xFF))
+        val db = kotlin.math.abs((a and 0xFF) - (b and 0xFF))
+        return maxOf(dr, dg, db) > INK_APART
+    }
+
+    private const val INK_APART = 80
+
+    /** Letters back into the words the reader gave (for the spaces between them), with their place. */
+    private fun text(letters: List<Letter>): Pair<String, Box> {
+        val units = ArrayList<Pair<String, Box>>()
+        var text = StringBuilder()
+        var box: Box? = null
+        var word = -1
+        for (letter in letters) {
+            if (letter.word != word && box != null) {
+                units.add(text.toString() to box)
+                text = StringBuilder()
+                box = null
+            }
+            text.append(letter.text)
+            box = box?.let { around(it, letter.box) } ?: letter.box
+            word = letter.word
+        }
+        box?.let { units.add(text.toString() to it) }
+        return line(units) to units.map { it.second }.reduce(::around)
+    }
+
+    /** The letters cut around each run of digits that has Chinese on both sides. */
+    private fun numbersApart(letters: List<Letter>): List<List<Letter>> {
+        fun han(i: Int) = ChineseText.hasHan(letters[i].text)
+        fun digits(i: Int) = letters[i].text.all { it.isDigit() || it in ".,¥￥" }
+        val out = ArrayList<List<Letter>>()
+        var from = 0
+        var i = 0
+        while (i < letters.size) {
+            if (!digits(i) || i == 0 || !han(i - 1)) {
+                i++
+                continue
+            }
+            var end = i
+            while (end < letters.size && digits(end)) end++
+            if (end < letters.size && han(end)) {
+                out.add(letters.subList(from, i))
+                out.add(letters.subList(i, end))
+                from = end
+            }
+            i = end
+        }
+        out.add(letters.subList(from, letters.size))
+        return out.filter { it.isNotEmpty() }
+    }
+
+    private const val DOTS = ".。…·"
+
+    private class Letter(val text: String, val box: Box, val word: Int)
+
+    private fun lettersOf(text: String, box: Box): List<Pair<String, Box>> {
+        if (text.length < 2 || text.none { it.toString() in BARS }) return listOf(text to box)
+        val step = box.width.toFloat() / text.length
+        return text.mapIndexed { i, c ->
+            c.toString() to Box(box.left + (i * step).toInt(), box.top, box.left + ((i + 1) * step).toInt(), box.bottom)
+        }
+    }
+
+    /**
+     * A bar standing between two things ("¥221 | 优惠前¥268"), with room on both sides. The reader
+     * often takes it for a 1 (the price then read ¥2211): a 1 as tall as the line and thin, apart
+     * from what is around it, is a bar too.
+     */
+    private fun isBar(letters: List<Letter>, i: Int): Boolean {
+        val letter = letters[i]
+        // A bar sign is never part of the words around it.
+        if (letter.text in BARS) return true
+        if (letter.text !in BAR_LIKE) return false
+        val before = letters.getOrNull(i - 1) ?: return false
+        val after = letters.getOrNull(i + 1) ?: return false
+        val height = maxOf(before.box.height, after.box.height)
+        if (letter.box.left - before.box.right < height * BAR_GAP || after.box.left - letter.box.right < height * BAR_GAP) return false
+        // As tall as the smaller text beside it (a price in large digits may stand before it), and thin.
+        return letter.box.height >= minOf(before.box.height, after.box.height) * 0.9f && letter.box.width <= letter.box.height * 0.3f
+    }
+
+    /** Where a price ending the letters `from` until `to` begins (after other text), or null. */
+    private fun priceAtEnd(letters: List<Letter>, drop: BooleanArray, from: Int, to: Int): Int? {
+        val kept = (from until to).filter { !drop[it] }
+        val sign = kept.lastOrNull { letters[it].text in CURRENCY } ?: return null
+        if (sign == kept.first()) return null
+        val after = kept.filter { it > sign }.map { letters[it].text }
+        if (after.isEmpty() || after.none { it.any(Char::isDigit) } || !after.all { part -> part.all { it.isDigit() || it == '.' || it == ',' } }) return null
+        val before = letters[kept[kept.indexOf(sign) - 1]].text.lastOrNull() ?: return null
+        return if (before.isDigit() || before.toString() in CURRENCY) null else sign
+    }
+
+    private val BARS = setOf("|", "｜", "丨", "¦", "︱", "│")
+    private val BAR_LIKE = setOf("1", "I", "l", "!", "i")
+    private val CURRENCY = setOf("¥", "￥")
+    private const val BAR_GAP = 0.25f
 
     private fun around(a: Box, b: Box) = Box(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom))
 

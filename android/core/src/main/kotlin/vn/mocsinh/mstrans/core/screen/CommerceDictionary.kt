@@ -12,7 +12,12 @@ class CommerceDictionary(
     private val terms: Map<String, String> = REQUIRED + TERMS,
     private val labels: Map<String, String> = LABELS,
     private val required: Map<String, String> = REQUIRED,
+    private val industry: Map<String, String> = IndustryTerms.ALL,
 ) {
+    /** What a line may be put together from: every word but the one-letter labels. */
+    private val parts: Map<String, String> = labels.filterKeys { it.length >= 2 } + industry + terms
+    private val longest = parts.keys.maxOf { it.length }
+
     private val mustKeep: List<Pair<String, String>> =
         required.entries.map { it.key to it.value }.sortedByDescending { it.first.length }
 
@@ -20,10 +25,158 @@ class CommerceDictionary(
         terms.entries.map { it.key to it.value }.sortedByDescending { it.first.length }
 
     /** The translation of the whole line, or null when it is not a known word or pattern. */
-    fun lookup(text: String): String? {
+    fun lookup(text: String, putTogether: Boolean = true): String? {
         val key = ChineseText.key(text)
         if (key.isEmpty()) return null
-        return terms[key] ?: labels[key] ?: pattern(key) ?: withArrow(key)
+        if (key in IndustryTerms.KEEP) return key
+        return terms[key] ?: labels[key] ?: industry[key] ?: pattern(key) ?: withArrow(key) ?: if (putTogether) together(text) else null
+    }
+
+    /** Words of three letters or more, by each one with one letter left out (as `?`): what a misread one may have been. */
+    private val nearly: Map<String, String?> = HashMap<String, String?>().also { map ->
+        for (word in parts.keys) {
+            if (word.length < 3 || !word.all { ChineseText.isHan(it.code) }) continue
+            for (k in word.indices) {
+                val shape = word.substring(0, k) + "?" + word.substring(k + 1)
+                // Two words one letter apart: not a sign of either.
+                map[shape] = if (map.containsKey(shape) && map[shape] != word) null else word
+            }
+        }
+    }
+    private val nearlyLongest = parts.keys.filter { it.length >= 3 }.maxOf { it.length }
+
+    /**
+     * Text read in a picture with one letter of a known word misread (on a dark page the reader takes
+     * 请 for 靖, 瑁 for 環): the word as it is in the dictionary. Words of three letters or more,
+     * one letter off, nothing else like them; text already right is left as it is.
+     */
+    fun correct(text: String): String {
+        val simplified = ChineseText.toSimplified(text)
+        if (!ChineseText.hasHan(simplified)) return text
+        val out = StringBuilder(simplified)
+        var changed = false
+        var i = 0
+        while (i < out.length) {
+            var fixed = 0
+            for (n in minOf(nearlyLongest, out.length - i) downTo 3) {
+                val window = out.substring(i, i + n)
+                if (!window.all { ChineseText.isHan(it.code) } || window in parts) continue
+                val found = (0 until n).mapNotNull { k -> nearly[window.substring(0, k) + "?" + window.substring(k + 1)] }.distinct()
+                if (found.size != 1) continue
+                out.replace(i, i + n, found[0])
+                changed = true
+                fixed = n
+                break
+            }
+            i += if (fixed > 0) fixed else 1
+        }
+        // Only where the line, so put right, is all known words: a real word one letter away from
+        // a known one (保温桶 is not 保温杯) in a line of other words is left as read.
+        val fixed = out.toString()
+        if (!changed) return text
+        val known = fixed.trim().split(SPACED).filter { ChineseText.hasHan(it) }.all { phrase ->
+            lookup(phrase) != null || compose(ChineseText.key(phrase), strict = false) != null
+        }
+        return if (known) fixed else text
+    }
+
+    /**
+     * A line of one phrase put together from known words (`compose`, strict). A line of several
+     * phrases set apart by spaces is not: each phrase is looked up on its own.
+     */
+    fun together(text: String): String? {
+        if (SPACED.containsMatchIn(text.trim())) return null
+        return compose(ChineseText.key(text), strict = true)
+    }
+
+    /**
+     * A line made only of known words, numbers with their units, signs and Latin letters, put
+     * together word by word: "镜框【颜色请备注】+1.56非球面" is "Gọng kính [ghi chú màu] +1.56 phi cầu".
+     * Null when a Chinese letter is not covered. `strict`: not when more than two words stand
+     * together with nothing between them; that is a phrase whose Vietnamese order is the other
+     * way round ("男士纯棉T恤"), better left to the translator, and only then put together.
+     */
+    fun compose(key: String, strict: Boolean): String? {
+        if (!ChineseText.hasHan(key)) return null
+        // The line as words, numbers with units, and the rest as written.
+        val tokens = ArrayList<Token>()
+        var i = 0
+        while (i < key.length) {
+            val unit = UNIT.matchAt(key, i)
+            if (unit != null && (i == 0 || !key[i - 1].isDigit() && key[i - 1] != '.')) {
+                val number = unit.groupValues[1]
+                val name = UNIT_NAMES.getValue(unit.groupValues[2])
+                tokens.add(Token(if (name == "size") "size $number" else "$number $name", unit = true))
+                i = unit.range.last + 1
+                continue
+            }
+            var n = minOf(longest, key.length - i)
+            var found: String? = null
+            while (n >= 2 && found == null) {
+                val part = key.substring(i, i + n)
+                found = if (ChineseText.hasHan(part)) parts[part] else null
+                if (found == null) n--
+            }
+            if (found != null) {
+                tokens.add(Token(found, head = key.substring(i, i + n) in IndustryTerms.HEADS))
+                i += n
+                continue
+            }
+            val cp = key.codePointAt(i)
+            if (ChineseText.isHan(cp)) {
+                tokens.add(Token(IndustryTerms.GLUE[key[i]] ?: return null))
+                i++
+                continue
+            }
+            val raw = String(Character.toChars(cp))
+            if (tokens.lastOrNull()?.raw == true) tokens[tokens.lastIndex] = Token(tokens.last().text + raw, raw = true) else tokens.add(Token(raw, raw = true))
+            i += Character.charCount(cp)
+        }
+        // Words standing together: the thing they describe goes first, as Vietnamese says it.
+        var start = 0
+        while (start < tokens.size) {
+            if (!tokens[start].word) {
+                start++
+                continue
+            }
+            var end = start
+            while (end < tokens.size && tokens[end].word) end++
+            if (strict && end - start > MAX_TOGETHER) return null
+            val run = tokens.subList(start, end)
+            if (run.size > 1 && run.last().head && run.dropLast(1).none { it.head }) {
+                val head = run.removeAt(run.lastIndex)
+                run.add(0, head)
+            }
+            start = end
+        }
+        val out = StringBuilder()
+        for (token in tokens) if (token.raw) out.append(token.text) else word(out, token.text, openLeft = token.unit)
+        return ScreenTranslator.tidy(out.toString())
+    }
+
+    /** A piece of a line being put together. `word`: from the dictionary (not a number, not as written). */
+    private class Token(val text: String, val head: Boolean = false, val unit: Boolean = false, val raw: Boolean = false) {
+        val word: Boolean get() = !unit && !raw
+    }
+
+    /**
+     * A word into a line being put together: with a capital at the start of the line and after a
+     * name in capitals ("ASTATRE Đen vàng"), small inside ("gọng kính [ghi chú màu]"); a borrowed
+     * word (Bluetooth, Cotton) as it is. `openLeft`: no space before it ("+0 độ").
+     */
+    private fun word(out: StringBuilder, word: String, openLeft: Boolean = false) {
+        val last = out.lastOrNull { it.isLetterOrDigit() }
+        val first = word.substringBefore(' ')
+        // A value after a colon or a slash starts again: "Màu sắc: Đen".
+        val after = out.lastOrNull { !it.isWhitespace() && it != ScreenTranslator.MARK }
+        val text = when {
+            last == null || after != null && after in ":：/|" -> word.replaceFirstChar { it.uppercaseChar() }
+            last.code < 0x80 && last.isUpperCase() -> word
+            first in IndustryTerms.BORROWED || first.count { it.isUpperCase() } > 1 -> word
+            else -> word.replaceFirstChar { it.lowercaseChar() }
+        }
+        if (!openLeft) out.append(ScreenTranslator.MARK)
+        out.append(text).append(ScreenTranslator.MARK)
     }
 
     /** A chip or a row that ends with an arrow ("超200人加购 >"): what is before it, the arrow kept. */
@@ -31,7 +184,7 @@ class CommerceDictionary(
         val arrow = key.takeLastWhile { it in ARROWS }
         if (arrow.isEmpty() || arrow.length == key.length) return null
         val body = key.dropLast(arrow.length)
-        val done = terms[body] ?: labels[body] ?: pattern(body) ?: return null
+        val done = terms[body] ?: labels[body] ?: industry[body] ?: pattern(body) ?: return null
         return "$done $arrow"
     }
 
@@ -39,6 +192,7 @@ class CommerceDictionary(
     fun short(text: String): String? {
         val key = ChineseText.key(text)
         SHORT[key]?.let { return it }
+        IndustryTerms.SHORT[key]?.let { return it }
         pattern(key, SHORT_PATTERNS)?.let { return it }
         val arrow = key.takeLastWhile { it in ARROWS }
         if (arrow.isEmpty() || arrow.length == key.length) return null
@@ -182,6 +336,15 @@ class CommerceDictionary(
         )
 
         private const val ARROWS = ">›»"
+
+        private val UNIT_NAMES: Map<String, String> = IndustryTerms.UNITS.toMap()
+        private val SPACED = Regex("\\s")
+
+        /** At most this many words standing together are put together without the translator. */
+        private const val MAX_TOGETHER = 6
+
+        /** A number, or a range of them, and its unit, the longest unit first. */
+        private val UNIT = Regex("(\\d+(?:\\.\\d+)?(?:[-~～]\\d+(?:\\.\\d+)?)?)(" + IndustryTerms.UNITS.joinToString("|") { it.first } + ")")
 
         /** A number as written: sign, currency, digits with separators, 万, "+" or "%". */
         private const val N = "([-−]?[¥￥$]?\\d+(?:[.,]\\d+)*(?:万|千)?[+%]?)"

@@ -156,6 +156,11 @@ class OverlayComposer(context: Context) {
             layout(text, paint(sizePx, condensed, 0), widthPx, OverlayPlanner.Align.START, Int.MAX_VALUE).lineCount
 
         override fun lineHeight(sizePx: Float): Float = sizePx * spacing
+
+        override fun longestWord(sizePx: Float, condensed: Boolean): Float {
+            val word = text.split(' ').maxByOrNull { it.length } ?: return 0f
+            return if (word == text) width(sizePx, condensed) else Ruler(word).width(sizePx, condensed)
+        }
     }
 
     private fun build(look: Look, text: String, plan: OverlayPlanner.Plan): Built {

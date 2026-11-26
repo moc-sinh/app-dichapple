@@ -98,10 +98,15 @@ class ScreenTranslator(
     private fun whole(text: String): Result? {
         val key = ChineseText.key(text)
         glossary[key]?.let { return Result(it.ifEmpty { text.trim() }, Source.GLOSSARY) }
-        dictionary.lookup(key)?.let { return Result(it, Source.DICTIONARY) }
+        dictionary.lookup(text, putTogether = false)?.let { return Result(it, Source.DICTIONARY) }
         synchronized(cache) { cache[key] ?: shaped(key) }?.let { return Result(it, Source.CACHE) }
+        // Known words only, put together: after what was translated before (the AI's, which saw the line whole).
+        dictionary.together(text)?.let { return Result(it, Source.DICTIONARY) }
         return null
     }
+
+    /** Text read in a picture with a letter of a known word misread, put right (`CommerceDictionary.correct`). */
+    fun corrected(text: String): String = dictionary.correct(text)
 
     /** A shorter word for a place too narrow for the usual one (a label under an icon); null: none. */
     fun shorter(text: String): String? {
@@ -115,6 +120,8 @@ class ScreenTranslator(
         quick(text)?.let { return it }
         // The line whole: the offline translator does worse on a phrase taken out of its line.
         val simplified = ChineseText.toSimplified(text.trim())
+        // Vietnamese on the line (an address): the translator would mangle it. Only the Chinese is translated.
+        if (VIETNAMESE.containsMatchIn(simplified)) return inPieces(simplified)?.let { remember(text, Result(it, Source.CHUNKS)) }
         val (replaced, used) = substitute(simplified)
         if (!ChineseText.hasHan(replaced)) return remember(text, Result(tidy(replaced), Source.DICTIONARY))
         val whole = ask(replaced)
@@ -133,6 +140,8 @@ class ScreenTranslator(
             val plain = ask(simplified)
             if (plain != null && trusted(simplified, plain, emptyList())) return remember(text, Result(plain.trim(), Source.ENGINE))
         }
+        // Every word of it is in the dictionary, only in the Chinese order: better than pieces.
+        dictionary.compose(ChineseText.key(simplified), strict = false)?.let { return remember(text, Result(it, Source.DICTIONARY)) }
         val pieces = inPieces(simplified) ?: return null
         return remember(text, Result(pieces, Source.CHUNKS))
     }
@@ -155,7 +164,7 @@ class ScreenTranslator(
     fun accept(source: String, translation: String, from: Source = Source.AI): Result? {
         if (!ChineseText.hasHan(source)) return null
         val clean = translation.trim()
-        if (!trusted(ChineseText.toSimplified(source.trim()), clean, emptyList())) return null
+        if (!trusted(ChineseText.toSimplified(source.trim()), clean, emptyList(), fromEngine = from == Source.ENGINE)) return null
         return remember(source, Result(clean, from))
     }
 
@@ -165,7 +174,7 @@ class ScreenTranslator(
      * offline ones; where it cannot (refused answer, limit, no network) the offline ones stay.
      * Returns the AI's error, if any, for the settings page.
      */
-    suspend fun translateAll(texts: List<String>, ai: ScreenAi?, onResult: (String, Result?) -> Unit): String? {
+    suspend fun translateAll(texts: List<String>, ai: ScreenAi?, screen: List<String> = emptyList(), onResult: (String, Result?) -> Unit): String? {
         val pending = ArrayList<String>()
         val better = ArrayList<String>()
         for (text in texts.distinct()) {
@@ -184,7 +193,7 @@ class ScreenTranslator(
         if (ai == null) return null
         for (batch in ScreenAi.batches(pending + better)) {
             try {
-                val answers = ai.translate(batch)
+                val answers = ai.translate(batch, screen)
                 synchronized(cache) { for (text in batch) asked.add(ChineseText.key(text)) }
                 for (text in batch) answers[text]?.let { accept(text, it, Source.AI) }?.let { onResult(text, it) }
             } catch (e: CancellationException) {
@@ -270,9 +279,10 @@ class ScreenTranslator(
         }
     }
 
-    private fun trusted(source: String, translation: String, used: List<String>): Boolean {
+    private fun trusted(source: String, translation: String, used: List<String>, fromEngine: Boolean = true): Boolean {
         if (translation.isBlank() || ChineseText.hasHan(translation)) return false
         if (!NumberGuard.kept(source, translation)) return false
+        if (fromEngine && leftOver(source, translation)) return false
         val vietnamese = vietnamese(translation)
         if (used.any { vietnamese(it) !in vietnamese }) return false
         return !dangerous(source, translation)
@@ -307,7 +317,31 @@ class ScreenTranslator(
 
     companion object {
         /** Where a Vietnamese piece meets the text around it: a space goes there when needed. */
-        private const val MARK = '\u0000'
+        internal const val MARK = '\u0000'
+
+        /**
+         * The offline translator goes through English, and leaves some behind ("Màu Sắc Jing Note",
+         * "BLU-RAY"): a word that is no Vietnamese syllable, not written in the line, and not a word
+         * Vietnamese shops borrow, means the translation is not to be trusted.
+         */
+        fun leftOver(source: String, translation: String): Boolean {
+            val written = source.lowercase()
+            return LATIN_WORD.findAll(translation).any { match ->
+                val word = match.value.lowercase()
+                word.length >= 2 && word !in written && word !in ALLOWED &&
+                    !vn.mocsinh.mstrans.core.telex.SyllableValidator.isValidSyllable(word, teencode = false)
+            }
+        }
+
+        private val LATIN_WORD = Regex("\\p{IsLatin}+")
+        private val ALLOWED: Set<String> = IndustryTerms.BORROWED.map { it.lowercase() }.toSet() + IndustryTerms.LOANWORDS + (
+            "size ship freeship shop sale online offline video live voucher combo set mini max pro plus ultra smart wifi wi fi " +
+                "bluetooth usb type led lcd oled ram rom cpu gpu app game gaming mode mm cm kg ml mah inch ok hd sim nfc gps ai pc tv " +
+                "gb tb mb kb hz ios android iphone ipad laptop tablet email logo tmall taobao alipay wechat jd sf ems vip"
+            ).split(' ').toSet()
+
+        /** Letters only Vietnamese uses (ă â đ ê ô ơ ư, and the tones). */
+        internal val VIETNAMESE = Regex("[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]")
         /** Where a number goes in a sentence kept without its numbers. */
         private const val HOLE = '\u0001'
         private val NUMBER = Regex("\\d+(?:[.,:]\\d+)*")

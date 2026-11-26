@@ -197,10 +197,12 @@ class ScreenQualityTest {
 
     @Test
     fun `a sentence seen with one number is known with another`() = runBlocking {
-        val engine = FakeEngine(mapOf("限购3台" to "Giới hạn mua 3 chiếc"))
+        val engine = FakeEngine(mapOf("每人限领3张" to "Mỗi người nhận tối đa 3 tờ"))
         val translator = ScreenTranslator(engine = engine)
-        assertEquals("Giới hạn mua 3 chiếc", translator.translate("限购3台")?.text)
-        assertEquals("Giới hạn mua 12 chiếc", translator.quick("限购12台")?.text)
+        assertEquals("Mỗi người nhận tối đa 3 tờ", translator.translate("每人限领3张")?.text)
+        assertEquals("Mỗi người nhận tối đa 12 tờ", translator.quick("每人限领12张")?.text)
+        // Known words with a number need no translator at all.
+        assertEquals("Giới hạn mua 3 chiếc", translator.quick("限购3台")?.text)
         assertEquals(1, engine.calls.size)
     }
 

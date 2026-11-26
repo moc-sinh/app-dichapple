@@ -4,12 +4,15 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.view.Display
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import vn.mocsinh.mstrans.core.screen.Box
+import vn.mocsinh.mstrans.core.screen.ShotOrigin
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 
@@ -31,10 +34,11 @@ class ScreenCapture(private val service: AccessibilityService) {
     /** When a screenshot was last asked for: of each window (Android 14+), or of the display (`DISPLAY`). */
     private val asked = HashMap<Int, Long>()
 
-    suspend fun take(windowId: Int, windowLeft: Int, windowTop: Int, overlay: OverlayController): Shot {
+    /** `window`: where the window is on `screen` (a window's picture may be larger, see `ShotOrigin`). */
+    suspend fun take(windowId: Int, window: Box, screen: Box, overlay: OverlayController): Shot {
         if (Build.VERSION.SDK_INT >= 34) {
             turn(windowId, WINDOW_GAP_MS)
-            return window(windowId, windowLeft, windowTop)
+            return window(windowId, window, screen)
         }
         if (Build.VERSION.SDK_INT < 30) return Shot.Failed
         turn(DISPLAY, DISPLAY_GAP_MS)
@@ -70,10 +74,16 @@ class ScreenCapture(private val service: AccessibilityService) {
     }
 
     @RequiresApi(34)
-    private suspend fun window(windowId: Int, left: Int, top: Int): Shot = suspendCancellableCoroutine { continuation ->
+    private suspend fun window(windowId: Int, window: Box, screen: Box): Shot = suspendCancellableCoroutine { continuation ->
         service.takeScreenshotOfWindow(windowId, executor, object : AccessibilityService.TakeScreenshotCallback {
             override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                continuation.resume(image(result, left, top))
+                continuation.resume(image(result) { width, height ->
+                    ShotOrigin.of(width, height, window, screen).also { (left, top) ->
+                        if (left != window.left || top != window.top) {
+                            Log.d(TAG, "window shot ${width}x$height for a window ${window.width}x${window.height}: corner at $left,$top, not ${window.left},${window.top}")
+                        }
+                    }
+                })
             }
 
             override fun onFailure(errorCode: Int) {
@@ -86,7 +96,7 @@ class ScreenCapture(private val service: AccessibilityService) {
     private suspend fun display(): Shot = suspendCancellableCoroutine { continuation ->
         service.takeScreenshot(Display.DEFAULT_DISPLAY, executor, object : AccessibilityService.TakeScreenshotCallback {
             override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                continuation.resume(image(result, 0, 0))
+                continuation.resume(image(result) { _, _ -> 0 to 0 })
             }
 
             override fun onFailure(errorCode: Int) {
@@ -104,13 +114,15 @@ class ScreenCapture(private val service: AccessibilityService) {
      * text already read from the app is painted out before pictures are read.
      */
     @RequiresApi(30)
-    private fun image(result: AccessibilityService.ScreenshotResult, left: Int, top: Int): Shot {
+    private fun image(result: AccessibilityService.ScreenshotResult, corner: (Int, Int) -> Pair<Int, Int>): Shot {
         val buffer = result.hardwareBuffer
         return try {
             val hardware = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace) ?: return Shot.Failed
             val copy = hardware.copy(Bitmap.Config.ARGB_8888, true)
             hardware.recycle()
-            if (copy == null) Shot.Failed else Shot.Image(copy, left, top)
+            if (copy == null) return Shot.Failed
+            val (left, top) = corner(copy.width, copy.height)
+            Shot.Image(copy, left, top)
         } finally {
             buffer.close()
         }
@@ -119,6 +131,7 @@ class ScreenCapture(private val service: AccessibilityService) {
     fun close() = executor.shutdown()
 
     private companion object {
+        const val TAG = "MSTransScreen"
         const val DISPLAY = -1
         /** A little more than Android's own limits. */
         const val WINDOW_GAP_MS = 350L

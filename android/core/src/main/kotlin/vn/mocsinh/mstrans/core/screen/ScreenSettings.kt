@@ -35,6 +35,8 @@ class ScreenSettings(private val store: KeyValueStore) {
         const val WIFI_ONLY = "screenWifiOnly"
         const val AI_LIMIT = "screenAiLimit"
         const val BUTTON_Y = "screenButtonY"
+        const val AUTO_OFF = "screenAutoOff"
+        const val AI_BEST = "screenAiBest"
     }
 
     private fun bool(key: String, default: Boolean) = store.get(key)?.toBooleanStrictOrNull() ?: default
@@ -80,6 +82,20 @@ class ScreenSettings(private val store: KeyValueStore) {
         set(value) = store.set(Key.AI_LIMIT, value.toString())
 
     /** Where the floating button was left, as a fraction of the screen height. */
+    /**
+     * Leaving the chosen apps for another app turns the accessibility permission itself off: an app
+     * that looks for accessibility services (a bank's) finds none. Going home or to recent apps is
+     * not leaving. On by default.
+     */
+    var autoOff: Boolean
+        get() = bool(Key.AUTO_OFF, true)
+        set(value) = store.set(Key.AUTO_OFF, value.toString())
+
+    /** "AI nâng cao" with the better, dearer model (GPT-6.1 Sol) instead of the quick one. */
+    var aiBest: Boolean
+        get() = bool(Key.AI_BEST, false)
+        set(value) = store.set(Key.AI_BEST, value.toString())
+
     var buttonY: Float
         get() = store.get(Key.BUTTON_Y)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.35f
         set(value) = store.set(Key.BUTTON_Y, value.toString())

@@ -42,16 +42,16 @@ class ScreenAiTest {
     fun sendsOnlyTextAndChecksTheAnswer() = runBlocking {
         val server = MockWebServer()
         server.enqueue(MockResponse().setBody(answer(
-            """{"items":[{"id":0,"vi":"Mẫu mới mùa thu, giá ¥199"},{"id":1,"vi":"Đăng xuất tài khoản"}]}""")))
+            """{"items":[{"id":0,"vi":"Chủ shop gợi ý đồ tốt, giá ¥199"},{"id":1,"vi":"Đăng xuất tài khoản"}]}""")))
         server.start()
         val translator = Translator("sk-test", TranslationModel.LUNA, Settings(MemoryStore()), server.url("/v1/responses").toString())
         val ai = ScreenAi(write = { instructions, input -> translator.write(instructions, input).first })
         val screen = ScreenTranslator()
         val results = mutableMapOf<String, ScreenTranslator.Result?>()
-        val error = screen.translateAll(listOf("秋季新款 ¥199", "注销账号说明", "购物车"), ai) { text, result -> results[text] = result }
+        val error = screen.translateAll(listOf("店主推荐好物 ¥199", "注销账号说明", "购物车"), ai) { text, result -> results[text] = result }
         assertEquals(null, error)
-        assertEquals("Mẫu mới mùa thu, giá ¥199", results["秋季新款 ¥199"]?.text)
-        assertEquals(ScreenTranslator.Source.AI, results["秋季新款 ¥199"]?.source)
+        assertEquals("Chủ shop gợi ý đồ tốt, giá ¥199", results["店主推荐好物 ¥199"]?.text)
+        assertEquals(ScreenTranslator.Source.AI, results["店主推荐好物 ¥199"]?.source)
         // The AI said "log out" for 注销: refused, and offline (no engine here) has nothing either.
         assertEquals(null, results["注销账号说明"])
         assertEquals("Giỏ hàng", results["购物车"]?.text)
@@ -60,7 +60,7 @@ class ScreenAiTest {
         val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         assertEquals("gpt-6-luna", body["model"]?.jsonPrimitive?.content)
         val input = body["input"]!!.jsonPrimitive.content
-        assertTrue("秋季新款 ¥199" in input && "注销账号说明" in input)
+        assertTrue("店主推荐好物 ¥199" in input && "注销账号说明" in input)
         // Already in the dictionary: never sent.
         assertTrue("购物车" !in input)
         assertEquals(1, server.requestCount)

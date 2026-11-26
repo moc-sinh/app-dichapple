@@ -64,6 +64,13 @@ class ShopActivity : Activity() {
             return
         }
         val scroll = ScrollView(this).apply { addView(column) }
+        if (screen == "sku") {
+            column.taobao()
+            setContentView(scroll)
+            main.postDelayed({ SkuSheet.show(this) { tap(it) } }, 400)
+            Log.d(TAG, "screen $screen")
+            return
+        }
         if (screen == "taobao") {
             setContentView(
                 LinearLayout(this).apply {
