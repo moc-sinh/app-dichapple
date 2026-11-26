@@ -10,7 +10,8 @@ object ScreenBlocks {
     fun texts(lines: List<Pair<String, Box>>): List<ScreenText> {
         val shown = lines.filter { it.first.isNotBlank() && it.second.area > 0 }
         val boxes = shown.map { it.second }
-        if (shown.size < 2 || !wrapped(boxes)) {
+        // A line that begins with a price is a row of its own under a title, not the title going on.
+        if (shown.size < 2 || shown.drop(1).any { PRICE.containsMatchIn(it.first) } || !wrapped(boxes)) {
             return shown.map { (line, box) -> ScreenText(line.trim(), box, fromImage = true, geometry = TextGeometry(listOf(box), box.height.toFloat())) }
         }
         val text = StringBuilder()
@@ -35,4 +36,7 @@ object ScreenBlocks {
     }
 
     private fun latin(c: Char) = c.code < 0x250 && c.isLetterOrDigit()
+
+    /** ¥ before a number; the reader of pictures often takes the ¥ for a Y or for 羊. */
+    private val PRICE = Regex("^\\s*[¥￥\$Y羊]\\s?\\d")
 }

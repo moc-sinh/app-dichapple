@@ -34,6 +34,8 @@ object OverlayPlanner {
         val measure: Measure,
         /** How the text sits in its own view, where that is known; null: judged by the room around it. */
         val align: Align? = null,
+        /** The size is a guess (the app does not say where the letters are): it gives way before anything else. */
+        val guessed: Boolean = false,
     )
 
     /** The text block: `width` wide from `left`, the text at `align` in it, its middle at `centerY`. */
@@ -49,11 +51,15 @@ object OverlayPlanner {
     )
 
     /**
-     * Text is never made smaller than this part of the original's size, nor under `minPx`. Big text
-     * (a banner's headline) may go down to `BIG_SCALE`, as long as it stays twice `minPx`.
+     * Text keeps at least this part of the original's size where it can: one line, or more lines
+     * where there is room. Big text (a banner's headline) may go down to `BIG_SCALE`, as long as it
+     * stays twice `minPx`. Only where it would otherwise be cut does it go on down to `minPx`: the
+     * whole of a label a size smaller tells more than "Mua …".
      */
     private const val MIN_SCALE = 0.8f
     private const val BIG_SCALE = 0.6f
+    /** What was one line becomes this many at most: a tab is not a column of words. */
+    private const val MOST_LINES = 2
 
     /** How much a text was squeezed: the part of its size kept, and whether in the narrow cut. */
     private class Level(val scale: Float, val condensed: Boolean)
@@ -69,7 +75,8 @@ object OverlayPlanner {
         val same = arrayOfNulls<Level>(items.size)
         for (members in items.indices.groupBy { items[it].group }.values) {
             if (members.size < 2) continue
-            val scale = members.minOf { alone[it].sizePx / items[it].sizePx }
+            // ...but one of them much too long is small alone.
+            val scale = members.minOf { alone[it].sizePx / items[it].sizePx }.coerceAtLeast(MIN_SCALE)
             val condensed = members.any { alone[it].condensed }
             if (scale < 1f || condensed) for (i in members) same[i] = Level(scale, condensed)
         }
@@ -99,8 +106,10 @@ object OverlayPlanner {
         val size = item.sizePx
         val measure = item.measure
         val most = same?.scale ?: 1f
-        val least = maxOf(minPx / size, minOf(MIN_SCALE, maxOf(BIG_SCALE, minPx * 2 / size))).coerceAtMost(most)
+        val floor = (minPx / size).coerceAtMost(most)
+        val least = if (item.guessed) floor else maxOf(minPx / size, minOf(MIN_SCALE, maxOf(BIG_SCALE, minPx * 2 / size))).coerceAtMost(most)
         val narrowOnly = same?.condensed == true
+        val mostLines = if (item.lines.size == 1) MOST_LINES else Int.MAX_VALUE
 
         // Room on each side, less what an earlier translation took, less a gap before what comes next.
         var freeLeft = item.freeLeft
@@ -151,19 +160,29 @@ object OverlayPlanner {
         val span = if (item.lines.size > 1 || spans.size == 1) spans[0] else spans.take(2).maxBy { it.width }
         val room = box.height + 2 * item.freeVertical
         fun fits(level: Level): Int? =
-            measure.lines(size * level.scale, span.width, level.condensed).takeIf { it * measure.lineHeight(size * level.scale) <= room }
-        val tries = listOfNotNull(Level(most, false).takeUnless { narrowOnly }, Level(most, true))
-        for (level in tries) fits(level)?.let { return plan(span, level, it, false) }
-        if (fits(Level(least, true)) != null) {
-            var low = least
-            var high = most
+            measure.lines(size * level.scale, span.width, level.condensed).takeIf { it <= mostLines && it * measure.lineHeight(size * level.scale) <= room }
+        /** The largest size from `low` (which fits) up to `high` that still fits. */
+        fun largest(from: Float, to: Float): Plan {
+            var low = from
+            var high = to
             repeat(12) {
                 val middle = (low + high) / 2
                 if (fits(Level(middle, true)) != null) low = middle else high = middle
             }
             return plan(span, Level(low, true), fits(Level(low, true))!!, false)
         }
-        val lines = (room / measure.lineHeight(size * least)).toInt().coerceAtLeast(1)
+        val tries = listOfNotNull(Level(most, false).takeUnless { narrowOnly }, Level(most, true))
+        for (level in tries) fits(level)?.let { return plan(span, level, it, false) }
+        if (fits(Level(least, true)) != null) return largest(least, most)
+        // Rather smaller, down to what still reads, than cut.
+        if (floor < least) {
+            if (item.lines.size == 1) for (one in spans) {
+                val scale = one.width / measure.width(size, true)
+                if (scale >= floor) return plan(one, Level(minOf(scale, least), true), 1, false)
+            }
+            if (fits(Level(floor, true)) != null) return largest(floor, least)
+        }
+        val lines = (room / measure.lineHeight(size * least)).toInt().coerceIn(1, mostLines)
         return plan(span, Level(least, true), lines, true)
     }
 

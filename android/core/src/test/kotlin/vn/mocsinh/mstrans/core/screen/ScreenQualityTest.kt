@@ -31,7 +31,7 @@ class ScreenQualityTest {
     fun `known phrases are drawn at once, before any translator is asked`() {
         val translator = ScreenTranslator()
         assertEquals("Đã bán 3000+ · Miễn phí vận chuyển", translator.quick("已售3000+  包邮")?.text)
-        assertEquals("Khoảng $ 29.96", translator.quick("约 $ 29.96")?.text)
+        assertEquals("≈ $29.96", translator.quick("约 $ 29.96")?.text)
         assertEquals("Đã bán 16", translator.quick("已售 16")?.text)
         // One phrase not known: nothing yet.
         assertNull(translator.quick("儿童书包 包邮"))
@@ -59,11 +59,28 @@ class ScreenQualityTest {
     }
 
     @Test
-    fun `a required word the translator drops is never given up`() = runBlocking {
-        // 库存 must be "Tồn kho": an answer without it is refused, with or without the word put in.
+    fun `a sentence whose required word the translator will not keep is still translated`() = runBlocking {
+        // 库存 is "Tồn kho" wherever the translator keeps it. Where it will not, its own words for the
+        // sentence are shown: on a phone, every sentence with 运费 or 物流 in it stayed in Chinese.
         val engine = FakeEngine(mapOf("Tồn kho不足" to "Không đủ hàng", "库存不足" to "Không đủ hàng"))
         val translator = ScreenTranslator(engine = engine)
-        assertNull(translator.translate("库存不足"))
+        assertEquals("Không đủ hàng", translator.translate("库存不足")?.text)
+    }
+
+    @Test
+    fun `the required word is kept wherever the translator keeps it`() = runBlocking {
+        val engine = FakeEngine(mapOf("Tồn kho不足" to "Tồn kho không đủ", "库存不足" to "Không đủ hàng"))
+        val translator = ScreenTranslator(engine = engine)
+        assertEquals("Tồn kho không đủ", translator.translate("库存不足")?.text)
+        assertEquals(listOf("Tồn kho不足"), engine.calls)
+    }
+
+    @Test
+    fun `deleting an account is never shown as logging out, with or without the words put in`() = runBlocking {
+        val engine = FakeEngine(mapOf("确定要Xóa tài khoản吗" to "Bạn có chắc muốn đăng xuất không", "确定要注销账号吗" to "Bạn có chắc muốn đăng xuất không"))
+        val translator = ScreenTranslator(engine = engine)
+        val shown = translator.translate("确定要注销账号吗")?.text
+        assertTrue(shown == null || "đăng xuất" !in shown.lowercase(), "$shown")
     }
 
     @Test
@@ -89,6 +106,51 @@ class ScreenQualityTest {
         assertEquals("Cửa hàng bán hơn 1 vạn sản phẩm/năm >", dictionary.lookup("店铺年销售超1万件 >"))
         assertEquals("Hơn 200 người thêm vào giỏ ›", dictionary.lookup("超200人加购 ›"))
         assertNull(dictionary.lookup(">"))
+    }
+
+    @Test
+    fun `the words of Taobao's own pages are known`() {
+        // Read off a phone, 26/11/2026: the offline translator made "Trắng", "Reclusion:", "Chợ đất" of some of these.
+        val dictionary = CommerceDictionary()
+        assertEquals("Cài đặt thanh toán", dictionary.lookup("支付设置"))
+        assertEquals("CSKH vận chuyển", dictionary.lookup("物流客服"))
+        assertEquals("Trung tâm vận chuyển", dictionary.lookup("物流中心"))
+        assertEquals("Chờ gom hàng", dictionary.lookup("待集运"))
+        assertEquals("Mua lẻ", dictionary.lookup("单品购买"))
+        assertEquals("Mua theo bộ", dictionary.lookup("组合套装"))
+        assertEquals("Ưu đãi thêm", dictionary.lookup("可再享:"))
+        assertEquals("Thành phố", dictionary.lookup("地市"))
+        assertEquals("Lịch sử tìm kiếm", dictionary.lookup("历史搜索"))
+        assertEquals("sau trợ giá", dictionary.lookup("补贴后"))
+        assertEquals("Dịch vụ xuyên biên giới chính thức · Mất hỏng đền bù", dictionary.lookup("官方跨境服务·丢损必赔"))
+        assertEquals("Gửi thẳng chính thức - Đường bộ", dictionary.lookup("官方直邮-陆运"))
+    }
+
+    @Test
+    fun `the number sentences of Taobao's own pages are known`() {
+        val dictionary = CommerceDictionary()
+        assertEquals("≈ $0.73-3.03", dictionary.lookup("约 $ 0.73-3.03"))
+        assertEquals("1 vạn khách quay lại/năm", dictionary.lookup("店铺一年回头客1万"))
+        assertEquals("Cửa hàng 9 năm", dictionary.lookup("9年老店"))
+        assertEquals("Đặt hàng giảm phí vận chuyển tới ¥30", dictionary.lookup("下单运费最高立减 ¥ 30"))
+        assertEquals("Đánh giá · 23", dictionary.lookup("评价·23"))
+        assertEquals("Mua bộ giảm thêm 20 tệ", dictionary.lookup("组合再省20元"))
+        assertEquals("trừ 0.5 tệ", dictionary.lookup("抵0.5元"))
+        assertEquals("4 vạn+ người đã mua", dictionary.lookup("4万+人付款"))
+        assertEquals("Miễn phí vận chuyển quốc tế từ ¥99", dictionary.lookup("¥99跨境包邮"))
+    }
+
+    @Test
+    fun `a narrow place gets the short sentence too`() {
+        val dictionary = CommerceDictionary()
+        assertEquals("Freeship", dictionary.short("包邮"))
+        assertEquals("Freeship từ ¥99", dictionary.short("满¥99包邮"))
+        assertEquals("100+ thêm giỏ", dictionary.short("超100人加购"))
+        assertEquals("200+ xem/30 ngày", dictionary.short("近30天200+人逛过"))
+        assertEquals("10+ đã mua", dictionary.short("10+人付款"))
+        assertEquals("200+ xem/30 ngày >", dictionary.short("近30天200+人逛过 >"))
+        assertEquals("Bán 1 vạn+/năm >", dictionary.short("店铺年销售超1万件 >"))
+        assertNull(dictionary.short("加厚食品级牛皮纸袋"))
     }
 
     @Test

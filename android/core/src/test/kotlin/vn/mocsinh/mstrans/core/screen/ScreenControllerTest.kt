@@ -30,7 +30,7 @@ class ScreenControllerTest {
         send(Event.WindowState("com.taobao.taobao"))
         val first = send(Event.Scrolled("com.taobao.taobao"))
         assertTrue(Action.Clear in first)
-        assertEquals(Speed.BALANCED.settleMs, scans(first).single().delayMs)
+        assertEquals(Speed.BALANCED.scrollMs, scans(first).single().delayMs)
         val second = send(Event.Scrolled("com.taobao.taobao"))
         // Each scroll moves the scan later: one scan once the list rests.
         assertTrue(scans(second).single().generation > scans(first).single().generation)
@@ -145,6 +145,84 @@ class ScreenControllerTest {
         val next = scans(send(Event.WindowState("com.taobao.taobao"))).single()
         assertEquals(150L, next.delayMs)
         assertTrue(next.restart)
+    }
+
+    @Test
+    fun aListAtRestIsReadWithoutWaitingForThatDistance() {
+        controller.speed = Speed.SAVER
+        val first = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(first.generation)
+        now += 100
+        // The translations are off the screen while a list moves: they come back as soon as it rests.
+        val next = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        assertEquals(Speed.SAVER.scrollMs, next.delayMs)
+    }
+
+    @Test
+    fun aSmallViewScrollingClearsOnlyItsOwnPlace() {
+        val scan = scans(send(Event.WindowState("com.taobao.taobao"))).single()
+        controller.scanStarted(scan.generation)
+        // A label that flips by itself, a row of pictures going by: the rest of the page stays translated.
+        val place = Box(600, 300, 900, 360)
+        val actions = send(Event.Scrolled("com.taobao.taobao", area = place))
+        assertEquals(Action.ClearArea(place), actions.first())
+        assertFalse(Action.Clear in actions)
+        assertTrue(controller.isCurrent(scan.generation))
+        val again = scans(actions).single()
+        assertEquals(scan.generation, again.generation)
+        // It is read once it rests.
+        assertTrue(again.restart)
+    }
+
+    @Test
+    fun aSmallViewScrollingIsNotReadWhileAKeyboardIsUp() {
+        send(Event.WindowState("com.taobao.taobao"))
+        send(Event.WindowsChanged(keyboard = true))
+        assertEquals(emptyList(), send(Event.Scrolled("com.taobao.taobao", area = Box(0, 0, 10, 10))))
+    }
+
+    @Test
+    fun aListReadWhileStillMovingIsWaitedForLongerNextTime() {
+        send(Event.WindowState("com.taobao.taobao"))
+        val first = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        assertEquals(Speed.BALANCED.scrollMs, first.delayMs)
+        // Its scan begins, and the list scrolls on: it had not come to rest.
+        now += first.delayMs
+        controller.scanStarted(first.generation)
+        now += 60
+        val second = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        assertTrue(second.delayMs > first.delayMs, "${second.delayMs}")
+        // Never longer than a change on the page is waited for.
+        repeat(20) {
+            val scan = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+            now += scan.delayMs
+            controller.scanStarted(scan.generation)
+            now += 60
+        }
+        assertEquals(Speed.BALANCED.settleMs, scans(send(Event.Scrolled("com.taobao.taobao"))).single().delayMs)
+    }
+
+    @Test
+    fun aListThatRestedWhenReadIsWaitedForLessAgain() {
+        send(Event.WindowState("com.taobao.taobao"))
+        val first = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        now += first.delayMs
+        controller.scanStarted(first.generation)
+        now += 60
+        val longer = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        // This time the scan runs to its end before anything moves.
+        repeat(10) {
+            now += 2_000
+            val scan = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+            now += scan.delayMs
+            controller.scanStarted(scan.generation)
+            now += 500
+            controller.scanFinished(scan.generation, 1)
+        }
+        now += 2_000
+        val later = scans(send(Event.Scrolled("com.taobao.taobao"))).single()
+        assertTrue(later.delayMs < longer.delayMs, "${later.delayMs}")
+        assertEquals(Speed.BALANCED.scrollMs, later.delayMs)
     }
 
     @Test

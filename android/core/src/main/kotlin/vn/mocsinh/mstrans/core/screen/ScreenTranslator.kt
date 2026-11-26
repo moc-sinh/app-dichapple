@@ -126,6 +126,13 @@ class ScreenTranslator(
             val again = ask(plainer)
             if (again != null && trusted(simplified, again, kept)) return remember(text, Result(again.trim(), Source.ENGINE))
         }
+        // It keeps none of the words put in: the sentence as it is, in the translator's own words
+        // (still checked: its numbers, no Chinese left, and never one account action for the other).
+        // A sentence left in Chinese because 运费 did not come out as the list has it helps nobody.
+        if (simplified != plainer) {
+            val plain = ask(simplified)
+            if (plain != null && trusted(simplified, plain, emptyList())) return remember(text, Result(plain.trim(), Source.ENGINE))
+        }
         val pieces = inPieces(simplified) ?: return null
         return remember(text, Result(pieces, Source.CHUNKS))
     }

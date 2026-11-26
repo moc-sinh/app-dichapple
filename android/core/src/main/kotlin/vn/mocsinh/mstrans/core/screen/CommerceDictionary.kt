@@ -35,8 +35,16 @@ class CommerceDictionary(
         return "$done $arrow"
     }
 
-    /** A shorter word for a place too narrow for the usual one (a label under an icon); null: none. */
-    fun short(text: String): String? = SHORT[ChineseText.key(text)]
+    /** A shorter word or sentence for a place too narrow for the usual one (a label under an icon, a chip); null: none. */
+    fun short(text: String): String? {
+        val key = ChineseText.key(text)
+        SHORT[key]?.let { return it }
+        pattern(key, SHORT_PATTERNS)?.let { return it }
+        val arrow = key.takeLastWhile { it in ARROWS }
+        if (arrow.isEmpty() || arrow.length == key.length) return null
+        val body = key.dropLast(arrow.length)
+        return (SHORT[body] ?: pattern(body, SHORT_PATTERNS))?.let { "$it $arrow" }
+    }
 
     /** The terms a translation must keep word for word, longest first. */
     fun required(): List<Pair<String, String>> = mustKeep
@@ -44,8 +52,8 @@ class CommerceDictionary(
     /** Terms to replace inside a line, longest first ("加入购物车" before "购物车"). */
     fun terms(): List<Pair<String, String>> = byLength
 
-    private fun pattern(key: String): String? {
-        for ((regex, template) in PATTERNS) {
+    private fun pattern(key: String, patterns: List<Pair<Regex, String>> = PATTERNS): String? {
+        for ((regex, template) in patterns) {
             val match = regex.matchEntire(key) ?: continue
             var out = template
             match.groupValues.drop(1).forEachIndexed { i, value -> out = out.replace("{${i + 1}}", number(value)) }
@@ -117,6 +125,9 @@ class CommerceDictionary(
             "全场包邮" to "Miễn phí vận chuyển toàn shop", "已享包邮" to "Đã được miễn phí vận chuyển", "到手价" to "Giá cuối",
             "限时特价" to "Giá ưu đãi có hạn", "新品上市" to "Hàng mới ra mắt", "买二送一" to "Mua 2 tặng 1", "买一送一" to "Mua 1 tặng 1",
             "官方物流" to "Vận chuyển chính hãng",
+            // Taobao's own pages (read off a phone, 26/11/2026)
+            "官方跨境服务" to "Dịch vụ xuyên biên giới chính thức", "丢损必赔" to "Mất hỏng đền bù", "官方直邮" to "Gửi thẳng chính thức",
+            "官方正品" to "Hàng chính hãng", "中国大陆" to "Trung Quốc đại lục",
             // Colours (the rows choosing a colour and a size need no translator then)
             "红色" to "Đỏ", "黑色" to "Đen", "白色" to "Trắng", "蓝色" to "Xanh dương", "绿色" to "Xanh lá", "黄色" to "Vàng",
             "粉色" to "Hồng", "灰色" to "Xám", "紫色" to "Tím", "橙色" to "Cam", "棕色" to "Nâu", "米色" to "Be", "卡其色" to "Kaki",
@@ -137,13 +148,37 @@ class CommerceDictionary(
             "宝贝" to "Sản phẩm", "商品" to "Sản phẩm", "评价" to "Đánh giá", "收藏" to "Lưu yêu thích",
             "关注" to "Theo dõi", "足迹" to "Đã xem", "结算" to "Thanh toán", "付款" to "Thanh toán", "数量" to "Số lượng",
             "我的" to "Của tôi", "消息" to "Tin nhắn", "客服" to "Chăm sóc khách hàng",
-            "约" to "Khoảng", "已售" to "Đã bán", "详情" to "Chi tiết",
+            "约" to "≈", "已售" to "Đã bán", "详情" to "Chi tiết",
+            // Taobao's own pages (read off a phone, 26/11/2026). My Taobao:
+            "关注店铺" to "Cửa hàng theo dõi", "红包卡券" to "Lì xì & phiếu giảm giá", "跨境工具" to "Công cụ mua hàng quốc tế",
+            "待集运" to "Chờ gom hàng", "直邮包裹" to "Kiện gửi thẳng", "支付设置" to "Cài đặt thanh toán", "物流客服" to "CSKH vận chuyển",
+            "物流中心" to "Trung tâm vận chuyển", "淘金币" to "Xu Taobao", "芭芭农场" to "Nông trại Baba", "短剧" to "Phim ngắn",
+            "官方客服" to "CSKH chính thức", "退款/售后" to "Hoàn tiền/Hậu mãi",
+            // Searching
+            "历史搜索" to "Lịch sử tìm kiếm", "猜你想搜" to "Gợi ý tìm kiếm", "为你推荐" to "Đề xuất cho bạn", "语音搜索" to "Tìm bằng giọng nói",
+            "反馈" to "Góp ý", "女装" to "Thời trang nữ", "男装" to "Thời trang nam", "住宅家具" to "Nội thất nhà ở", "潮玩盲盒" to "Đồ chơi & hộp mù",
+            "手机配件" to "Phụ kiện điện thoại", "口腔护理" to "Chăm sóc răng miệng", "女士休闲裤" to "Quần nữ thường ngày", "盲盒" to "Hộp mù",
+            "跑步鞋" to "Giày chạy bộ", "男士夹克" to "Áo khoác nam", "穿搭" to "Phối đồ", "家具" to "Nội thất", "运动户外" to "Thể thao & dã ngoại",
+            "百货" to "Bách hóa", "数码" to "Đồ điện tử", "美妆" to "Mỹ phẩm", "母婴" to "Mẹ & bé", "食品" to "Thực phẩm", "家电" to "Điện gia dụng",
+            "鞋包" to "Giày & túi", "外卖打包" to "Đóng gói mang đi", "防油" to "Chống dầu", "耐高温" to "Chịu nhiệt",
+            // A product's page
+            "单品购买" to "Mua lẻ", "组合套装" to "Mua theo bộ", "推荐搭配清单" to "Gợi ý phối bộ", "图集" to "Bộ ảnh", "宝贝讲解" to "Giới thiệu sản phẩm",
+            "可再享" to "Ưu đãi thêm", "支付宝支付满减" to "Trả bằng Alipay được giảm", "看对比" to "So sánh", "省份" to "Tỉnh", "地市" to "Thành phố",
+            "查看全部" to "Xem tất cả", "查看更多" to "Xem thêm", "匿名买家" to "Người mua ẩn danh", "已购" to "Đã mua", "提问" to "Đặt câu hỏi",
+            "进店逛逛" to "Vào xem cửa hàng", "全部宝贝" to "Tất cả sản phẩm", "宝贝质量" to "Chất lượng hàng", "物流速度" to "Tốc độ giao hàng",
+            "服务保障" to "Bảo đảm dịch vụ", "粉丝" to "Người theo dõi", "顶部" to "Lên đầu", "陆运" to "Đường bộ", "空运" to "Đường hàng không",
+            "海运" to "Đường biển", "高" to "Cao", "中" to "Trung bình", "低" to "Thấp", "起" to "trở lên",
+            "补贴后" to "sau trợ giá", "优惠后" to "sau ưu đãi", "券后" to "sau phiếu giảm", "到手" to "giá cuối",
         )
 
         /** Shorter words for places too narrow for the usual ones: labels under icons, tabs. */
         val SHORT: Map<String, String> = linkedMapOf(
             "客服" to "CSKH", "收藏" to "Lưu", "店铺" to "Shop", "消息" to "Tin", "分类" to "Mục", "购物车" to "Giỏ",
-            "加入购物车" to "Thêm vào giỏ", "我的淘宝" to "Của tôi",
+            "加入购物车" to "Thêm vào giỏ", "我的淘宝" to "Của tôi", "包邮" to "Freeship", "运动户外" to "Thể thao", "关注店铺" to "Theo dõi",
+            "红包卡券" to "Lì xì", "官方客服" to "CSKH", "物流客服" to "CSKH", "直邮包裹" to "Gửi thẳng", "支付设置" to "Thanh toán",
+            "物流中心" to "Vận chuyển", "退款/售后" to "Hoàn tiền", "待付款" to "Chờ trả", "待发货" to "Chờ gửi", "待收货" to "Chờ nhận",
+            "待评价" to "Chờ đ.giá", "立即购买" to "Mua ngay", "首页" to "T.chủ", "品牌" to "Hãng", "外卖打包" to "Mang đi",
+            "推荐搭配清单" to "Gợi ý bộ", "为你推荐" to "Gợi ý", "查看全部" to "Tất cả", "查看更多" to "Thêm",
         )
 
         private const val ARROWS = ">›»"
@@ -176,6 +211,41 @@ class CommerceDictionary(
             "官方立减${N}" to "Giảm chính hãng {1}",
             "到手价${N}(?:元)?" to "Giá cuối {1}",
             "限时${N}" to "Ưu đãi có hạn {1}",
+            // Taobao's own pages (read off a phone, 26/11/2026)
+            "约([¥￥$]?\\d+(?:[.,]\\d+)*(?:-\\d+(?:[.,]\\d+)*)?)" to "≈ {1}",
+            "店铺一年回头客${N}" to "{1} khách quay lại/năm",
+            "回头客${N}" to "{1} khách quay lại",
+            "(\\d+)年老店" to "Cửa hàng {1} năm",
+            "下单运费最高立减${N}" to "Đặt hàng giảm phí vận chuyển tới {1}",
+            "评价[·・.]?(\\d+)" to "Đánh giá · {1}",
+            "问大家[·・.]?(\\d+)" to "Hỏi người đã mua · {1}",
+            "组合再省${N}元" to "Mua bộ giảm thêm {1} tệ",
+            "抵${N}元" to "trừ {1} tệ",
+            "红包省${N}元" to "Lì xì giảm {1} tệ",
+            "直降${N}元" to "Giảm thẳng {1} tệ",
+            "首单立减${N}元" to "Đơn đầu giảm {1} tệ",
+            "满(\\d+)件减${N}元" to "Mua {1} món giảm {2} tệ",
+            "${N}跨境包邮" to "Miễn phí vận chuyển quốc tế từ {1}",
+            "${N}粉丝" to "{1} người theo dõi",
+            "官方跨境服务[·・]丢损必赔" to "Dịch vụ xuyên biên giới chính thức · Mất hỏng đền bù",
+            "官方直邮[-－]陆运" to "Gửi thẳng chính thức - Đường bộ",
+            "官方直邮[-－]空运" to "Gửi thẳng chính thức - Đường hàng không",
+        ).map { (pattern, template) -> Regex(pattern) to template }
+
+        /** The same sentences said shorter, for a chip or a tab with no room for the usual words. */
+        private val SHORT_PATTERNS: List<Pair<Regex, String>> = listOf(
+            "满${N}(?:元)?包邮" to "Freeship từ {1}",
+            "超${N}人加购" to "{1}+ thêm giỏ",
+            "${N}人加购" to "{1} thêm giỏ",
+            "近(\\d+)天${N}人逛过" to "{2} xem/{1} ngày",
+            "${N}人逛过" to "{1} đã xem",
+            "${N}人付款" to "{1} đã mua",
+            "店铺一年回头客${N}" to "{1} khách quen/năm",
+            "(?:超级)?立减${N}" to "Giảm {1}",
+            "已售${N}(?:件)?" to "Bán {1}",
+            "组合再省${N}元" to "Bộ giảm {1} tệ",
+            "店铺年销(?:售|量)?超${N}(?:件)?" to "Bán {1}+/năm",
+            "下单运费最高立减${N}" to "Giảm phí vận chuyển tới {1}",
         ).map { (pattern, template) -> Regex(pattern) to template }
     }
 }

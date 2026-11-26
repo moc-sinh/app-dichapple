@@ -3,6 +3,7 @@ package vn.mocsinh.mstrans.screen
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.SystemClock
 import android.view.Display
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
@@ -27,10 +28,16 @@ class ScreenCapture(private val service: AccessibilityService) {
     }
 
     private val executor = Executors.newSingleThreadExecutor()
+    /** When a screenshot was last asked for: of each window (Android 14+), or of the display (`DISPLAY`). */
+    private val asked = HashMap<Int, Long>()
 
     suspend fun take(windowId: Int, windowLeft: Int, windowTop: Int, overlay: OverlayController): Shot {
-        if (Build.VERSION.SDK_INT >= 34) return window(windowId, windowLeft, windowTop)
+        if (Build.VERSION.SDK_INT >= 34) {
+            turn(windowId, WINDOW_GAP_MS)
+            return window(windowId, windowLeft, windowTop)
+        }
         if (Build.VERSION.SDK_INT < 30) return Shot.Failed
+        turn(DISPLAY, DISPLAY_GAP_MS)
         withContext(Dispatchers.Main) { overlay.hideForCapture() }
         return try {
             // Two frames for the hidden overlay to leave the screen.
@@ -38,6 +45,27 @@ class ScreenCapture(private val service: AccessibilityService) {
             display()
         } finally {
             withContext(Dispatchers.Main) { overlay.showAfterCapture() }
+        }
+    }
+
+    /**
+     * Android refuses a screenshot asked for too soon after the one before (a third of a second
+     * for a window, a second for the display). Asking anyway cost the refusal and a whole new scan
+     * of the screen; the rest of that time is waited out here instead.
+     */
+    private suspend fun turn(key: Int, gapMs: Long) {
+        while (true) {
+            val wait = synchronized(asked) {
+                val now = SystemClock.uptimeMillis()
+                val free = (asked[key] ?: (now - gapMs)) + gapMs
+                if (free <= now) {
+                    if (asked.size > 50) asked.clear()
+                    asked[key] = now
+                    0L
+                } else free - now
+            }
+            if (wait == 0L) return
+            delay(wait)
         }
     }
 
@@ -89,4 +117,11 @@ class ScreenCapture(private val service: AccessibilityService) {
     }
 
     fun close() = executor.shutdown()
+
+    private companion object {
+        const val DISPLAY = -1
+        /** A little more than Android's own limits. */
+        const val WINDOW_GAP_MS = 350L
+        const val DISPLAY_GAP_MS = 1_030L
+    }
 }

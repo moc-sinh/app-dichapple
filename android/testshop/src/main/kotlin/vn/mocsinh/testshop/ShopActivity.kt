@@ -58,6 +58,11 @@ class ShopActivity : Activity() {
             "taobao" -> column.taobao()
             else -> column.home()
         }
+        if (screen == "real") {
+            setContentView(real())
+            Log.d(TAG, "screen $screen")
+            return
+        }
         val scroll = ScrollView(this).apply { addView(column) }
         if (screen == "taobao") {
             setContentView(
@@ -78,7 +83,174 @@ class ShopActivity : Activity() {
 
     override fun onDestroy() {
         countdown?.let { main.removeCallbacks(it) }
+        flip?.let { main.removeCallbacks(it) }
         super.onDestroy()
+    }
+
+    // A page that behaves like a real shopping app's (seen on a phone, 26/11/2026)
+
+    private var flip: Runnable? = null
+
+    /** A view the app draws itself: no text of its own for a screen reader, only a description. */
+    private class Painted(context: android.content.Context, description: String, val paint: (Canvas, Paint, Int, Int) -> Unit) : View(context) {
+        private val brush = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        init {
+            contentDescription = description
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            brush.reset()
+            brush.isAntiAlias = true
+            paint(canvas, brush, width, height)
+        }
+    }
+
+    /**
+     * Product cards that are one node each (title and price as its description), chips described as
+     * a screen reader would say them, a label that flips by itself every two and a half seconds, a
+     * bar that stays over the top of the list and one over its bottom (an icon and its label one node).
+     */
+    private fun real(): View {
+        val dark = Color.rgb(24, 24, 26)
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(dark)
+            setPadding(dp(8), dp(64), dp(8), dp(72))
+        }
+        tapCount = column.line("点击次数：$taps", 12f, Color.GRAY)
+        column.horizontal {
+            for (chip in listOf("品牌，可选，按钮", "外卖打包，按钮", "防油，按钮", "耐高温，按钮")) {
+                val label = chip.substringBefore('，')
+                addView(
+                    Painted(context, chip) { canvas, brush, _, height ->
+                        brush.color = Color.LTGRAY
+                        brush.textSize = dp(13).toFloat()
+                        canvas.drawText(label, dp(10).toFloat(), height / 2f + dp(5), brush)
+                    }.apply { background = rounded(Color.rgb(50, 50, 54), 14) },
+                    LinearLayout.LayoutParams(dp(26 + 13 * label.length), dp(30)).apply { rightMargin = dp(8) },
+                )
+            }
+        }
+        // The label that flips by itself: a list of two lines, one of them to be seen.
+        val flipper = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                for (text in listOf("组合再省20元", "推荐搭配清单")) addView(plain(text, 12f, Color.WHITE).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), 0, dp(6), 0)
+                    setBackgroundColor(ORANGE)
+                }, ViewGroup.LayoutParams.WRAP_CONTENT, dp(22))
+            })
+        }
+        column.horizontal {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+            addView(plain("单品购买", 15f, Color.WHITE, bold = true), LinearLayout.LayoutParams(dp(110), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(plain("组合套装  ", 15f, Color.LTGRAY))
+            addView(flipper, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(22)))
+        }
+        var second = false
+        val turn = object : Runnable {
+            override fun run() {
+                second = !second
+                flipper.smoothScrollTo(0, if (second) dp(22) else 0)
+                main.postDelayed(this, 2_500)
+            }
+        }
+        flip = turn
+        main.postDelayed(turn, 2_500)
+        column.addView(plain("加厚食品级牛皮纸袋包装袋冰箱果蔬收纳袋面包防油打包纸袋子防水", 16f, Color.WHITE).apply { setPadding(0, dp(4), 0, dp(8)) })
+        column.horizontal {
+            for (chip in listOf("店铺一年回头客1万 >", "超100人加购 >", "近30天200+人逛过 >")) {
+                addView(
+                    plain(chip, 11f, Color.LTGRAY).apply {
+                        background = rounded(dark, 4, Color.GRAY)
+                        setPadding(dp(5), dp(2), dp(5), dp(2))
+                        maxLines = 1
+                    },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) },
+                )
+            }
+        }
+        column.space(10)
+        for (row in CARDS.chunked(2)) column.horizontal {
+            for (card in row) {
+                addView(
+                    Painted(context, "${card[0]} ${card[1]}元") { canvas, brush, width, height ->
+                        // The photograph: paper bags on a table.
+                        brush.color = Color.rgb(196, 160, 118)
+                        canvas.drawRect(0f, 0f, width.toFloat(), height * 0.62f, brush)
+                        brush.color = Color.rgb(150, 112, 74)
+                        canvas.drawRect(width * 0.2f, height * 0.15f, width * 0.55f, height * 0.55f, brush)
+                        canvas.drawRect(width * 0.6f, height * 0.25f, width * 0.85f, height * 0.55f, brush)
+                        brush.color = Color.rgb(36, 36, 40)
+                        canvas.drawRect(0f, height * 0.62f, width.toFloat(), height.toFloat(), brush)
+                        // The title, cut short as the app cuts it, and the price.
+                        brush.color = Color.WHITE
+                        brush.textSize = dp(13).toFloat()
+                        canvas.drawText(card[0].take(11), dp(8).toFloat(), height * 0.62f + dp(22), brush)
+                        brush.color = ORANGE
+                        brush.textSize = dp(16).toFloat()
+                        canvas.drawText("¥${card[1]}", dp(8).toFloat(), height * 0.62f + dp(48), brush)
+                        brush.color = Color.GRAY
+                        brush.textSize = dp(11).toFloat()
+                        canvas.drawText(card[2], dp(70).toFloat(), height * 0.62f + dp(48), brush)
+                    }.apply { setOnClickListener { tap("card ${card[1]}") } },
+                    LinearLayout.LayoutParams(0, dp(250), 1f).apply { rightMargin = dp(6); bottomMargin = dp(8) },
+                )
+            }
+        }
+        for (line in LINES) column.addView(plain(line, 14f, Color.LTGRAY).apply { setPadding(0, dp(6), 0, dp(6)) })
+        val list = ScrollView(this).apply { addView(column) }
+        // The bar that stays over the top of the list, and the one over its bottom.
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.rgb(12, 12, 14))
+            setPadding(dp(14), 0, dp(14), 0)
+            addView(plain("tbNick_leerf", 14f, Color.WHITE), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(plain("官方客服", 13f, Color.WHITE))
+            addView(plain("   设置", 13f, Color.WHITE))
+        }
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.rgb(12, 12, 14))
+            setPadding(dp(8), 0, dp(8), 0)
+            for (label in listOf("店铺", "客服", "收藏")) {
+                addView(
+                    Painted(context, label) { canvas, brush, width, _ ->
+                        brush.color = Color.LTGRAY
+                        brush.style = Paint.Style.STROKE
+                        brush.strokeWidth = dp(2).toFloat()
+                        canvas.drawRoundRect(width / 2f - dp(10), dp(8).toFloat(), width / 2f + dp(10), dp(28).toFloat(), dp(5).toFloat(), dp(5).toFloat(), brush)
+                        brush.style = Paint.Style.FILL
+                        brush.textSize = dp(10).toFloat()
+                        brush.textAlign = Paint.Align.CENTER
+                        canvas.drawText(label, width / 2f, dp(44).toFloat(), brush)
+                    }.apply { setOnClickListener { tap("bar $label") } },
+                    LinearLayout.LayoutParams(dp(46), dp(52)),
+                )
+            }
+            for ((label, colour) in listOf("加入购物车" to Color.rgb(255, 170, 0), "立即购买" to Color.rgb(255, 90, 0))) {
+                addView(
+                    plain(label, 15f, Color.WHITE, bold = true).apply {
+                        gravity = Gravity.CENTER
+                        background = rounded(colour, 20)
+                        setOnClickListener { tap("bar $label") }
+                    },
+                    LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(6) },
+                )
+            }
+        }
+        return android.widget.FrameLayout(this).apply {
+            addView(list, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            addView(top, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56), Gravity.TOP))
+            addView(bottom, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(60), Gravity.BOTTOM))
+        }
     }
 
     private fun LinearLayout.home() {
@@ -413,6 +585,28 @@ class ShopActivity : Activity() {
             listOf("PD 140W 充电器", "单口140W彩屏", "新款屏显氮化镓充电器十口桌面充电站全协议", "官方立减12%", "¥178", "300+人付款"),
             listOf("67W氮化镓", "自带双1米伸缩线", "Divoom点音像素屏充电头67W氮化镓多口", "限时特价", "¥129", "60+人付款"),
             listOf("桌面全能王", "六口同时快充", "470W带伸缩线数显桌面充电站USB多口快充", "超级立减50%", "¥188", "80+人付款"),
+        )
+
+        /** Title, price, buyers: all of it the card's description, only some of it written on the card. */
+        private val CARDS = listOf(
+            listOf("公主-可水洗牛皮纸袋厨房冰箱蔬菜收纳袋防水加厚食品袋环保", "6.80", "800+人付款"),
+            listOf("牛皮纸袋厨房冰箱蔬菜水果收纳袋防水可水洗加厚食品袋", "14.20", "500+人付款"),
+            listOf("食品包装打包纸袋一次性防油牛皮纸袋汉堡外卖袋定制", "5.48", "2万+人付款"),
+            listOf("冰箱收纳防油打包纸袋大容量加厚食品级防水环保袋", "7.90", "100+人付款"),
+            listOf("可水洗牛皮纸收纳篮北欧风格黑色加厚置物袋", "3.97", "2万+人付款"),
+            listOf("防油牛皮纸袋小吃袋一次性烧烤炸鸡打包袋", "17.20", "20+人付款"),
+        )
+
+        /** Lines no dictionary knows, each different: the offline translator has to do them all. */
+        private val LINES = listOf(
+            "这款纸袋采用加厚牛皮纸制作，结实耐用不易破。", "内层覆有防水膜，可以直接装湿的蔬菜水果。", "袋口可以折叠，放进冰箱节省空间。",
+            "适合厨房收纳、外卖打包、面包烘焙等多种用途。", "支持定制印刷图案，免费设计，量大从优。", "收到货后如有破损请及时联系我们处理。",
+            "发货前都会仔细检查，请放心购买。", "偏远地区需要补运费，下单前请咨询。", "本产品通过食品级安全检测，无异味。",
+            "多种尺寸可选，小号适合装零食，大号适合装衣物。", "老客户再次购买可以享受额外的折扣。", "图片仅供参考，请以收到的实物为准。",
+            "每个账号限购五件，超出部分将自动取消。", "活动期间下单的顾客还会收到一份小礼品。", "如果对尺寸不确定，可以先买一个试试。",
+            "我们的工厂有十年的生产经验，质量有保证。", "纸袋底部加固处理，可以承受三公斤的重量。", "请勿将纸袋长时间浸泡在水中。",
+            "使用后可以回收再利用，绿色环保。", "颜色可能因为拍摄光线略有差异。", "批量采购请联系在线客服获取报价。",
+            "新店开张，全场商品限时九折优惠。", "已有超过一万名顾客给出了五星好评。", "欢迎收藏本店，上新第一时间通知您。",
         )
 
         private val PRODUCTS = listOf(

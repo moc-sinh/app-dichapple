@@ -282,6 +282,40 @@ class LineStylesTest {
     }
 
     @Test
+    fun `of an icon and its label in one box only the label is the text`() {
+        val screen = Screen(400, 200, white).apply {
+            rect(Box(180, 40, 230, 86), black)
+            text(Box(184, 92, 226, 124), black)
+        }
+        val geometry = LineStyles.lines(screen.grid(), Box(150, 30, 260, 130), "店铺")!!
+        assertEquals(listOf(Box(184, 97, 226, 119)), geometry.lines)
+        assertEquals(22 / 0.93f, geometry.sizePx, 0.1f)
+    }
+
+    @Test
+    fun `a box whose ink cannot be its text has no lines`() {
+        // A card: a picture, and under it a title too short to be the card's whole description.
+        val screen = Screen(400, 200, white).apply {
+            rect(Box(40, 20, 360, 130), red)
+            text(Box(50, 140, 210, 170), black)
+        }
+        assertNull(LineStyles.lines(screen.grid(), Box(40, 20, 360, 180), "公主-可水洗牛皮纸袋厨房冰箱蔬菜收纳袋防水加厚食品袋环保 6.80元"))
+    }
+
+    @Test
+    fun `the words of a bar lying over a box are not that box's text`() {
+        // A card has scrolled under the page's header: a name at the left of it, two buttons at the right.
+        val screen = Screen(400, 200, white).apply {
+            text(Box(20, 60, 100, 90), black)
+            text(Box(290, 60, 380, 90), black)
+        }
+        // As wide in all as the card's description would be, but not one piece of writing.
+        assertNull(LineStyles.lines(screen.grid(), Box(10, 40, 390, 110), "牛皮纸袋厨房冰箱蔬菜水果收纳袋防水"))
+        // Each of them alone is still found as the short text it is.
+        assertEquals(listOf(Box(20, 65, 95, 85)), LineStyles.lines(screen.grid(), Box(10, 40, 200, 110), "官方客服")!!.lines)
+    }
+
+    @Test
     fun `a picture has no lines of ink to find`() {
         val screen = Screen(400, 200, white)
         var seed = 7
@@ -308,8 +342,8 @@ class OverlayPlannerTest {
 
     private fun item(
         box: Box, letters: Int, size: Float = 40f, freeLeft: Int = 0, freeRight: Int = 0, freeVertical: Int = 0, group: Int = box.hashCode(),
-        align: OverlayPlanner.Align? = null,
-    ) = OverlayPlanner.Item(listOf(box), size, freeLeft, freeRight, freeVertical, (box.top + box.bottom) / 2, group, Letters(letters), align)
+        align: OverlayPlanner.Align? = null, guessed: Boolean = false,
+    ) = OverlayPlanner.Item(listOf(box), size, freeLeft, freeRight, freeVertical, (box.top + box.bottom) / 2, group, Letters(letters), align, guessed)
 
     private fun plan(vararg items: OverlayPlanner.Item, minPx: Float = 20f) = OverlayPlanner.plan(items.toList(), minPx)
 
@@ -399,11 +433,47 @@ class OverlayPlannerTest {
     }
 
     @Test
-    fun `much too long with no room is cut at the smallest size`() {
+    fun `too long with no room is made smaller, as far as it still reads, rather than cut`() {
+        // "Mua …" tells nothing: the whole of it a size down does.
         val plan = plan(item(Box(42, 100, 122, 150), letters = 14, freeRight = 100)).single()
+        assertEquals(27.9f, plan.sizePx, 0.1f)
+        assertEquals(1, plan.maxLines)
+        assertFalse(plan.ellipsize)
+    }
+
+    @Test
+    fun `only what does not fit at the smallest size is cut, at the usual one`() {
+        val plan = plan(item(Box(42, 100, 122, 150), letters = 60, freeRight = 100)).single()
         assertEquals(32f, plan.sizePx, 0.01f)
         assertEquals(1, plan.maxLines)
         assertTrue(plan.ellipsize)
+    }
+
+    @Test
+    fun `a size that was only guessed gives way before anything else`() {
+        // A label whose letters the app does not place: its size is a guess, never a reason to wrap or cut.
+        val plan = plan(item(Box(42, 100, 122, 150), letters = 8, freeVertical = 60, guessed = true)).single()
+        assertEquals(23.25f, plan.sizePx, 0.1f)
+        assertEquals(1, plan.maxLines)
+        assertFalse(plan.ellipsize)
+    }
+
+    @Test
+    fun `one line becomes two at most`() {
+        // A tab whose translation is long: two lines, not a column of words down the page.
+        val plan = plan(item(Box(42, 100, 122, 150), letters = 60, freeRight = 100, freeVertical = 300)).single()
+        assertEquals(2, plan.maxLines)
+        assertTrue(plan.ellipsize)
+    }
+
+    @Test
+    fun `one text much too long does not make the others of its look small`() {
+        val plans = plan(
+            item(Box(90, 80, 170, 110), letters = 20, freeLeft = 60, freeRight = 60, group = 7),
+            item(Box(390, 80, 470, 110), letters = 4, freeLeft = 60, freeRight = 60, group = 7),
+        )
+        assertTrue(plans[0].sizePx < 32f, "size ${plans[0].sizePx}")
+        assertEquals(32f, plans[1].sizePx, 0.01f)
     }
 
     @Test

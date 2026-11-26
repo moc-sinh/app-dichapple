@@ -29,10 +29,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -48,6 +52,7 @@ import vn.mocsinh.mstrans.core.screen.LineStyle
 import vn.mocsinh.mstrans.core.screen.LineStyles
 import vn.mocsinh.mstrans.core.screen.Look
 import vn.mocsinh.mstrans.core.screen.OverlayFit
+import vn.mocsinh.mstrans.core.screen.PaintOrder
 import vn.mocsinh.mstrans.core.screen.PixelGrid
 import vn.mocsinh.mstrans.core.screen.ScreenAi
 import vn.mocsinh.mstrans.core.screen.ScreenController
@@ -58,10 +63,14 @@ import vn.mocsinh.mstrans.core.screen.ScreenText
 import vn.mocsinh.mstrans.core.screen.ScreenTextMerger
 import vn.mocsinh.mstrans.core.screen.ScreenTranslator
 import vn.mocsinh.mstrans.core.screen.SensitiveScreen
+import vn.mocsinh.mstrans.core.screen.SpokenText
 import vn.mocsinh.mstrans.core.screen.TextEngine
+import vn.mocsinh.mstrans.core.screen.TextFit
 import vn.mocsinh.mstrans.core.screen.TextGeometry
 import vn.mocsinh.mstrans.core.screen.TextLines
+import vn.mocsinh.mstrans.core.screen.TreeWalk
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -80,6 +89,24 @@ class ScreenTranslationService : AccessibilityService() {
     private val composing = Dispatchers.Default.limitedParallelism(1)
     /** Translating goes on across the scans of an app, and stops when the app is left. */
     private val translations = SupervisorJob(scope.coroutineContext[Job])
+    /**
+     * The app is asked for the nodes of its screen a few at a time: each question waits for the
+     * app's main thread, and one after another a screen of some hundred nodes took most of a second.
+     */
+    private val readerThreads = Executors.newFixedThreadPool(READERS)
+    private val readers = readerThreads.asCoroutineDispatcher()
+    /** Which view scrolled is asked of the app off the main thread, one event after another. */
+    private val lookups = Executors.newSingleThreadExecutor()
+    /**
+     * A view that scrolls, as far as its events tell one from another: its window, its kind, how far
+     * it can scroll, how many things it lists.
+     */
+    private data class Scroller(val window: Int, val kind: String?, val maxX: Int, val maxY: Int, val items: Int)
+
+    /** The views that have scrolled on this page: true the page itself, false a small one. Main thread. */
+    private val scrollers = HashMap<Scroller, Boolean>()
+    /** Small views that scrolled a moment ago, and when: nothing is drawn in them until they rest. */
+    @Volatile private var moved: List<Pair<Box, Long>> = emptyList()
     private lateinit var settings: ScreenSettings
     private lateinit var appSettings: Settings
     private lateinit var controller: ScreenController
@@ -136,6 +163,8 @@ class ScreenTranslationService : AccessibilityService() {
     @Volatile private var lastFrame: FrameSignature? = null
     @Volatile private var imageText: List<ScreenText> = emptyList()
     @Volatile private var lastImageAt = 0L
+    /** The page whose pictures `imageText` was read from. */
+    @Volatile private var imageGeneration = -1L
     @Volatile private var lastLayout = 0
     /** The window that refused a screenshot (FLAG_SECURE): nothing of it is translated. */
     @Volatile private var secureWindow: Int? = null
@@ -145,8 +174,8 @@ class ScreenTranslationService : AccessibilityService() {
     @Volatile private var pageAt = 0L
     @Volatile private var firstDrawn = false
     /** Asking the app where its letters are, in the scan under way: how often, how long. */
-    private var lettersCalls = 0
-    private var lettersMs = 0L
+    private val lettersCalls = AtomicInteger()
+    @Volatile private var lettersMs = 0L
     /** The page found unsettled, and how many scans of it in a row. */
     private var moving = -1L
     private var movingScans = 0
@@ -162,9 +191,15 @@ class ScreenTranslationService : AccessibilityService() {
     }
 
     @Volatile private var page: Page? = null
-    /** Looks read from screenshots, and lines found by their ink; guarded by `looks`. */
+    /**
+     * Looks read from screenshots; lines found by their ink, and the boxes in which no ink was the
+     * text (a card described in words, a text under a bar): all guarded by `looks`.
+     */
     private val looks = lru<Place, Look>(600)
-    private val inked = lru<Box, TextGeometry>(300)
+    private val inked = lru<Pair<String, Box>, TextGeometry>(300)
+    private val inkless = lru<Pair<String, Box>, Boolean>(300)
+    /** The app's own lines found to lie under a bar, where they were when looked at. */
+    private val covered = lru<Pair<String, Box>, Boolean>(300)
     /** What the app said about where its letters are (`NOWHERE`: asked, no answer); guarded by itself. */
     private val letters = lru<Pair<String, Box>, Any>(1_000)
     private val translating: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -268,22 +303,27 @@ class ScreenTranslationService : AccessibilityService() {
         // the user moving to MSTrans (it used to cancel the scan of the app just opened).
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg == packageName && ownOverlay(event.windowId)) return
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null && pkg !in imePackages && pkg != foreground) {
+            // Something of another app showing over a chosen one (a notice, a small system window)
+            // is not the user leaving it: the app that has the screen says which app is in front.
+            if (!settings.isSelected(pkg) && settings.isSelected(foreground) && inFront() == foreground) return
             foreground = pkg
             updateButton()
         }
         if (!running) return
+        if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            scrolled(event, pkg)
+            return
+        }
         val translated = when (type) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
                 if (pkg != null && pkg in imePackages && keyboardUp()) Event.WindowsChanged(true)
                 else {
                     secureWindow = null
                     imagesDue = true
+                    // Another page: its views are other views.
+                    scrollers.clear()
                     Event.WindowState(pkg)
                 }
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                imagesDue = true
-                Event.Scrolled(pkg)
-            }
             // The scan works out whether the Chinese changed (cheaper than reading the tree twice).
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> Event.ContentChanged(pkg, null)
             AccessibilityEvent.TYPE_WINDOWS_CHANGED ->
@@ -301,6 +341,58 @@ class ScreenTranslationService : AccessibilityService() {
 
     private val keyboardGone = Runnable {
         if (running && !keyboardUp()) apply(controller.handle(Event.WindowsChanged(false), settings::isSelected))
+    }
+
+    /**
+     * Something scrolled. The page itself: every translation goes at once and comes back when it
+     * rests. A small view (a label that flips by itself, a row of pictures going by): only what is
+     * in it goes; the rest of the page used to blink each time such a view moved. Which it is, the
+     * app is asked (where the view is), off the main thread, and it is remembered for the page: the
+     * page itself is then not asked about again, and a small view only for where it now is.
+     */
+    private fun scrolled(event: AccessibilityEvent, pkg: String?) {
+        // Only the package name of an app not chosen is looked at.
+        if (!settings.isSelected(pkg)) return
+        val key = Scroller(event.windowId, event.className?.toString(), event.maxScrollX, event.maxScrollY, event.itemCount)
+        val known = scrollers[key]
+        if (known == true) {
+            pageScrolled(pkg)
+            return
+        }
+        @Suppress("DEPRECATION")
+        val copy = if (Build.VERSION.SDK_INT >= 30) AccessibilityEvent(event) else AccessibilityEvent.obtain(event)
+        val decided = AtomicBoolean(false)
+        // A view not met on this page before, and an app slow to say where it is: taken to be the page.
+        val late = if (known != null) null else Runnable { if (decided.compareAndSet(false, true) && running) pageScrolled(pkg) }
+        late?.let { main.postDelayed(it, SOURCE_WAIT_MS) }
+        lookups.execute {
+            // Null: the app did not say. Empty: the view is not on the screen (a label that goes
+            // on flipping after it was scrolled away): nothing to be seen has moved.
+            val box = runCatching {
+                copy.source?.let { node ->
+                    val rect = Rect().also { node.getBoundsInScreen(it) }
+                    if (!node.isVisibleToUser || rect.isEmpty) NO_BOX else Box(rect.left, rect.top, rect.right, rect.bottom)
+                }
+            }.getOrNull()
+            main.post {
+                if (!connected || !running) return@post
+                val window = page?.window ?: screen()
+                val small = box != null && box.area * 5 < window.area * 2
+                if (scrollers.size > 64) scrollers.clear()
+                scrollers[key] = !small
+                if (!decided.compareAndSet(false, true)) return@post
+                late?.let { main.removeCallbacks(it) }
+                when {
+                    !small -> pageScrolled(pkg)
+                    box !== NO_BOX && box != null -> apply(controller.handle(Event.Scrolled(pkg, box), settings::isSelected))
+                }
+            }
+        }
+    }
+
+    private fun pageScrolled(pkg: String?) {
+        imagesDue = true
+        apply(controller.handle(Event.Scrolled(pkg), settings::isSelected))
     }
 
     override fun onInterrupt() = Unit
@@ -342,6 +434,14 @@ class ScreenTranslationService : AccessibilityService() {
 
     private fun keyboardUp(): Boolean = runCatching { windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
 
+    /** The package of the app whose window has the screen (only its name is looked at); null: none, or not known. */
+    private fun inFront(): String? = runCatching {
+        val all = windows
+        val front = all.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
+            ?: all.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
+        front?.root?.packageName?.toString()
+    }.getOrNull()
+
     private fun ownOverlay(windowId: Int): Boolean =
         runCatching { windows.firstOrNull { it.id == windowId }?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }.getOrDefault(false)
 
@@ -356,6 +456,21 @@ class ScreenTranslationService : AccessibilityService() {
             Action.Clear -> {
                 page = null
                 overlay.clear()
+            }
+            is Action.ClearArea -> {
+                val area = action.area
+                val now = SystemClock.uptimeMillis()
+                moved = moved.filter { it.first != area && now - it.second < MOVED_MS } + (area to now)
+                // What was read in pictures there is gone with them; the next scan reads this place again.
+                imageText = imageText.filterNot { inside(it.bounds, area) }
+                lastLayout = 0
+                page?.let { old ->
+                    val kept = old.lines.filterNot { inside(old.looks.getValue(it).geometry.box, area) }
+                    if (kept.size != old.lines.size) {
+                        page = Page(old.generation, kept, old.looks, old.window)
+                        render()
+                    }
+                }
             }
             Action.CancelScan -> {
                 main.removeCallbacks(scanNow)
@@ -372,7 +487,11 @@ class ScreenTranslationService : AccessibilityService() {
                 synchronized(looks) {
                     looks.clear()
                     inked.clear()
+                    inkless.clear()
+                    covered.clear()
                 }
+                moved = emptyList()
+                scrollers.clear()
                 translations.cancelChildren()
                 translating.clear()
                 unknown.clear()
@@ -443,6 +562,8 @@ class ScreenTranslationService : AccessibilityService() {
     private class Tree(
         val nodes: List<ScreenText>, val others: List<Box>, val texts: List<String>, val password: Boolean, val editable: Boolean, val visited: Int,
         val asking: List<Asking>,
+        /** For each of `nodes`: it may lie under a bar that stays in place (`PaintOrder.underPanels`). */
+        val under: BooleanArray,
     )
 
     /** A text whose letters are still to be asked for: its node (kept until then), its place in `Tree.nodes`. */
@@ -512,9 +633,9 @@ class ScreenTranslationService : AccessibilityService() {
             it.type == AccessibilityWindowInfo.TYPE_SYSTEM && it.layer > window.layer && it.box().area * 2 < screenArea
         }.map { it.box() }
 
-        lettersCalls = 0
+        lettersCalls.set(0)
         lettersMs = 0L
-        val tree = read(root)
+        val tree = read(root, windowBox)
         SensitiveScreen.check(tree.texts, passwordField = tree.password, editableField = tree.editable)?.let {
             release(tree)
             pause(generation, it)
@@ -530,22 +651,40 @@ class ScreenTranslationService : AccessibilityService() {
             return 0
         }
 
+        // Translating begins at once: it needs the words, not where they are. A box that may be a
+        // card described in words, or may lie under a bar, waits until the picture of the screen has told.
+        val normal = GUESSED_SIZE_SP.sp()
+        val doubted = BooleanArray(tree.nodes.size) { tree.under[it] || TextFit.isRegion(tree.nodes[it].text, tree.nodes[it].bounds, normal) }
+        request(ScreenTextMerger.merge(tree.nodes.filterIndexed { i, _ -> !doubted[i] }, emptyList(), windowBox, excluded, tree.others).map { it.text })
+
         // A new page or a scroll needs a screenshot anyway (pictures are read again): it is taken
         // while the app is asked where its letters are. Only now, the screen known not to be sensitive.
         val early = if (picturesDue) CoroutineScope(coroutineContext).async { capture.take(window.id, windowBox.left, windowBox.top, overlay) } else null
         val nodes = withLetters(tree)
+        val under = HashSet<Pair<String, Box>>()
+        for ((i, node) in nodes.withIndex()) if (tree.under[i]) under.add(node.text to node.bounds)
         val readAt = SystemClock.elapsedRealtime()
 
-        // A screenshot, for the colours of text not seen before and for text in pictures. What was
-        // read in pictures before stays until they are read again, unless the page is a new one or
-        // was scrolled: then it is somewhere else, or gone.
-        if (imagesNow) {
-            // ...and read again even if the screen looks as before.
+        // What was read in the pictures of another page, or of this one before it was scrolled, is
+        // not on this one (and its pictures are read even if the screen looks as before). On the
+        // same page it stays until the pictures are read again: nothing blinks meanwhile.
+        if (imageGeneration != generation) {
             imageText = emptyList()
             lastFrame = null
+            imageGeneration = generation
         }
-        val known = ScreenTextMerger.merge(nodes, imageText, windowBox, excluded, tree.others)
-        val unseen = synchronized(looks) { known.any { line -> (line.geometry ?: inked[line.bounds])?.let { Place(it) !in looks } ?: true } }
+        // A screenshot: for the colours of text not seen before, for the boxes still in doubt, for text in pictures.
+        var known = ScreenTextMerger.merge(judge(nodes, doubted, null, keep = true), imageText, windowBox, excluded, tree.others)
+        val unseen = synchronized(looks) {
+            known.any { line ->
+                val key = line.text to line.bounds
+                // Looked at before and found to lie under a bar: not a reason to look again.
+                if (key in covered) return@any false
+                val geometry = line.geometry ?: inked[key] ?: TextGeometry(listOf(line.bounds), 0f).takeIf { key in inkless }
+                // The same lines `show` keeps the look of: those on the screen.
+                geometry?.let { onScreen(it, windowBox)?.let { seen -> Place(seen) !in looks } ?: false } ?: true
+            }
+        }
         var shot: ScreenCapture.Shot.Image? = null
         var grid: PixelGrid? = null
         if (Build.VERSION.SDK_INT >= 30 && (unseen || picturesDue)) {
@@ -568,23 +707,29 @@ class ScreenTranslationService : AccessibilityService() {
             // the page is read again, soon at first, then every second. One that still does not
             // agree after that (its text under something else) is shown without a screenshot:
             // where the app says, in the theme's colours.
-            val settled = grid?.let { agrees(it, known, windowBox) } ?: !unseen
+            val settled = grid?.let { agrees(it, known, windowBox, under) } ?: !unseen
             if (!settled) {
-                shot?.bitmap?.recycle()
-                shot = null
-                grid = null
                 val tries = unsettled(generation)
-                Log.d(TAG, "page not settled (try $tries): ${if (tries <= QUICK_RETRIES + SLOW_RETRIES) "read again" else "shown without a screenshot"}")
-                if (tries <= QUICK_RETRIES) return SETTLE_MS
-                if (tries <= QUICK_RETRIES + SLOW_RETRIES) return SLOW_SETTLE_MS
+                val again = tries <= QUICK_RETRIES + SLOW_RETRIES
+                Log.d(TAG, "page not settled (try $tries): ${if (again) "read again" else "shown as it is"}")
+                if (again) {
+                    shot?.bitmap?.recycle()
+                    return if (tries <= QUICK_RETRIES) SETTLE_MS else SLOW_SETTLE_MS
+                }
+                // It will not settle (something of the page keeps moving, or lies under something
+                // else): shown from this screenshot, each of the app's lines only where its ink is.
             } else movingScans = 0
         }
+        // The picture of the screen tells which boxes are text: a card described in words is not,
+        // nor is a text lying under a bar. What is written there is read from the picture instead.
+        val judged = judge(nodes, doubted, grid, keep = false)
+        known = ScreenTextMerger.merge(judged, imageText, windowBox, excluded, tree.others)
         val shotAt = SystemClock.elapsedRealtime()
         try {
             if (!controller.isCurrent(generation)) return 0
             // First what the app itself says (and pictures as last read): on screen before the
             // pictures are read again, which is the slow part.
-            var stale = show(generation, known, grid, windowBox)
+            var stale = show(generation, known, grid, windowBox, under)
             val shownAt = SystemClock.elapsedRealtime()
             var pictures = imageText
             if (picturesDue && shot != null && ml != null) {
@@ -599,7 +744,7 @@ class ScreenTranslationService : AccessibilityService() {
                     if (!controller.isCurrent(generation)) return 0
                     imageText = pictures
                     lastFrame = frame
-                    stale = show(generation, ScreenTextMerger.merge(nodes, pictures, windowBox, excluded, tree.others), grid, windowBox)
+                    stale = show(generation, ScreenTextMerger.merge(judged, pictures, windowBox, excluded, tree.others), grid, windowBox, under)
                 }
                 lastImageAt = readAt
             }
@@ -610,7 +755,7 @@ class ScreenTranslationService : AccessibilityService() {
             ScreenState.status = "Đang dịch"
             ScreenState.changed()
             Log.d(TAG, "scan ${done - started} ms, ${started - pageAt} ms after the page: tree ${readAt - started} ms (${tree.visited} nodes, " +
-                "letters $lettersCalls in $lettersMs ms), shot ${shotAt - readAt} ms, " +
+                "letters ${lettersCalls.get()} in $lettersMs ms), ${nodes.size - judged.size} boxes not text, shot ${shotAt - readAt} ms, " +
                 "shown ${shownAt - shotAt} ms, pictures ${done - shownAt} ms, ${known.size} lines, ${pictures.size} in pictures")
             // Lines left out are asked again shortly (not for ever: as for a page that does not settle).
             if (stale && unsettled(generation) <= QUICK_RETRIES + SLOW_RETRIES) return SETTLE_MS
@@ -647,55 +792,122 @@ class ScreenTranslationService : AccessibilityService() {
      * asks the app once per text): `withLetters` does, once the screen is known not to be sensitive,
      * while the screenshot is being taken.
      */
-    private fun read(root: AccessibilityNodeInfo): Tree {
+    private suspend fun read(root: AccessibilityNodeInfo, window: Box): Tree {
         val nodes = ArrayList<ScreenText>()
+        val numbers = ArrayList<Int>()
         val others = ArrayList<Box>()
         val texts = ArrayList<String>()
         val asking = ArrayList<Asking>()
+        val kept = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<AccessibilityNodeInfo, Boolean>())
+        // The tree as arrays, one entry a node visited: for what is painted over what.
+        val parents = ArrayList<Int>()
+        val orders = ArrayList<Int>()
+        val boxes = ArrayList<Box>()
+        val scrolls = ArrayList<Boolean>()
+        val worded = ArrayList<Boolean>()
         var password = false
         var editable = false
-        var visited = 0
         val rect = Rect()
-        val stack = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
-        stack.addLast(root to 0)
-        while (stack.isNotEmpty()) {
-            val (node, depth) = stack.removeLast()
-            visited++
-            var kept = false
-            if (visited <= MAX_NODES && node.isVisibleToUser) {
-                if (node.isPassword) password = true
-                if (node.isEditable) editable = true
-                val own = node.text?.toString()
-                val text = own ?: node.contentDescription?.toString()?.takeIf { node.childCount == 0 && !isImage(node.className) }
-                if (!text.isNullOrBlank()) {
-                    texts.add(text)
+        val visited = TreeWalk.walk(
+            root, MAX_NODES, MAX_DEPTH, readers,
+            child = { node, i -> child(node, i) },
+            visit = { node, at ->
+                parents.add(at.parent)
+                orders.add(node.drawingOrder)
+                var box = NO_BOX
+                var hasText = false
+                var into = 0
+                if (node.isVisibleToUser) {
+                    if (node.isPassword) password = true
+                    if (node.isEditable) editable = true
                     node.getBoundsInScreen(rect)
-                    val bounds = Box(rect.left, rect.top, rect.right, rect.bottom)
-                    // What the user types stays as typed.
-                    if (!node.isEditable && ChineseText.hasHan(text)) {
-                        nodes.add(ScreenText(text.trim(), bounds))
-                        if (own != null && node !== root) {
-                            asking.add(Asking(node, nodes.lastIndex, own, bounds))
-                            kept = true
+                    box = Box(rect.left, rect.top, rect.right, rect.bottom)
+                    val own = node.text?.toString()
+                    val said = own ?: node.contentDescription?.toString()?.takeIf { node.childCount == 0 && !isImage(node.className) }
+                    if (!said.isNullOrBlank()) {
+                        texts.add(said)
+                        // "品牌，可选，按钮": what is written on the screen is 品牌.
+                        val text = SpokenText.label(said).trim()
+                        if (text.isNotEmpty()) {
+                            hasText = true
+                            // What the user types stays as typed.
+                            if (!node.isEditable && ChineseText.hasHan(text)) {
+                                nodes.add(ScreenText(text, box))
+                                numbers.add(at.number)
+                                if (own != null && node !== root && text == own.trim()) {
+                                    asking.add(Asking(node, nodes.lastIndex, own, box))
+                                    kept.add(node)
+                                }
+                            } else others.add(box)
                         }
-                    } else others.add(bounds)
+                    }
+                    into = node.childCount
                 }
-                if (depth < MAX_DEPTH) for (i in 0 until node.childCount) node.getChild(i)?.let { stack.addLast(it to depth + 1) }
-            }
-            @Suppress("DEPRECATION")
-            if (!kept && node !== root && Build.VERSION.SDK_INT < 33) node.recycle()
-        }
-        return Tree(nodes, others, texts, password, editable, visited, asking)
+                boxes.add(box)
+                scrolls.add(node.isScrollable)
+                worded.add(hasText)
+                into
+            },
+            left = { node ->
+                @Suppress("DEPRECATION")
+                if (Build.VERSION.SDK_INT < 33 && node !== root && node !in kept) node.recycle()
+            },
+        )
+        val under = PaintOrder.underPanels(parents.toIntArray(), orders.toIntArray(), boxes, scrolls.toBooleanArray(), worded.toBooleanArray(), window)
+        return Tree(nodes, others, texts, password, editable, visited, asking, BooleanArray(nodes.size) { under[numbers[it]] })
     }
 
-    /** The texts, each with where the app says its letters are. */
-    private fun withLetters(tree: Tree): List<ScreenText> {
+    /**
+     * One child of a node. Android 13 and later hand over one node a question unless told not to
+     * stop: told so, a node comes with those under it (up to 50), and a screen takes a few
+     * questions instead of one for every node.
+     */
+    private fun child(node: AccessibilityNodeInfo, index: Int): AccessibilityNodeInfo? = runCatching {
+        if (Build.VERSION.SDK_INT >= 33) {
+            node.getChild(index, AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_HYBRID or AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE)
+        } else node.getChild(index)
+    }.getOrNull()
+
+    /** The texts, each with where the app says its letters are (asked side by side). */
+    private suspend fun withLetters(tree: Tree): List<ScreenText> {
+        val began = SystemClock.elapsedRealtime()
+        val found = coroutineScope { tree.asking.map { ask -> async(readers) { letters(ask.node, ask.text, ask.bounds) } }.awaitAll() }
         val out = tree.nodes.toMutableList()
-        for (ask in tree.asking) {
-            letters(ask.node, ask.text, ask.bounds)?.let { out[ask.index] = out[ask.index].copy(geometry = it) }
-        }
+        for ((i, ask) in tree.asking.withIndex()) found[i]?.let { out[ask.index] = out[ask.index].copy(geometry = it) }
         release(tree)
+        lettersMs = SystemClock.elapsedRealtime() - began
         return out
+    }
+
+    /**
+     * The app's texts less the boxes that are not text: a box in doubt (far larger than its words,
+     * or under a bar that stays in place) is one only if the picture of the screen shows its words
+     * in it. `keep`: a box not yet looked at stays in for now.
+     */
+    private fun judge(nodes: List<ScreenText>, doubted: BooleanArray, grid: PixelGrid?, keep: Boolean): List<ScreenText> = synchronized(looks) {
+        nodes.filterIndexed { i, node ->
+            if (node.geometry != null || !doubted[i]) return@filterIndexed true
+            val key = node.text to node.bounds
+            if (key in inked) return@filterIndexed true
+            if (key in inkless) return@filterIndexed false
+            if (grid == null) return@filterIndexed keep
+            val found = LineStyles.lines(grid, node.bounds, node.text)
+            if (found != null) inked[key] = found else inkless[key] = true
+            found != null
+        }
+    }
+
+    /** More than half of `box` is in `area`. */
+    private fun inside(box: Box, area: Box): Boolean = (box.intersect(area)?.area ?: 0L) * 2 > box.area
+
+    /** The lines of a text that are on the screen (more than half of each); null: none is. */
+    private fun onScreen(whole: TextGeometry, window: Box): TextGeometry? {
+        val seen = whole.lines.filter { inside(it, window) }
+        return when (seen.size) {
+            0 -> null
+            whole.lines.size -> whole
+            else -> TextGeometry(seen, whole.sizePx)
+        }
     }
 
     private fun release(tree: Tree) {
@@ -712,8 +924,7 @@ class ScreenTranslationService : AccessibilityService() {
     private fun letters(node: AccessibilityNodeInfo, text: String, bounds: Box): TextGeometry? {
         val key = text.trim() to bounds
         synchronized(letters) { letters[key] }?.let { return it as? TextGeometry }
-        val asked = SystemClock.elapsedRealtime()
-        lettersCalls++
+        lettersCalls.incrementAndGet()
         val found = runCatching {
             if (AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY !in node.availableExtraData) return@runCatching null
             val arguments = Bundle().apply {
@@ -730,14 +941,17 @@ class ScreenTranslationService : AccessibilityService() {
         // Letters said to be outside their own view: asked while the page was moving. Not believed, not kept.
         }.getOrNull()?.takeIf { it.within(bounds) }
         synchronized(letters) { letters[key] = found ?: NOWHERE }
-        lettersMs += SystemClock.elapsedRealtime() - asked
         return found
     }
 
-    /** The screenshot shows the app's text where the app says it is (most of a dozen lines asked). */
-    private fun agrees(grid: PixelGrid, lines: List<ScreenText>, window: Box): Boolean {
+    /**
+     * The screenshot shows the app's text where the app says it is: at least half of a dozen lines
+     * asked. A page still sliding into place shows none of them there; a page at rest shows all but
+     * those something else lies over. Lines that may be under a bar are not asked at all.
+     */
+    private fun agrees(grid: PixelGrid, lines: List<ScreenText>, window: Box, under: Set<Pair<String, Box>>): Boolean {
         // Lines from top to bottom of the page: a part of it still moving (the top seldom does) is seen.
-        val exact = lines.filter { !it.fromImage && it.geometry?.lines?.size == 1 }.sortedBy { it.geometry!!.box.top }
+        val exact = lines.filter { !it.fromImage && it.geometry?.lines?.size == 1 && (it.text to it.bounds) !in under }.sortedBy { it.geometry!!.box.top }
         val step = maxOf(1, exact.size / AGREE_LINES)
         var asked = 0
         var yes = 0
@@ -747,7 +961,7 @@ class ScreenTranslationService : AccessibilityService() {
             asked++
             if (style.agrees(geometry.box, geometry.sizePx)) yes++
         }
-        return asked < 3 || yes * 10 >= asked * 8
+        return asked < 3 || yes * 2 >= asked
     }
 
     private fun grid(shot: ScreenCapture.Shot.Image): PixelGrid {
@@ -768,7 +982,8 @@ class ScreenTranslationService : AccessibilityService() {
         for (line in lines) {
             if (line.fromImage) continue
             val look = synchronized(looks) {
-                val geometry = line.geometry ?: inked[line.bounds] ?: return@synchronized null
+                val key = line.text to line.bounds
+                val geometry = line.geometry ?: inked[key] ?: TextGeometry(listOf(line.bounds), 0f).takeIf { key in inkless } ?: return@synchronized null
                 looks[Place(geometry)]
             }?.takeIf { it.style.plain } ?: continue
             paint.color = look.style.background
@@ -785,37 +1000,58 @@ class ScreenTranslationService : AccessibilityService() {
      * is a screenshot, remembered or plain where not): draws what is already translated, asks for
      * the rest. True: some line was left out for now and the screen must be read again.
      */
-    private fun show(generation: Long, lines: List<ScreenText>, grid: PixelGrid?, window: Box): Boolean {
+    private fun show(generation: Long, lines: List<ScreenText>, grid: PixelGrid?, window: Box, under: Set<Pair<String, Box>>): Boolean {
         val found = HashMap<ScreenText, Look>()
         var stale = false
+        // Small views still moving (a label flipping, pictures going by): nothing is drawn in them yet.
+        val wait = controller.speed.scrollMs
+        val moving = SystemClock.uptimeMillis().let { now -> moved.filter { now - it.second < wait }.map { it.first } }
         synchronized(looks) {
             for (line in lines) {
-                val whole = line.geometry ?: inked[line.bounds] ?: grid?.let { LineStyles.lines(it, line.bounds) }?.also { inked[line.bounds] = it }
-                    ?: TextGeometry(listOf(line.bounds), minOf(line.bounds.height * 0.6f, GUESSED_SIZE_SP.sp()))
-                // Only the lines that are on the screen.
-                val seen = whole.lines.filter { (it.intersect(window)?.area ?: 0L) * 2 > it.area }
-                if (seen.isEmpty()) continue
-                val geometry = if (seen.size == whole.lines.size) whole else TextGeometry(seen, whole.sizePx)
+                val key = line.text to line.bounds
+                val sure = line.geometry ?: inked[key]
+                    ?: grid?.takeUnless { key in inkless }?.let { LineStyles.lines(it, line.bounds, line.text) }?.also { inked[key] = it }
+                // No ink in its box is this text: where it is, and how large, is a guess from the box.
+                val guessed = sure == null
+                if (guessed && grid != null && !line.fromImage) inkless[key] = true
+                val whole = sure ?: TextGeometry(listOf(line.bounds), minOf(line.bounds.height * 0.6f, GUESSED_SIZE_SP.sp()))
+                val geometry = onScreen(whole, window) ?: continue
+                if (moving.any { inside(geometry.box, it) }) continue
                 val place = Place(geometry)
                 val exact = line.geometry != null && !line.fromImage
                 val view = line.bounds.takeUnless { line.fromImage }
                 val style = grid?.let { LineStyles.of(it, geometry.box, window) }
+                if (exact && key in under) {
+                    // The app's own letters, perhaps under a bar that stays in place: drawn only
+                    // where the picture of the screen shows them. No waiting for them to come.
+                    val first = geometry.lines[0]
+                    val there = grid?.let { LineStyles.of(it, first, window) }
+                    if (there == null || !there.plain || !there.agrees(first, geometry.sizePx)) {
+                        if (grid != null) covered[key] = true
+                        continue
+                    }
+                }
                 // One line whose letters are not where the app said (it was asked while the page was
                 // moving): not drawn now, forgotten, and asked again at the next scan.
                 if (style != null && exact && geometry.lines.size == 1 && style.plain && !style.agrees(geometry.box, geometry.sizePx)) {
-                    synchronized(letters) { letters.remove(line.text to line.bounds) }
+                    synchronized(letters) { letters.remove(key) }
                     stale = true
                     continue
                 }
                 val read = style?.let {
-                    // Text read in a picture or found by its ink: its place and size are those of the ink.
                     val ink = it.ink
                     val box = geometry.box
-                    if (exact || ink == null || geometry.lines.size != 1) Look(geometry, it, view)
-                    else Look(
-                        TextGeometry(listOf(Box(minOf(box.left, ink.left), minOf(box.top, ink.top), maxOf(box.right, ink.right), maxOf(box.bottom, ink.bottom))), ink.height / HAN_INK),
-                        it, view,
-                    )
+                    when {
+                        exact || ink == null || geometry.lines.size != 1 -> Look(geometry, it, view, guessed)
+                        // A guess from the box: the ink in it is believed only if it can be this text
+                        // on one line (an icon above a label is ink too).
+                        guessed && !TextFit.isOneLine(line.text, ink.width, ink.height / HAN_INK) -> Look(geometry, it, view, true)
+                        // Text read in a picture or found by its ink: its place and size are those of the ink.
+                        else -> Look(
+                            TextGeometry(listOf(Box(minOf(box.left, ink.left), minOf(box.top, ink.top), maxOf(box.right, ink.right), maxOf(box.bottom, ink.bottom))), ink.height / HAN_INK),
+                            it, view,
+                        )
+                    }
                 }?.also { looks[place] = it }
                 found[line] = read ?: looks[place]?.let { if (exact) sameLook(it, geometry) else it } ?: plain(line, geometry)
             }
@@ -823,7 +1059,7 @@ class ScreenTranslationService : AccessibilityService() {
         val order = found.keys.sortedWith(compareBy({ found.getValue(it).geometry.box.top }, { found.getValue(it).geometry.box.left }))
         page = Page(generation, order, found, window)
         render()
-        request(order)
+        request(order.map { it.text })
         return stale
     }
 
@@ -845,6 +1081,7 @@ class ScreenTranslationService : AccessibilityService() {
                 freeLeft = (box.left - line.bounds.left).coerceAtLeast(0), freeRight = (line.bounds.right - box.right).coerceAtLeast(0),
             ),
             line.bounds.takeUnless { line.fromImage },
+            guessed = line.geometry == null,
         )
     }
 
@@ -857,7 +1094,7 @@ class ScreenTranslationService : AccessibilityService() {
                 val known = translator.quick(line.text)?.text ?: return@mapNotNull null
                 // Nothing is drawn where the "translation" is the Chinese itself (a glossary entry kept as written).
                 if (known == line.text || ChineseText.hasHan(known)) return@mapNotNull null
-                OverlayComposer.Entry(now.looks.getValue(line), known, translator.shorter(line.text))
+                OverlayComposer.Entry(now.looks.getValue(line), known, translator.shorter(line.text), picture = line.fromImage)
             }
             val drawn = composer.compose(entries, now.window)
             onMain {
@@ -873,16 +1110,20 @@ class ScreenTranslationService : AccessibilityService() {
     }
 
     /** Translates what is not known yet; each answer goes into memory and the page is drawn again. */
-    private fun request(lines: List<ScreenText>) {
+    private fun request(wanted: List<String>) {
         if (unknown.size > 2_000) unknown.clear()
-        val texts = lines.map { it.text }.distinct().filter { it !in unknown && translator.quick(it) == null && translating.add(it) }
-        if (texts.isEmpty()) return
+        val fresh = wanted.distinct().filter { it !in unknown && translator.quick(it) == null && translating.add(it) }
+        if (fresh.isEmpty()) return
+        // Short texts first (a label, the words by a price: each is quick, and there are many of
+        // them), then the long ones; among each, as they come on the page.
+        val texts = fresh.sortedBy { if (TextFit.ems(it) <= SHORT_EMS) 0 else 1 }
         scope.launch(translations) {
-            val news = AtomicBoolean(false)
+            // The first answer is drawn at once, the following ones every `DRAW_GAP_MS` at most.
+            val news = Channel<Unit>(Channel.CONFLATED)
             val drawing = launch {
-                while (isActive) {
-                    delay(120)
-                    if (news.getAndSet(false)) render()
+                for (ignored in news) {
+                    render()
+                    delay(DRAW_GAP_MS)
                 }
             }
             val began = SystemClock.elapsedRealtime()
@@ -896,7 +1137,7 @@ class ScreenTranslationService : AccessibilityService() {
                     if (result == null) {
                         unknown.add(text)
                         missed.incrementAndGet()
-                    } else news.set(true)
+                    } else news.trySend(Unit)
                 }
                 if (error != null) ScreenState.error(error)
             } finally {
@@ -975,6 +1216,8 @@ class ScreenTranslationService : AccessibilityService() {
         main.removeCallbacks(scanNow)
         main.removeCallbacks(keyboardGone)
         scope.cancel()
+        readerThreads.shutdown()
+        lookups.shutdown()
         receiver?.let { runCatching { unregisterReceiver(it) } }
         receiver = null
         overlay.remove()
@@ -1016,16 +1259,29 @@ class ScreenTranslationService : AccessibilityService() {
         private const val MAX_REST_MS = 900L
         /**
          * A page still settling is read again after `SETTLE_MS` (Android 14 allows a screenshot
-         * every third of a second) a few times, then every second for a while.
+         * every third of a second) a few times, then once more a second later. On a phone, waiting
+         * longer (it was eleven seconds) left pages of real apps without translations for that
+         * long: a page that has not settled in two seconds is not sliding into place.
          */
         private const val SETTLE_MS = 350L
-        private const val QUICK_RETRIES = 4
+        private const val QUICK_RETRIES = 3
         private const val SLOW_SETTLE_MS = 1_000L
-        private const val SLOW_RETRIES = 10
+        private const val SLOW_RETRIES = 1
         /** How much of its text size a line of Chinese ink is high. */
         private const val HAN_INK = 0.92f
         private const val GUESSED_SIZE_SP = 16f
         private val NOWHERE = Any()
+        private val NO_BOX = Box(0, 0, 0, 0)
+        /** How many questions about its nodes the app is asked at a time. */
+        private const val READERS = 4
+        /** An app that has not said within this long which view scrolled is taken to be scrolling its page. */
+        private const val SOURCE_WAIT_MS = 150L
+        /** How long a small view that scrolled is remembered. */
+        private const val MOVED_MS = 2_000L
+        /** Texts up to this many letters of Chinese are translated before the longer ones. */
+        private const val SHORT_EMS = 8f
+        /** Translations coming in are drawn this often at most. */
+        private const val DRAW_GAP_MS = 120L
 
         private fun <K, V> lru(most: Int): MutableMap<K, V> = object : LinkedHashMap<K, V>(64, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?) = size > most

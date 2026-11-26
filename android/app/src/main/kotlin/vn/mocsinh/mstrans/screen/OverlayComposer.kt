@@ -25,10 +25,16 @@ import java.util.Objects
  * as built, so nothing is laid out twice.
  */
 class OverlayComposer(context: Context) {
-    /** `shorter`: a shorter word for the same, used where the usual one would be cut or wrapped (a label under an icon). */
-    class Entry(val look: Look, val translation: String, val shorter: String? = null)
+    /**
+     * `shorter`: a shorter word for the same, used where the usual one would be cut or wrapped (a
+     * label under an icon). `picture`: the text was read in a picture.
+     */
+    class Entry(val look: Look, val translation: String, val shorter: String? = null, val picture: Boolean = false)
 
     private data class Key(val translation: String, val look: Look, val plan: OverlayPlanner.Plan)
+
+    /** A translation laid out, and how much of it is to be seen (1: all of it). */
+    private class Built(val drawn: OverlayView.Drawn, val shown: Float)
 
     private val metrics = context.resources.displayMetrics
     private val smallest = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, metrics)
@@ -42,7 +48,7 @@ class OverlayComposer(context: Context) {
     private val spacing = ruler.fontSpacing / RULER
     /** Widths at the ruler's size, in the normal and the narrow cut. */
     private val widths = HashMap<String, FloatArray>()
-    private var built = HashMap<Key, OverlayView.Drawn>()
+    private var built = HashMap<Key, Built>()
 
     /** `entries` in reading order; `window` is the app's window (nothing is drawn outside it). */
     fun compose(entries: List<Entry>, window: Box): List<OverlayView.Drawn> {
@@ -65,10 +71,15 @@ class OverlayComposer(context: Context) {
             texts = texts.mapIndexed { i, text -> if (i in tight) entries[i].shorter!! else text }
             plans = plans(texts)
         }
-        val next = HashMap<Key, OverlayView.Drawn>()
-        val out = entries.mapIndexed { i, entry ->
+        val next = HashMap<Key, Built>()
+        val out = entries.indices.mapNotNull { i ->
+            val entry = entries[i]
+            // Text in a picture that does not fit is left as it is: half a word over a photograph helps nobody.
+            if (entry.picture && plans[i].ellipsize) return@mapNotNull null
             val key = Key(texts[i], entry.look, plans[i])
-            (built[key] ?: build(entry.look, texts[i], plans[i])).also { next[key] = it }
+            val made = (built[key] ?: build(entry.look, texts[i], plans[i])).also { next[key] = it }
+            // Nor is a text cut down to "Mua …" drawn: the Chinese left as it is says more.
+            made.drawn.takeIf { made.shown >= LEAST_SHOWN }
         }
         built = next
         if (widths.size > 4_000) widths.clear()
@@ -92,6 +103,7 @@ class OverlayComposer(context: Context) {
             group = Objects.hash(Math.round(size), style.background shr 4 and 0x0F0F0F, style.text shr 5 and 0x070707, style.plain),
             measure = Ruler(text),
             align = align(look),
+            guessed = look.guessed,
         )
     }
 
@@ -146,10 +158,15 @@ class OverlayComposer(context: Context) {
         override fun lineHeight(sizePx: Float): Float = sizePx * spacing
     }
 
-    private fun build(look: Look, text: String, plan: OverlayPlanner.Plan): OverlayView.Drawn {
+    private fun build(look: Look, text: String, plan: OverlayPlanner.Plan): Built {
+        val layout = layout(text, paint(plan.sizePx, plan.condensed, colour(look.style)), plan.width, plan.align, plan.maxLines)
+        val cut = (0 until layout.lineCount).sumOf { layout.getEllipsisCount(it) }
+        return Built(draw(look, layout, plan), if (text.isEmpty()) 1f else (text.length - cut).toFloat() / text.length)
+    }
+
+    private fun draw(look: Look, layout: StaticLayout, plan: OverlayPlanner.Plan): OverlayView.Drawn {
         val style = look.style
         val box = look.geometry.box
-        val layout = layout(text, paint(plan.sizePx, plan.condensed, colour(style)), plan.width, plan.align, plan.maxLines)
         val x = plan.left.toFloat()
         // One line sits with the middle of its capital letters on the middle of the Chinese ink.
         val y = if (layout.lineCount == 1) plan.centerY + plan.sizePx * CAPITAL_MIDDLE - layout.getLineBaseline(0)
@@ -237,6 +254,8 @@ class OverlayComposer(context: Context) {
 
     private companion object {
         const val RULER = 100f
+        /** A translation of which less than this part can be shown is not drawn at all. */
+        const val LEAST_SHOWN = 0.6f
         /** Half the height of a capital letter, in text sizes: where the middle of a line of Latin text is. */
         const val CAPITAL_MIDDLE = 0.36f
     }

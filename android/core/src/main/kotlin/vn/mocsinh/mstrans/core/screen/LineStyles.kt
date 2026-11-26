@@ -44,15 +44,18 @@ data class LineStyle(
 
 /**
  * A text's lines and size, with its look read from the screenshot; `view` is the box of the app's
- * own view of it, where it has one (how the text sits in it tells how it is aligned).
+ * own view of it, where it has one (how the text sits in it tells how it is aligned). `guessed`:
+ * neither the app nor the ink told the size.
  */
-data class Look(val geometry: TextGeometry, val style: LineStyle, val view: Box? = null)
+data class Look(val geometry: TextGeometry, val style: LineStyle, val view: Box? = null, val guessed: Boolean = false)
 
 object LineStyles {
     /** Two colours this close (largest difference of a channel) are the same background. */
     private const val SAME = 10
     /** A pixel this far from the background is ink. */
     private const val INK = 40
+    /** Ink further apart on a row than this many times the row's height is not the same writing. */
+    private const val WIDE_GAP = 2.5f
 
     /** The look of the text in `line`, read from the screenshot; room is looked for inside `limit` only. */
     fun of(grid: PixelGrid, line: Box, limit: Box): LineStyle? {
@@ -216,9 +219,10 @@ object LineStyles {
     /**
      * The lines of text inside `bounds`, for a box that does not say where its letters are: rows of
      * ink on the box's plain colour, without the page around a button or the button's edge. Null
-     * over a picture.
+     * over a picture. With `text` (what the box says is written in it), only the rows that can be
+     * that text: not the icon above a label, and none at all in a card that is mostly picture.
      */
-    fun lines(grid: PixelGrid, bounds: Box): TextGeometry? {
+    fun lines(grid: PixelGrid, bounds: Box, text: String? = null): TextGeometry? {
         val box = bounds.intersect(grid.box) ?: return null
         if (box.width < 8 || box.height < 8) return null
         val xs = steps(box.left, box.right, 400)
@@ -257,18 +261,41 @@ object LineStyles {
         }
         if (runs.isEmpty()) return null
         fun height(run: IntRange) = ys[run.last] - ys[run.first] + 1
-        val middle = runs.map { height(it) }.sorted()[runs.size / 2]
-        // A thin run is a rule between rows, not a line of text.
-        val lines = runs.filter { height(it) >= maxOf(3f, middle * 0.35f) }.map { run ->
+        fun box(run: IntRange): Box {
             var first = right
             var last = left
             for (y in run) for (x in left until right) if (ink[y * columns + x]) {
                 first = minOf(first, x)
                 last = maxOf(last, x)
             }
-            Box(xs[first], ys[run.first], xs[last] + 1, ys[run.last] + 1)
+            return Box(xs[first], ys[run.first], xs[last] + 1, ys[run.last] + 1)
         }
-        return TextGeometry(lines, middle / 0.93f)
+        if (text != null) {
+            // A row with a wide stretch of nothing in it is two pieces of writing (a name at one end
+            // of a bar, buttons at the other), never one line of a text.
+            val pieces = ArrayList<Box>()
+            for (run in runs) {
+                if (height(run) < 3) continue
+                val gap = height(run) * WIDE_GAP
+                var from = -1
+                var last = -1
+                for (x in left until right) {
+                    if ((run).none { ink[it * columns + x] }) continue
+                    if (from >= 0 && xs[x] - xs[last] > gap) {
+                        pieces.add(Box(xs[from], ys[run.first], xs[last] + 1, ys[run.last] + 1))
+                        from = -1
+                    }
+                    if (from < 0) from = x
+                    last = x
+                }
+                if (from >= 0) pieces.add(Box(xs[from], ys[run.first], xs[last] + 1, ys[run.last] + 1))
+            }
+            return TextFit.pick(text, pieces)
+        }
+        val middle = runs.map { height(it) }.sorted()[runs.size / 2]
+        // A thin run is a rule between rows, not a line of text.
+        val lines = runs.filter { height(it) >= maxOf(3f, middle * 0.35f) }.map { box(it) }
+        return TextGeometry(lines, middle / TextFit.INK_OF_SIZE)
     }
 
     /** Over a picture: its average colour behind the text, black or white letters, no room taken. */

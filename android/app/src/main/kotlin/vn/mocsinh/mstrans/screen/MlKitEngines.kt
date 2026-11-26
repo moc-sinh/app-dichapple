@@ -9,11 +9,13 @@ import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import vn.mocsinh.mstrans.core.screen.Box
+import vn.mocsinh.mstrans.core.screen.PictureText
 import vn.mocsinh.mstrans.core.screen.ScreenBlocks
 import vn.mocsinh.mstrans.core.screen.ScreenText
 import vn.mocsinh.mstrans.core.screen.TextEngine
@@ -57,13 +59,26 @@ class MlKitEngines {
     suspend fun read(bitmap: Bitmap, left: Int, top: Int): List<ScreenText> {
         val text = recognizer().process(InputImage.fromBitmap(bitmap, 0)).await()
         return text.textBlocks.flatMap { block ->
-            ScreenBlocks.texts(
-                block.lines.mapNotNull { line ->
-                    val r = line.boundingBox ?: return@mapNotNull null
-                    line.text to Box(r.left, r.top, r.right, r.bottom).offset(left, top)
-                },
-            )
+            // Each line as the things written on it: a price and, further along, how many bought are two.
+            val lines = block.lines.mapNotNull { line ->
+                // What the reader is not sure of, or reads on a slant (the writing on the goods in a photograph), is left alone.
+                if (!PictureText.worth(line.text, line.confidence, line.angle)) return@mapNotNull null
+                val pieces = PictureText.pieces(line.elements.map { word -> letters(word) })
+                if (pieces.isNotEmpty()) pieces.map { (piece, box) -> piece to box.offset(left, top) }
+                else line.boundingBox?.let { listOf(line.text to Box(it.left, it.top, it.right, it.bottom).offset(left, top)) }
+            }
+            // A sentence wrapped over lines is one text; a line of several things is never part of one.
+            val whole = if (lines.all { it.size == 1 }) ScreenBlocks.texts(lines.map { it[0] }) else lines.flatten().flatMap { ScreenBlocks.texts(listOf(it)) }
+            // An icon taken for a letter (a cart for 口) is not text either.
+            whole.filter { PictureText.worth(it.text, null, null) }
         }
+    }
+
+    /** The letters of a word with their places; the word whole where the reader does not place its letters. */
+    private fun letters(word: Text.Element): List<Pair<String, Box>> {
+        val letters = word.symbols.mapNotNull { letter -> letter.boundingBox?.let { letter.text to Box(it.left, it.top, it.right, it.bottom) } }
+        if (letters.isNotEmpty() && letters.size == word.symbols.size) return letters
+        return listOfNotNull(word.boundingBox?.let { word.text to Box(it.left, it.top, it.right, it.bottom) })
     }
 
     /**

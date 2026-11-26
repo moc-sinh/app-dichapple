@@ -21,7 +21,11 @@ class ScreenController(
         data object Rotated : Event
         /** A new screen or dialog in `pkg`. */
         data class WindowState(val pkg: String?) : Event
-        data class Scrolled(val pkg: String?) : Event
+        /**
+         * Something scrolled in `pkg`. `area`: where the view that scrolled is, when it is a small
+         * one (a label flipping by itself, a row of pictures); null: the page itself, or not known.
+         */
+        data class Scrolled(val pkg: String?, val area: Box? = null) : Event
         /** Something on screen changed; `signature` is its Chinese (null: not known yet). */
         data class ContentChanged(val pkg: String?, val signature: Int?) : Event
         /** Windows came or went; `keyboard` says whether a keyboard is up (null: not known). */
@@ -31,6 +35,8 @@ class ScreenController(
     sealed interface Action {
         /** Take every translation off the screen. */
         data object Clear : Action
+        /** Take the translations in this place off the screen; the others stay. */
+        data class ClearArea(val area: Box) : Action
         /** Forget translations kept in memory. */
         data object ClearCache : Action
         data object CancelScan : Action
@@ -48,7 +54,11 @@ class ScreenController(
     private var keyboard = false
     private var currentPackage: String? = null
     private var lastSignature: Int? = null
-    private var lastScanAt = Long.MIN_VALUE / 2
+    private var lastScanAt = NEVER
+    /** The page a scroll asked a scan for, when that scan began, and how much longer a list is now waited for. */
+    private var scrollGeneration = -1L
+    private var scrollScanAt = NEVER
+    private var scrollExtra = 0L
 
     /** The app in front, as far as the events tell. */
     val foreground: String? get() = currentPackage
@@ -102,8 +112,17 @@ class ScreenController(
                 if (!chosen(event.pkg)) return emptyList()
                 currentPackage = event.pkg
                 if (keyboard) return emptyList()
+                // A small view: only its own place is cleared and read again, once it rests.
+                if (event.area != null) return listOf(Action.ClearArea(event.area), scan(speed.scrollMs))
+                // The list was read while still moving: it is waited for a little longer from now on.
+                if (clock() - scrollScanAt < EARLY_MS) scrollExtra += LONGER_MS
+                scrollScanAt = NEVER
                 bump()
-                return listOf(Action.Clear, scan(speed.settleMs))
+                scrollGeneration = generation
+                // Read as soon as it rests, whenever the scan before was: nothing is translated meanwhile.
+                val longest = maxOf(speed.settleMs, speed.scrollMs)
+                scrollExtra = scrollExtra.coerceAtMost(longest - speed.scrollMs)
+                return listOf(Action.Clear, Action.Scan(speed.scrollMs + scrollExtra, generation))
             }
             is Event.ContentChanged -> {
                 if (!chosen(event.pkg)) return emptyList()
@@ -146,12 +165,21 @@ class ScreenController(
 
     @Synchronized
     fun scanStarted(generation: Long) {
-        if (generation == this.generation) lastScanAt = clock()
+        if (generation != this.generation) return
+        lastScanAt = clock()
+        if (generation == scrollGeneration && scrollScanAt == NEVER) scrollScanAt = lastScanAt
     }
 
     @Synchronized
     fun scanFinished(generation: Long, signature: Int?) {
-        if (generation == this.generation && signature != null) lastSignature = signature
+        if (generation != this.generation) return
+        if (signature != null) lastSignature = signature
+        if (generation == scrollGeneration && scrollScanAt != NEVER) {
+            // The list rested while it was read: the wait gets shorter again.
+            scrollExtra = (scrollExtra - SHORTER_MS).coerceAtLeast(0)
+            scrollScanAt = NEVER
+            scrollGeneration = -1
+        }
     }
 
     /** One more scan of the same page, after the one under way. */
@@ -177,5 +205,10 @@ class ScreenController(
     private companion object {
         /** A new page is read this long after it opens (its first content is there by then). */
         const val OPEN_MS = 150L
+        const val NEVER = Long.MIN_VALUE / 2
+        /** A scroll this soon after the scan of a list began: the list had not come to rest. */
+        const val EARLY_MS = 250L
+        const val LONGER_MS = 50L
+        const val SHORTER_MS = 25L
     }
 }
