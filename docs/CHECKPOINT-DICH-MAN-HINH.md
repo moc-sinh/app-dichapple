@@ -506,3 +506,87 @@ máy ảo (câu hỏi lần trước chưa được trả lời), tải file, s�
   26/11 đã được viết lại để bỏ dòng này trước khi push; vài commit cũ hơn trên nhánh vẫn còn, không sửa vì đã push.
 - Repo công khai, còn cấu hình git trên máy đã làm dùng email công ty. Commit bằng địa chỉ noreply của tài khoản
   `minhdn-del` (xem `git log`): `git -c user.email=<địa chỉ đó> commit ...`, trừ khi Minh bảo khác.
+
+## 16. Phiên 26/11/2026, 02:50 đến 05:10 (tài khoản mới)
+
+**Minh đã đồng ý trong phiên này:** tự bật quyền Trợ năng của MSTrans trên máy ảo và thao tác máy ảo (Wi-Fi, xoay,
+khoá màn hình) để thử; làm lại hiển thị "theo phương án đẹp nhất cho mọi trường hợp"; tối ưu chất lượng và tốc độ;
+gửi file APK; commit. Chưa xin: push, tải file, sửa cài đặt Windows.
+
+**APK đã gửi Minh** (bản thứ hai thay bản thứ nhất): 1.7.0 (15), chỉ ARM, 27.164.243 byte, SHA-256
+`C63EB8C1A982470AC5AB8301F342708E3B373E3F152047C098D7EED7409C909E`, chứng thư `ff13e1b4…994a6eb9` (cài đè 1.6.0 được).
+Build bằng `MSTRANS_BUILD=15`, không đặt `MSTRANS_ABIS`. Mã của APK là commit `531dcbc` (166 test lõi xanh).
+**Chưa push**: hai commit của phiên này chỉ có trên máy này.
+
+### 16.1 Lỗi đã sửa
+- **Mở app đã chọn mà không dịch** (màn tĩnh dịch được 1/3 lần): nút nổi và lớp phủ là cửa sổ
+  `TYPE_ACCESSIBILITY_OVERLAY` của chính MSTrans; sự kiện đổi cửa sổ của chúng bị hiểu là "người dùng sang app
+  MSTrans" nên xoá lớp phủ và huỷ quét. Giờ bỏ qua (`ownOverlay`). Sau khi sửa 7/7.
+- **Trang có đồng hồ đếm ngược** (Taobao có nhiều): mỗi giây đồng hồ nhảy số làm bỏ lần quét đang chạy, bản dịch
+  lâu mới hiện hoặc hiện thiếu. Giờ nội dung đổi trên cùng trang không bỏ lần quét đang chạy mà quét thêm một lần sau
+  (`ScreenController`: thế hệ chỉ tăng khi sang trang, cuộn, xoay).
+- **Đang cuộn nhanh, bản dịch cũ đứng yên chồng lên chữ đã chạy**: gom sự kiện `notificationTimeout` 150 → 50 ms;
+  thử lại 0,15 giây sau khi vuốt thì lớp phủ đã xoá kịp.
+- **Đóng bàn phím đôi khi không dịch lại**: sự kiện cuối tới lúc bàn phím còn đang trượt ra. Giờ 400 ms sau khi thấy
+  bàn phím mở thì xem lại (`keyboardGone`). Sau khi sửa 6/6.
+- Dòng "Gói dịch Trung → Việt" ghi "Đã tải" (hết ngắt hai dòng).
+
+### 16.2 Hiển thị làm lại (Minh: "chữ sắp xếp rất xấu")
+Trước: bản dịch ép vào đúng khung chữ Trung, cỡ chữ to nhất vừa chiều cao, nền là trung bình điểm ảnh trong khung
+(lẫn màu nét chữ, trong 5 %), chữ chỉ đen hoặc trắng. Giờ (lõi có test, `core/screen`):
+- `TextLines`: vị trí từng chữ hỏi app (`EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY`) → từng dòng thật và cỡ chữ thật;
+  app không trả lời thì `LineStyles.lines` tìm dòng theo nét mực trong ảnh chụp.
+- `LineStyles.of`: màu nền thật (một màu, chuyển màu ngang như nút "加入购物车/立即购买", chuyển màu dọc như ảnh
+  banner), màu chữ gốc (giá đỏ vẫn đỏ, chữ phụ vẫn xám), nét mực ở đâu, khoảng trống cùng nền bốn phía.
+- `OverlayPlanner`: cùng cỡ chữ gốc trên một dòng, lấn sang khoảng trống bên cạnh; không đủ thì chữ hẹp
+  (sans-serif-condensed) rồi mới nhỏ dần (tối thiểu 80 % cỡ gốc, chữ to được tới 60 %); chữ cùng kiểu thì cùng cỡ;
+  giữa thì giữ giữa, sát phải thì mọc sang trái; hai bản dịch trên một hàng không đè nhau; đoạn nhiều dòng dàn lại
+  trong các dòng của nó; chỉ cắt "…" khi hết cách. Lề trang được giữ hai bên.
+- `OverlayComposer` + `OverlayView`: che chữ Trung bằng đúng màu nền (kể cả chuyển màu), viết bằng màu chữ gốc;
+  trên ảnh thì nhãn bo góc màu của ảnh; nhãn hẹp (dưới biểu tượng) dùng từ ngắn (`CommerceDictionary.SHORT`).
+- Ảnh chụp không khớp vị trí app báo (trang còn trượt vào) thì không dùng: `LineStyle.agrees`.
+- `ScreenBlocks`: chữ trong ảnh xuống dòng của cùng một câu được dịch thành một câu.
+- TestShop có màn mới `taobao` dựng giống trang sản phẩm Taobao thật (ảnh Minh gửi): tab, ô tìm kiếm, banner chữ
+  trong ảnh, giá, chip viền cam, thanh xanh, lưới sản phẩm, thanh mua chuyển màu.
+
+### 16.3 Chất lượng dịch
+- Dòng nhiều cụm cách nhau bởi khoảng trắng ("月销500+  现货"): cụm nào cũng có trong từ điển thì ghép bằng " · ",
+  không qua bộ dịch. Có cụm lạ thì dịch cả dòng (thử trên máy: dịch từng cụm rời ra kém hơn).
+- Thêm mẫu số và từ trang Taobao thật (`距结束`, `库存N件`, `预计发货后12-15日送达`, `超200人加购`, `满¥99包邮`,
+  `超级立减50%`, `到手价`…); bỏ tên hàng khỏi từ điển (càng chèn nhiều từ, bộ dịch càng làm rơi).
+- Câu đã dịch với một số được nhớ theo "khuôn": cùng câu, số khác thì không phải dịch lại.
+- Bộ dịch làm rơi từ đã chèn sẵn: hỏi lại chỉ với từ bắt buộc.
+- Chế độ AI: hiện bản ngoại tuyến trước, bản AI thay vào sau; mỗi dòng chỉ hỏi AI một lần.
+- Chữ không có Hán của app (giá "¥178") bị OCR đọc thành "羊178" không còn bị dịch.
+- Bộ nhớ đệm bản dịch 3.000 dòng, giữ khi đổi app (chỉ trong bộ nhớ, không ghi xuống máy).
+
+### 16.4 Tốc độ
+- Ghi log thời gian (không ghi chữ): "scan … ms after the page: tree … (letters N in … ms), shot, shown, pictures"
+  và "shown X of Y lines … ms after the page".
+- Đã đổi: chữ app tự báo vẽ trước, chữ trong ảnh vẽ sau; chụp màn hình song song với lúc hỏi vị trí chữ (chỉ sau khi
+  biết màn không nhạy cảm); quét 150 ms sau khi mở trang (trước 250) và chờ cửa sổ hết trượt bằng cách đọc lại khung
+  mỗi 50 ms (không tốn lượt chụp màn hình, Android giới hạn 1 lần mỗi 333 ms); nạp sẵn bộ dịch và bộ đọc chữ trong
+  ảnh khi bật; chờ sau khi cuộn 400 → 300 ms (Cân bằng), 350 → 250 ms (Nhanh).
+- Số đo trên máy ảo (từ sự kiện mở trang đến lúc có chữ): tốt nhất 0,45 đến 0,75 giây, xấu 1,1 đến 2 giây. **Máy ảo
+  thiếu RAM (4 GB, còn khoảng 400 MB, đã dùng swap), cùng một màn dao động gấp 3 lần: không đủ tin để nói các thay
+  đổi tốc độ nhanh hơn bao nhiêu.** Cần đo trên điện thoại thật.
+- RAM của MSTrans khi dịch: PSS 199 đến 218 MB (native heap 142 đến 151 MB, phần lớn là ML Kit).
+
+### 16.5 Tình huống mục 11 trên máy ảo (TestShop thay Taobao)
+Đạt: 1 tự dịch khi mở; 2 cuộn (ẩn khi cuộn, dịch lại khi dừng); 3 sang chi tiết không sót bản dịch cũ; 5, 6 thuật ngữ
+bắt buộc, Đăng xuất / Xóa tài khoản không lẫn; 8 sang app khác lớp phủ mất ngay; 9 bàn phím (ẩn khi mở, dịch lại khi
+đóng); 10 khoá và mở khoá; 11 mất mạng vẫn dịch; 13 xoay; 14 thu hồi và cấp lại quyền; 16 số, ¥, %, mã giữ nguyên;
+17 chạm xuyên lớp phủ; 19 ô mật khẩu và FLAG_SECURE không dịch.
+Chưa kiểm: 4 trên Taobao thật; 7 (1688 chưa cài); 12 tắt/bật lại từ nút nổi; 15 chạy lâu 30 phút; 18 bàn phím
+MSTrans; 20 pin. Chưa thử điện thoại thật, chưa thử Taobao thật.
+
+### 16.6 Biết mà chưa sửa
+- Dịch ngoại tuyến còn sai câu mô tả và tên thương hiệu (ví dụ "机乐堂" ra "Máy âm nhạc hội trường", "控温系统" ra
+  "Hệ thống thắt chặt"); chế độ AI sửa được nhưng cần key OpenAI.
+- Chip viền cam hẹp: bản dịch dài bị cắt "…".
+- Lint: vẫn 1 lỗi cũ (`MissingPermission` ở `AndroidAudio.kt`) và 13 cảnh báo như mốc 1.6.0; không có cái mới.
+
+### 16.7 Máy ảo
+`mstrans34` (serial `emulator-5554`), Trợ năng MSTrans đang bật, TestShop đã chọn trong "Ứng dụng được dịch",
+"Tự động dịch màn hình" bật. Đang cài bản `MSTRANS_ABIS=arm64-v8a,x86_64` cùng mã với APK đã gửi. Build TestShop:
+`MSTRANS_TESTSHOP=1`, màn `--es screen taobao` là màn giống Taobao.
