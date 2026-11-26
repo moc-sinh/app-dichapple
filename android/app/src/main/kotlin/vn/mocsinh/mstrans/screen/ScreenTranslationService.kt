@@ -63,6 +63,8 @@ import vn.mocsinh.mstrans.core.screen.TextGeometry
 import vn.mocsinh.mstrans.core.screen.TextLines
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
 /**
@@ -87,7 +89,24 @@ class ScreenTranslationService : AccessibilityService() {
     private var button: FloatingButton? = null
     @Volatile private var engines: MlKitEngines? = null
     /** What was translated stays in memory while the service runs: coming back to a page draws at once. */
-    private val translator = ScreenTranslator(engine = TextEngine { text -> engines?.engine?.translate(text) }, cacheSize = 3_000)
+    /** The offline translator's calls, for the log: how many, how long in all, the longest. */
+    private val engineCalls = AtomicInteger()
+    private val engineMs = AtomicLong()
+    private val engineLongest = AtomicLong()
+    private val translator = ScreenTranslator(
+        engine = TextEngine { text ->
+            val asked = SystemClock.elapsedRealtime()
+            try {
+                engines?.engine?.translate(text)
+            } finally {
+                val took = SystemClock.elapsedRealtime() - asked
+                engineCalls.incrementAndGet()
+                engineMs.addAndGet(took)
+                engineLongest.accumulateAndGet(took) { a, b -> maxOf(a, b) }
+            }
+        },
+        cacheSize = 3_000,
+    )
     @Volatile private var ai: ScreenAi? = null
     private var aiKey: String? = null
     private var glossary: String? = null
@@ -520,7 +539,11 @@ class ScreenTranslationService : AccessibilityService() {
         // A screenshot, for the colours of text not seen before and for text in pictures. What was
         // read in pictures before stays until they are read again, unless the page is a new one or
         // was scrolled: then it is somewhere else, or gone.
-        if (imagesNow) imageText = emptyList()
+        if (imagesNow) {
+            // ...and read again even if the screen looks as before.
+            imageText = emptyList()
+            lastFrame = null
+        }
         val known = ScreenTextMerger.merge(nodes, imageText, windowBox, excluded, tree.others)
         val unseen = synchronized(looks) { known.any { line -> (line.geometry ?: inked[line.bounds])?.let { Place(it) !in looks } ?: true } }
         var shot: ScreenCapture.Shot.Image? = null
@@ -572,9 +595,10 @@ class ScreenTranslationService : AccessibilityService() {
                 val frame = FrameSignature.of(bitmap.width, bitmap.height) { x, y -> bitmap.getPixel(x, y) }
                 if (frame.differs(lastFrame)) {
                     pictures = ml.read(bitmap, shot.left, shot.top)
+                    // Read for a page that is gone: not kept for the next one.
+                    if (!controller.isCurrent(generation)) return 0
                     imageText = pictures
                     lastFrame = frame
-                    if (!controller.isCurrent(generation)) return 0
                     stale = show(generation, ScreenTextMerger.merge(nodes, pictures, windowBox, excluded, tree.others), grid, windowBox)
                 }
                 lastImageAt = readAt
@@ -712,16 +736,18 @@ class ScreenTranslationService : AccessibilityService() {
 
     /** The screenshot shows the app's text where the app says it is (most of a dozen lines asked). */
     private fun agrees(grid: PixelGrid, lines: List<ScreenText>, window: Box): Boolean {
+        // Lines from top to bottom of the page: a part of it still moving (the top seldom does) is seen.
+        val exact = lines.filter { !it.fromImage && it.geometry?.lines?.size == 1 }.sortedBy { it.geometry!!.box.top }
+        val step = maxOf(1, exact.size / AGREE_LINES)
         var asked = 0
         var yes = 0
-        for (line in lines) {
-            val geometry = line.geometry?.takeIf { !line.fromImage && it.lines.size == 1 } ?: continue
+        for (i in exact.indices step step) {
+            val geometry = exact[i].geometry!!
             val style = LineStyles.of(grid, geometry.box, window)?.takeIf { it.plain } ?: continue
             asked++
             if (style.agrees(geometry.box, geometry.sizePx)) yes++
-            if (asked == 12) break
         }
-        return asked < 3 || yes * 10 >= asked * 7
+        return asked < 3 || yes * 10 >= asked * 8
     }
 
     private fun grid(shot: ScreenCapture.Shot.Image): PixelGrid {
@@ -731,14 +757,20 @@ class ScreenTranslationService : AccessibilityService() {
         return PixelGrid(bitmap.width, bitmap.height, pixels, shot.left, shot.top)
     }
 
-    /** The app's own text painted over with the colour behind it, before pictures are read. */
+    /**
+     * The app's own text painted over with the colour behind it, before pictures are read (or the
+     * reader of pictures reads it too, and it is drawn twice). The colours are those `show` just
+     * read, kept by place: an event clearing the page meanwhile does not undo this.
+     */
     private fun paintOut(bitmap: Bitmap, shot: ScreenCapture.Shot.Image, lines: List<ScreenText>) {
-        val shown = page?.looks ?: return
         val canvas = Canvas(bitmap)
         val paint = Paint()
         for (line in lines) {
-            if (line.fromImage || line.geometry == null) continue
-            val look = shown[line]?.takeIf { it.style.plain } ?: continue
+            if (line.fromImage) continue
+            val look = synchronized(looks) {
+                val geometry = line.geometry ?: inked[line.bounds] ?: return@synchronized null
+                looks[Place(geometry)]
+            }?.takeIf { it.style.plain } ?: continue
             paint.color = look.style.background
             for (box in look.geometry.lines) {
                 canvas.drawRect(box.left - shot.left - 2f, (box.top - shot.top).toFloat(), box.right - shot.left + 2f, (box.bottom - shot.top).toFloat(), paint)
@@ -853,10 +885,18 @@ class ScreenTranslationService : AccessibilityService() {
                     if (news.getAndSet(false)) render()
                 }
             }
+            val began = SystemClock.elapsedRealtime()
+            val calls = engineCalls.get()
+            val spent = engineMs.get()
+            engineLongest.set(0)
+            val missed = AtomicInteger()
             try {
                 val error = translator.translateAll(texts, ai) { text, result ->
                     translating.remove(text)
-                    if (result == null) unknown.add(text) else news.set(true)
+                    if (result == null) {
+                        unknown.add(text)
+                        missed.incrementAndGet()
+                    } else news.set(true)
                 }
                 if (error != null) ScreenState.error(error)
             } finally {
@@ -864,6 +904,9 @@ class ScreenTranslationService : AccessibilityService() {
                 translating.removeAll(texts.toSet())
             }
             render()
+            val done = SystemClock.elapsedRealtime()
+            Log.d(TAG, "translated ${texts.size - missed.get()} of ${texts.size} lines in ${done - began} ms: engine ${engineCalls.get() - calls} calls, " +
+                "${engineMs.get() - spent} ms in all, longest ${engineLongest.get()} ms; ${done - pageAt} ms after the page")
         }
     }
 
@@ -964,6 +1007,8 @@ class ScreenTranslationService : AccessibilityService() {
         private const val MAX_DEPTH = 60
         private const val MAX_WAIT_MS = 1_500L
         private const val MAX_LETTERS = 2_000
+        /** About this many of the app's lines, spread over the page, tell whether a screenshot shows it where the app says. */
+        private const val AGREE_LINES = 12
         /** A keyboard seen up is looked for again this long after (long enough for it to slide out). */
         private const val KEYBOARD_CHECK_MS = 400L
         /** A window sliding into place is looked at again this often, for this long at most. */

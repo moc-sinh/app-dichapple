@@ -83,6 +83,45 @@ class ScreenQualityTest {
     }
 
     @Test
+    fun `chips of a shop's page with an arrow are known, the arrow kept`() {
+        val dictionary = CommerceDictionary()
+        assertEquals("400+ người đã xem trong 7 ngày >", dictionary.lookup("近7天400+人逛过 >"))
+        assertEquals("Cửa hàng bán hơn 1 vạn sản phẩm/năm >", dictionary.lookup("店铺年销售超1万件 >"))
+        assertEquals("Hơn 200 người thêm vào giỏ ›", dictionary.lookup("超200人加购 ›"))
+        assertNull(dictionary.lookup(">"))
+    }
+
+    @Test
+    fun `a line choosing a colour and a size needs no translator`() = runBlocking {
+        val engine = FakeEngine(emptyMap())
+        val translator = ScreenTranslator(engine = engine)
+        assertEquals("Quy cách: XL / Đỏ", translator.translate("规格：XL / 红色")?.text)
+        assertEquals("Màu sắc: Đen", translator.translate("颜色：黑色")?.text)
+        assertEquals("Xanh dương", translator.quick("蓝色")?.text)
+        assertTrue(engine.calls.isEmpty())
+    }
+
+    @Test
+    fun `the pieces of a line are translated side by side`() = runBlocking {
+        // The whole line comes back without its numbers: not trusted, so it goes piece by piece.
+        val running = java.util.concurrent.atomic.AtomicInteger()
+        var most = 0
+        val engine = object : TextEngine {
+            override suspend fun translate(text: String): String {
+                val now = running.incrementAndGet()
+                synchronized(this) { most = maxOf(most, now) }
+                kotlinx.coroutines.delay(40)
+                running.decrementAndGet()
+                return if (text.length > 4) "Cả dòng không có số" else "Mảnh"
+            }
+        }
+        val translator = ScreenTranslator(engine = engine)
+        val result = translator.translate("甲乙1丙丁2戊己3庚辛")
+        assertEquals("Mảnh 1 Mảnh 2 Mảnh 3 Mảnh", result?.text)
+        assertEquals(2, most)
+    }
+
+    @Test
     fun `a narrow place gets the short word`() {
         val translator = ScreenTranslator()
         assertEquals("CSKH", translator.shorter("客服"))

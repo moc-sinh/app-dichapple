@@ -271,23 +271,26 @@ class ScreenTranslator(
         return !dangerous(source, translation)
     }
 
-    /** Each Chinese piece alone, the rest (numbers, codes, symbols) as written. */
+    /** Each Chinese piece alone (side by side), the rest (numbers, codes, symbols) as written. */
     private suspend fun inPieces(simplified: String): String? {
         val runs = ChineseText.runs(simplified)
         if (runs.count { it.second } == runs.size) return null
+        val done = coroutineScope {
+            runs.map { (piece, han) ->
+                async {
+                    if (!han) null else quick(piece)?.text ?: run {
+                        val (replaced, used) = substitute(piece)
+                        if (!ChineseText.hasHan(replaced)) replaced.replace(MARK.toString(), "")
+                        else ask(replaced)?.takeIf { trusted(piece, it, used) }
+                    }
+                }
+            }.awaitAll()
+        }
         var translated = 0
         val out = StringBuilder()
-        for ((piece, han) in runs) {
-            if (!han) {
-                out.append(piece)
-                continue
-            }
-            val known = quick(piece)?.text ?: run {
-                val (replaced, used) = substitute(piece)
-                if (!ChineseText.hasHan(replaced)) replaced.replace(MARK.toString(), "")
-                else ask(replaced)?.takeIf { trusted(piece, it, used) }
-            }
-            if (known == null) out.append(piece) else {
+        for ((i, run) in runs.withIndex()) {
+            val known = done[i]
+            if (known == null) out.append(run.first) else {
                 translated++
                 out.append(MARK).append(known).append(MARK)
             }

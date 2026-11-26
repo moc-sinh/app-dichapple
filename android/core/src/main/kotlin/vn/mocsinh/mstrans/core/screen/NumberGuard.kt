@@ -36,12 +36,36 @@ object NumberGuard {
         }
     }
 
-    /** Every token of `source` is in `translation`, as many times, not inside a longer number. */
+    /**
+     * Every token of `source` is in `translation`, as many times, not inside a longer number. A code
+     * may come back in other capitals ("ProMax", "Promax"); a number of 万 (ten thousands) may come
+     * back written out ("1万" as "10.000").
+     */
     fun kept(source: String, translation: String): Boolean {
         val target = normalize(translation)
-        return tokens(source).groupingBy { it }.eachCount().all { (token, count) -> occurrences(target, token) >= count }
+        val written = writtenOut(normalize(source))
+        return tokens(source).groupingBy { it }.eachCount().all { (token, count) ->
+            (listOf(token) + written[token].orEmpty()).sumOf { occurrences(target, it) } >= count
+        }
     }
 
+    private val tenThousands = Regex("(?<![0-9.,])(\\d+(?:\\.\\d+)?)万")
+
+    /** A number before 万, with the ways the same value is written out: 10000, 10.000, 10,000. */
+    private fun writtenOut(source: String): Map<String, List<String>> {
+        val out = HashMap<String, List<String>>()
+        for (match in tenThousands.findAll(source)) {
+            val value = java.math.BigDecimal(match.groupValues[1]).multiply(java.math.BigDecimal(10_000)).stripTrailingZeros()
+            if (value.scale() > 0) continue
+            val plain = value.toBigInteger().toString()
+            val grouped = plain.reversed().chunked(3).joinToString(".").reversed()
+            out[match.groupValues[1]] = listOf(plain, grouped, grouped.replace('.', ','))
+        }
+        return out
+    }
+
+    /** Not part of a longer number either: "1" is not in "1.000". */
     private fun occurrences(text: String, token: String): Int =
-        Regex("(?<![0-9A-Za-z])" + Regex.escape(token) + "(?![0-9A-Za-z])").findAll(text).count()
+        Regex("(?<![0-9A-Za-z])(?<![0-9][.,])" + Regex.escape(token) + "(?![0-9A-Za-z])(?![.,][0-9])", RegexOption.IGNORE_CASE)
+            .findAll(text).count()
 }

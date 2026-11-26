@@ -130,4 +130,23 @@ class NumberGuardTest {
         assertFalse(NumberGuard.kept("2件 2件", "2 cái"))
         assertTrue(NumberGuard.kept("价格", "Giá"))
     }
+
+    @Test
+    fun aCodeWrittenInOtherCapitalsIsTheSameCode() {
+        // Seen on the emulator: a good title thrown away for "ProMax" written "Promax".
+        assertTrue(NumberGuard.kept("适用iPhone18ProMax手机", "Áp dụng điện thoại iPhone18Promax"))
+        assertTrue(NumberGuard.kept("尺码XL", "Cỡ xl"))
+        assertFalse(NumberGuard.kept("型号A12-B", "Mẫu A12-C"))
+    }
+
+    @Test
+    fun tenThousandsMayBeWrittenOut() {
+        assertTrue(NumberGuard.kept("店铺年销售超1万件", "Cửa hàng bán trên 10.000 sản phẩm"))
+        assertTrue(NumberGuard.kept("1.2万+人付款", "Hơn 12,000+ người đã mua"))
+        assertTrue(NumberGuard.kept("超3万", "hơn 30000"))
+        assertTrue(NumberGuard.kept("超1万件", "trên 1 vạn"))
+        assertFalse(NumberGuard.kept("超1万件", "trên 1.000"))
+        // A "+" is kept: "400+" is not "400".
+        assertFalse(NumberGuard.kept("近7天400+人逛过", "Gần 7 ngày 400 người đã qua"))
+    }
 }

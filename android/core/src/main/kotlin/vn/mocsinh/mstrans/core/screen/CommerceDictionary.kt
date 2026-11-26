@@ -23,7 +23,16 @@ class CommerceDictionary(
     fun lookup(text: String): String? {
         val key = ChineseText.key(text)
         if (key.isEmpty()) return null
-        return terms[key] ?: labels[key] ?: pattern(key)
+        return terms[key] ?: labels[key] ?: pattern(key) ?: withArrow(key)
+    }
+
+    /** A chip or a row that ends with an arrow ("超200人加购 >"): what is before it, the arrow kept. */
+    private fun withArrow(key: String): String? {
+        val arrow = key.takeLastWhile { it in ARROWS }
+        if (arrow.isEmpty() || arrow.length == key.length) return null
+        val body = key.dropLast(arrow.length)
+        val done = terms[body] ?: labels[body] ?: pattern(body) ?: return null
+        return "$done $arrow"
     }
 
     /** A shorter word for a place too narrow for the usual one (a label under an icon); null: none. */
@@ -108,6 +117,11 @@ class CommerceDictionary(
             "全场包邮" to "Miễn phí vận chuyển toàn shop", "已享包邮" to "Đã được miễn phí vận chuyển", "到手价" to "Giá cuối",
             "限时特价" to "Giá ưu đãi có hạn", "新品上市" to "Hàng mới ra mắt", "买二送一" to "Mua 2 tặng 1", "买一送一" to "Mua 1 tặng 1",
             "官方物流" to "Vận chuyển chính hãng",
+            // Colours (the rows choosing a colour and a size need no translator then)
+            "红色" to "Đỏ", "黑色" to "Đen", "白色" to "Trắng", "蓝色" to "Xanh dương", "绿色" to "Xanh lá", "黄色" to "Vàng",
+            "粉色" to "Hồng", "灰色" to "Xám", "紫色" to "Tím", "橙色" to "Cam", "棕色" to "Nâu", "米色" to "Be", "卡其色" to "Kaki",
+            "银色" to "Bạc", "金色" to "Vàng kim", "藏青色" to "Xanh than", "酒红色" to "Đỏ rượu vang", "天蓝色" to "Xanh da trời",
+            "颜色分类" to "Phân loại màu",
             // Names of the shops themselves. Names of goods are left to the translator: tried on a
             // phone, the more words are put into a product's title for it, the more of them it loses.
             "淘宝" to "Taobao", "天猫" to "Tmall", "京东" to "JD", "拼多多" to "Pinduoduo",
@@ -132,6 +146,8 @@ class CommerceDictionary(
             "加入购物车" to "Thêm vào giỏ", "我的淘宝" to "Của tôi",
         )
 
+        private const val ARROWS = ">›»"
+
         /** A number as written: sign, currency, digits with separators, 万, "+" or "%". */
         private const val N = "([-−]?[¥￥$]?\\d+(?:[.,]\\d+)*(?:万|千)?[+%]?)"
 
@@ -152,7 +168,9 @@ class CommerceDictionary(
             "预计发货后(\\d+)-(\\d+)日送达" to "Dự kiến giao sau {1}-{2} ngày kể từ khi gửi",
             "超${N}人加购" to "Hơn {1} người thêm vào giỏ",
             "${N}人加购" to "{1} người thêm vào giỏ",
+            "近(\\d+)天${N}人逛过" to "{2} người đã xem trong {1} ngày",
             "${N}人逛过" to "{1} người đã xem",
+            "店铺年销(?:售|量)?超${N}(?:件)?" to "Cửa hàng bán hơn {1} sản phẩm/năm",
             "满${N}(?:元)?包邮" to "Đủ {1} miễn phí vận chuyển",
             "(?:超级)?立减${N}" to "Giảm ngay {1}",
             "官方立减${N}" to "Giảm chính hãng {1}",
