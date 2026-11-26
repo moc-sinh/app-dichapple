@@ -590,3 +590,26 @@ MSTrans; 20 pin. Chưa thử điện thoại thật, chưa thử Taobao thật.
 `mstrans34` (serial `emulator-5554`), Trợ năng MSTrans đang bật, TestShop đã chọn trong "Ứng dụng được dịch",
 "Tự động dịch màn hình" bật. Đang cài bản `MSTRANS_ABIS=arm64-v8a,x86_64` cùng mã với APK đã gửi. Build TestShop:
 `MSTRANS_TESTSHOP=1`, màn `--es screen taobao` là màn giống Taobao.
+
+### 16.8 Tăng tốc khâu dịch (commit `e363f90`, chưa push)
+Log mới (chỉ số đo): "translated X of Y lines in … ms: engine N calls, … ms in all, longest … ms; … ms after the page".
+Đo với bộ nhớ đệm trống (tắt rồi bật lại dịch vụ trước mỗi lần), máy ảo:
+
+| Màn | Trước | Sau |
+|---|---|---|
+| Taobao | 20 lần gọi bộ dịch cho 10 dòng | 7 lần cho 8 dòng (2 chip giờ có mẫu câu) |
+| Chi tiết | 12 lần cho 8 dòng | 10 lần cho 8 dòng |
+
+- Thử dịch 4 dòng cùng lúc (thay 2): thời gian thực không đổi, mỗi lần gọi chậm gấp đôi; ML Kit chỉ chạy song song
+  được khoảng 2 việc. Giữ 2.
+- `NumberGuard`: mã chữ không phân biệt hoa thường ("ProMax" = "Promax"); số 万 viết ra được ("1万" = "10.000");
+  "1" không còn được coi là có trong "1.000"; dấu "+" vẫn bắt buộc. Trước đây tên sản phẩm dài bị loại oan rồi dịch
+  lại 11 mảnh nối tiếp, ra câu kém hơn.
+- Dịch từng mảnh: các mảnh chạy song song (trước lần lượt).
+- Từ điển: mẫu "近7天400+人逛过", "店铺年销售超1万件"; chip có mũi tên ">" giữ mũi tên; tên màu (红色, 黑色…).
+- Lỗi tìm được khi đo: chữ của app bị OCR đọc lại và vẽ chồng (tô xoá chữ app trước khi đọc ảnh dựa vào "trang hiện
+  tại", có lúc đã bị xoá giữa chừng); kết quả đọc ảnh của lần quét lỗi thời vẫn được giữ; trang mới mà ảnh chụp giống
+  lần trước thì không đọc ảnh lại nên mất chữ trong ảnh; phép kiểm ảnh chụp chỉ xem 12 dòng đầu trang nên không thấy
+  phần dưới còn xê dịch. Đã sửa cả bốn; màn taobao 6/6 lần đúng, các màn khác xem lại không hỏng.
+- APK gửi Minh lần ba: 27.168.507 byte, SHA-256 `71FFF241D996B6380722D8F11B2644B0A944279591C25C53C3F582A024F6CD8F`.
+- Thời gian thực trên máy ảo vẫn dao động mạnh; chưa đo trên điện thoại thật.
