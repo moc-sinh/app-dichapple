@@ -5,6 +5,7 @@ import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -41,6 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import vn.mocsinh.mstrans.AppLock
 import vn.mocsinh.mstrans.MSTransApp
 import vn.mocsinh.mstrans.core.Settings
 import vn.mocsinh.mstrans.core.TranslationModel
@@ -142,6 +144,10 @@ class ScreenTranslationService : AccessibilityService() {
     /** The app in front, for the floating button (known while paused too). */
     private var foreground: String? = null
     private var imePackages = emptySet<String>()
+    /** Home screens (see `launchers`). */
+    private var homes = emptySet<String>()
+    /** A chosen app was in front since the permission was given (see `leaving`). */
+    private var usedChosen = false
     private var receiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
 
@@ -219,7 +225,59 @@ class ScreenTranslationService : AccessibilityService() {
         listenToScreen()
         connected = true
         ScreenState.service = this
+        homes = launchers()
+        // The permission given (in Android's settings, by the shortcut, from the tile) is the switch:
+        // given, it translates.
+        settings.enabled = true
+        settings.paused = false
+        ScreenState.tileChanged(this)
         refresh()
+    }
+
+    /**
+     * Off for good: translating stops and the accessibility permission is taken back by MSTrans
+     * itself, so no other app sees an accessibility service running. On again from the tile, the
+     * settings page, or Android's accessibility shortcut.
+     */
+    fun turnOff() {
+        main.post {
+            stopAll()
+            runCatching { disableSelf() }
+            ScreenState.status = "Đã tắt hẳn quyền Trợ năng"
+            ScreenState.changed()
+            ScreenState.tileChanged(this)
+        }
+    }
+
+    /** Home screens: going home, or to the list of recent apps, is not leaving the chosen apps. */
+    private fun launchers(): Set<String> = runCatching {
+        packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)
+            .map { it.activityInfo.packageName }.toSet()
+    }.getOrDefault(emptySet())
+
+    /**
+     * With "Tự tắt khi rời app mua sắm": once a chosen app was used, another app coming to the
+     * front turns the permission off. Not for what only passes over (the system's bars and dialogs,
+     * keyboards, home, MSTrans itself, Android's settings where it was just turned on).
+     */
+    private fun leaving(pkg: String) {
+        if (settings.isSelected(pkg)) {
+            usedChosen = true
+            return
+        }
+        if (!settings.autoOff || !usedChosen) return
+        if (pkg == packageName || pkg in imePackages || pkg in homes || pkg in PASSING) return
+        // Only an app that really has the screen, and still has it a moment later: a window of
+        // the system passing over (Digital Wellbeing, a phone maker's pop-up) is not leaving.
+        main.removeCallbacks(leftCheck)
+        leftTo = pkg
+        main.postDelayed(leftCheck, LEAVE_CHECK_MS)
+    }
+
+    private var leftTo: String? = null
+    private val leftCheck = Runnable {
+        val pkg = leftTo ?: return@Runnable
+        if (connected && settings.autoOff && foreground == pkg && !settings.isSelected(pkg) && inFront() == pkg) turnOff()
     }
 
     /** Settings changed (from the settings page or the floating button): apply them now. */
@@ -234,7 +292,8 @@ class ScreenTranslationService : AccessibilityService() {
         updateAi()
         unknown.clear()
         imePackages = getSystemService(InputMethodManager::class.java)?.enabledInputMethodList?.map { it.packageName }?.toSet() ?: emptySet()
-        val run = settings.enabled && !settings.paused
+        // Not activated: nothing is read or translated.
+        val run = settings.enabled && !settings.paused && AppLock.active(this)
         if (run && !running) {
             running = true
             val ml = engines ?: MlKitEngines().also { engines = it }
@@ -282,13 +341,13 @@ class ScreenTranslationService : AccessibilityService() {
 
     private fun updateAi() {
         val key = appSettings.apiKey?.takeIf { settings.mode == ScreenSettings.Mode.AI }
-        val tag = key?.let { "$it/${settings.aiLimit}" }
+        val tag = key?.let { "$it/${settings.aiLimit}/${settings.aiBest}" }
         if (tag == aiKey) return
         // What the other way of translating made is made again.
         translator.clearCache()
         aiKey = tag
         ai = key?.let {
-            val translator = Translator(it, TranslationModel.LUNA, appSettings)
+            val translator = Translator(it, if (settings.aiBest) TranslationModel.SOL else TranslationModel.LUNA, appSettings)
             ScreenAi(write = { instructions, input -> translator.write(instructions, input).first }, limitPer10Minutes = settings.aiLimit)
         }
     }
@@ -308,6 +367,7 @@ class ScreenTranslationService : AccessibilityService() {
             if (!settings.isSelected(pkg) && settings.isSelected(foreground) && inFront() == foreground) return
             foreground = pkg
             updateButton()
+            leaving(pkg)
         }
         if (!running) return
         if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
@@ -659,7 +719,7 @@ class ScreenTranslationService : AccessibilityService() {
 
         // A new page or a scroll needs a screenshot anyway (pictures are read again): it is taken
         // while the app is asked where its letters are. Only now, the screen known not to be sensitive.
-        val early = if (picturesDue) CoroutineScope(coroutineContext).async { capture.take(window.id, windowBox.left, windowBox.top, overlay) } else null
+        val early = if (picturesDue) CoroutineScope(coroutineContext).async { capture.take(window.id, windowBox, screen(), overlay) } else null
         val nodes = withLetters(tree)
         val under = HashSet<Pair<String, Box>>()
         for ((i, node) in nodes.withIndex()) if (tree.under[i]) under.add(node.text to node.bounds)
@@ -688,7 +748,7 @@ class ScreenTranslationService : AccessibilityService() {
         var shot: ScreenCapture.Shot.Image? = null
         var grid: PixelGrid? = null
         if (Build.VERSION.SDK_INT >= 30 && (unseen || picturesDue)) {
-            when (val taken = early?.await() ?: capture.take(window.id, windowBox.left, windowBox.top, overlay)) {
+            when (val taken = early?.await() ?: capture.take(window.id, windowBox, screen(), overlay)) {
                 ScreenCapture.Shot.Secure -> {
                     secureWindow = window.id
                     pause(generation, SensitiveScreen.Reason.SECURE_WINDOW)
@@ -739,7 +799,9 @@ class ScreenTranslationService : AccessibilityService() {
                 paintOut(bitmap, shot, known)
                 val frame = FrameSignature.of(bitmap.width, bitmap.height) { x, y -> bitmap.getPixel(x, y) }
                 if (frame.differs(lastFrame)) {
-                    pictures = ml.read(bitmap, shot.left, shot.top)
+                    // A letter misread in a known word is put right; a piece known whole keeps its numbers in it.
+                    pictures = ml.read(bitmap, shot.left, shot.top) { piece -> translator.quick(translator.corrected(piece)) != null }
+                        .map { line -> translator.corrected(line.text).let { if (it == line.text) line else line.copy(text = it) } }
                     // Read for a page that is gone: not kept for the next one.
                     if (!controller.isCurrent(generation)) return 0
                     imageText = pictures
@@ -1090,8 +1152,12 @@ class ScreenTranslationService : AccessibilityService() {
         scope.launch(composing) {
             val now = page ?: return@launch
             if (!controller.isCurrent(now.generation)) return@launch
+            // The made-up test shop only (never a real app's text): what was read and what it became.
+            val trying = foreground == TEST_SHOP
             val entries = now.lines.mapNotNull { line ->
-                val known = translator.quick(line.text)?.text ?: return@mapNotNull null
+                val known = translator.quick(line.text)?.text
+                if (trying) Log.d(TEST_TAG, "${if (line.fromImage) "picture" else "app"} [${line.text}] -> [${known ?: "…"}]")
+                if (known == null) return@mapNotNull null
                 // Nothing is drawn where the "translation" is the Chinese itself (a glossary entry kept as written).
                 if (known == line.text || ChineseText.hasHan(known)) return@mapNotNull null
                 OverlayComposer.Entry(now.looks.getValue(line), known, translator.shorter(line.text), picture = line.fromImage)
@@ -1132,7 +1198,7 @@ class ScreenTranslationService : AccessibilityService() {
             engineLongest.set(0)
             val missed = AtomicInteger()
             try {
-                val error = translator.translateAll(texts, ai) { text, result ->
+                val error = translator.translateAll(texts, ai, wanted) { text, result ->
                     translating.remove(text)
                     if (result == null) {
                         unknown.add(text)
@@ -1215,6 +1281,7 @@ class ScreenTranslationService : AccessibilityService() {
         running = false
         main.removeCallbacks(scanNow)
         main.removeCallbacks(keyboardGone)
+        main.removeCallbacks(leftCheck)
         scope.cancel()
         readerThreads.shutdown()
         lookups.shutdown()
@@ -1232,6 +1299,7 @@ class ScreenTranslationService : AccessibilityService() {
         if (ScreenState.service === this) ScreenState.service = null
         ScreenState.status = "Chưa có quyền Trợ năng"
         ScreenState.changed()
+        ScreenState.tileChanged(this)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -1246,6 +1314,19 @@ class ScreenTranslationService : AccessibilityService() {
 
     companion object {
         const val TAG = "MSTransScreen"
+
+        /** The made-up shop of `android/testshop`: only its text is ever written to the log, to check translations. */
+        private const val TEST_SHOP = "vn.mocsinh.testshop"
+        private const val TEST_TAG = "MSTransTest"
+
+        /** How long another app must keep the screen before "Tự tắt khi rời app mua sắm" turns the permission off. */
+        private const val LEAVE_CHECK_MS = 1_500L
+
+        /** Windows that only pass over the app in front (Android's own). */
+        private val PASSING = setOf(
+            "com.android.systemui", "android", "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+            "com.android.settings", "com.android.intentresolver",
+        )
         private const val MAX_NODES = 1_500
         private const val MAX_DEPTH = 60
         private const val MAX_WAIT_MS = 1_500L

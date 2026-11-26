@@ -6,7 +6,7 @@ import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
-import android.view.ViewTreeObserver
+import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import kotlinx.coroutines.CancellationException
@@ -15,36 +15,40 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import vn.mocsinh.mstrans.MainActivity
 import vn.mocsinh.mstrans.R
+import vn.mocsinh.mstrans.Screen
 import vn.mocsinh.mstrans.core.screen.ScreenSettings
 import vn.mocsinh.mstrans.core.screen.Speed
 import vn.mocsinh.mstrans.screen.MlKitEngines
 import vn.mocsinh.mstrans.screen.ScreenState
 
-/** Cài đặt › Dịch màn hình: the switch, the permission, the language pack, the apps, the options. */
-class ScreenTranslationPage(private val activity: MainActivity) {
+/** Tab Dịch Web (translating the screen of shopping apps): the switch, the permission, the language pack, the apps, the options. */
+class ScreenTranslationPage(private val activity: MainActivity) : Screen {
     private val settings = ScreenState.settings(activity)
     private val c = activity.colors
     private val scope = MainScope()
-    private lateinit var body: LinearLayout
+    private val body = activity.vertical().apply { setPadding(activity.dp(16), activity.dp(4), activity.dp(16), activity.dp(32)) }
+    private val scroll = ScrollView(activity).apply { addView(body) }
     private var downloading = false
     private var deleting = false
     private var modelError: String? = null
 
-    fun open() {
-        val focus = ViewTreeObserver.OnWindowFocusChangeListener { focused -> if (focused) build() }
-        lateinit var view: View
-        view = activity.page("Dịch màn hình", onClose = {
-            scope.cancel()
-            ScreenState.listener = null
-            runCatching { view.viewTreeObserver.removeOnWindowFocusChangeListener(focus) }
-        }) { body = this }
-        // Back from Android's settings (permission given): the page shows it.
-        view.viewTreeObserver.addOnWindowFocusChangeListener(focus)
+    override val view: View = activity.vertical().apply {
+        addView(activity.topBar("Dịch Web"), matchWidth())
+        addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+    }
+
+    /** The tab shows, or the app comes back (from Android's settings, the permission given): all read again. */
+    override fun shown() {
         ScreenState.listener = { build() }
-        activity.push(view)
         build()
         checkModel()
     }
+
+    override fun hidden() {
+        ScreenState.listener = null
+    }
+
+    override fun destroyed() = scope.cancel()
 
     private fun changed() {
         ScreenState.service?.refresh()
@@ -52,6 +56,8 @@ class ScreenTranslationPage(private val activity: MainActivity) {
     }
 
     private fun build() {
+        val y = scroll.scrollY
+        scroll.post { scroll.scrollTo(0, y) }
         body.removeAllViews()
         body.addView(mainSection())
         body.addView(permissionSection())
@@ -66,42 +72,79 @@ class ScreenTranslationPage(private val activity: MainActivity) {
 
     // Sections
 
+    /**
+     * One switch: on is the accessibility permission given (Android lets no app give it to itself:
+     * its own page opens, one switch there); off is MSTrans giving it back, so no other app sees an
+     * accessibility service running.
+     */
     private fun mainSection(): View {
-        val permitted = ScreenState.permitted(activity)
-        val footer = when {
-            !settings.enabled -> "Bật rồi mở Taobao như bình thường: chữ Trung tự hiện bản dịch tiếng Việt ngay trên màn hình, tự cập nhật khi cuộn " +
-                "hay đổi trang. Vẫn chạm, vuốt, bấm nút của Taobao như thường."
-            !permitted -> "Đã bật, nhưng còn thiếu quyền Trợ năng ở mục bên dưới."
-            settings.paused -> "Đang tạm dừng. Tắt “Tạm dừng” ở dưới hoặc giữ nút nổi để dịch tiếp."
-            else -> "Đang bật. Mở app đã chọn để thấy bản dịch."
+        val on = ScreenState.permitted(activity) && ScreenState.service != null
+        val footer = if (on) {
+            "Đang bật: mở Taobao (hay app đã chọn) là tự dịch. Tắt ở đây hoặc chạm ô “Dịch Web” trong bảng kéo xuống từ đỉnh màn hình: " +
+                "MSTrans tắt hẳn quyền Trợ năng, app ngân hàng và các app khác không còn thấy."
+        } else {
+            "Bật: Android mở danh sách Trợ năng, chạm “MSTrans · Dịch Web”, bật công tắc rồi quay lại. Lần sau bật nhanh bằng ô “Dịch Web” " +
+                "trong bảng kéo xuống từ đỉnh màn hình."
         }
-        return activity.section(null, footer, listOf(
-            activity.switchRow("Tự động dịch màn hình", settings.enabled) {
-                settings.enabled = it
-                if (it) settings.paused = false
-                changed()
-                if (it && !ScreenState.permitted(activity)) activity.toast("Cấp quyền Trợ năng ở mục bên dưới")
-            },
-        ))
+        val rows = ArrayList<View>()
+        rows.add(activity.switchRow("Dịch Web", on) { want ->
+            if (want) {
+                settings.enabled = true
+                settings.paused = false
+                runCatching { activity.startActivity(ScreenState.permissionPage(activity)) }.onFailure { activity.toast("Không mở được cài đặt Trợ năng") }
+            } else {
+                ScreenState.service?.turnOff()
+                activity.toast("Đã tắt hẳn quyền Trợ năng của MSTrans")
+            }
+            build()
+        })
+        rows.add(activity.switchRow("Tự tắt khi rời app mua sắm", settings.autoOff) {
+            settings.autoOff = it
+            build()
+        })
+        if (Build.VERSION.SDK_INT >= 33) {
+            rows.add(activity.row("Thêm ô “Dịch Web” vào bảng kéo xuống", null, c.green) { addTile() })
+        }
+        return activity.section(null, footer, rows)
     }
 
+    /** What else is needed, while it is off: Android 13+ blocks the switch of an app installed from a file. */
     private fun permissionSection(): View {
-        val permitted = ScreenState.permitted(activity)
         val rows = ArrayList<View>()
-        rows.add(step(permitted, if (permitted) "Đã cấp quyền Trợ năng" else "Chưa cấp quyền Trợ năng",
-            "Cài đặt điện thoại › Trợ năng (Hỗ trợ tiếp cận) › Ứng dụng đã cài đặt › MSTrans · Dịch màn hình › bật. MSTrans chỉ đọc chữ của các app " +
-                "bạn chọn ở dưới, không bấm hay gõ thay bạn, không đọc ô mật khẩu."))
-        rows.add(activity.row("Mở cài đặt Trợ năng", null, c.green) {
-            runCatching { activity.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { activity.toast("Không mở được cài đặt Trợ năng") }
-        })
-        if (!permitted && Build.VERSION.SDK_INT >= 33) {
+        rows.add(step(null, "Tự tắt khi rời app mua sắm",
+            if (settings.autoOff) "Đang bật: rời app đã chọn sang app khác (về màn hình chính thì không tính) là MSTrans tự tắt hẳn quyền. " +
+                "Quay lại mua hàng thì bật lại bằng ô “Dịch Web”." else "Đang tắt: quyền Trợ năng còn bật cho tới khi bạn tắt."))
+        if (!ScreenState.permitted(activity) && Build.VERSION.SDK_INT >= 33) {
             rows.add(step(null, "Nếu Android báo “Cài đặt bị hạn chế”",
-                "MSTrans được cài từ file APK nên Android 13 trở lên chặn bật Trợ năng lần đầu. Mở Thông tin ứng dụng › chạm ⋮ (góc trên) › " +
-                    "Cho phép cài đặt bị hạn chế (tên mục khác nhau tùy hãng), rồi quay lại bật Trợ năng."))
+                "MSTrans được cài từ file APK nên Android 13 trở lên chặn bật lần đầu. Mở Thông tin ứng dụng › chạm ⋮ (góc trên) › " +
+                    "Cho phép cài đặt bị hạn chế (tên mục khác nhau tùy hãng), rồi bật lại. Chỉ cần làm một lần."))
             rows.add(activity.row("Mở Thông tin ứng dụng", null, c.green) { Setup.openAppSettings(activity) })
         }
+        rows.add(step(null, "MSTrans đọc gì",
+            "Chỉ chữ của các app bạn chọn ở dưới, khi đang bật. Không bấm hay gõ thay bạn, không đọc ô mật khẩu, không dịch màn hình thanh toán."))
         return activity.section("Quyền", null, rows)
+    }
+
+    /** Android 13+: Android's own question "Add tile?", one tap. */
+    private fun addTile() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val bar = activity.getSystemService(android.app.StatusBarManager::class.java) ?: return
+        runCatching {
+            bar.requestAddTileService(
+                android.content.ComponentName(activity, vn.mocsinh.mstrans.screen.ScreenTileService::class.java),
+                activity.getString(R.string.screen_translation_tile),
+                android.graphics.drawable.Icon.createWithResource(activity, R.drawable.ic_tab_translate),
+                activity.mainExecutor,
+            ) { result ->
+                activity.toast(
+                    when (result) {
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "Đã thêm ô “Dịch Web”"
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "Ô “Dịch Web” đã có sẵn"
+                        else -> "Chưa thêm ô"
+                    },
+                )
+            }
+        }.onFailure { activity.toast("Kéo bảng xuống › chạm ✎ (sửa) › kéo ô “Dịch Web” lên") }
     }
 
     private fun modelSection(): View {
@@ -163,11 +206,14 @@ class ScreenTranslationPage(private val activity: MainActivity) {
     private fun modeSection(): View {
         val hasKey = activity.settings.apiKey != null
         val footer = if (settings.mode == ScreenSettings.Mode.AI) {
-            "AI nâng cao dùng key OpenAI ở tab Cài đặt (GPT-6 Luna): chỉ gửi chữ của các dòng từ điển chưa có, không gửi ảnh, tối đa " +
-                "${settings.aiLimit} lần gọi mỗi 10 phút (mỗi lần tối đa 40 dòng), ước tính dưới 0,001 USD mỗi lần. Vượt giới hạn hoặc mất mạng thì tự dịch ngoại tuyến." +
+            "AI nâng cao dịch sát nghĩa nhất, theo đúng ngành hàng đang xem (gửi kèm chữ khác trên cùng màn hình để AI hiểu mặt hàng). Dùng key " +
+                "OpenAI ở tab Cài đặt; chỉ gửi chữ của các dòng từ điển chưa có, không gửi ảnh; bản ngoại tuyến hiện trước, bản AI thay vào sau. " +
+                "Tối đa ${settings.aiLimit} lần gọi mỗi 10 phút, mỗi lần tối đa 40 dòng: Nhanh (GPT-6 Luna) ước tính dưới 0,001 USD một lần, " +
+                "Chuẩn nhất (GPT-6.1 Sol) khoảng 0,01 USD một lần. Vượt giới hạn hoặc mất mạng thì tự dịch ngoại tuyến." +
                 if (hasKey) "" else " Chưa có key OpenAI: đang dịch ngoại tuyến."
         } else {
-            "Ngoại tuyến: miễn phí, không gửi chữ nào ra mạng. Thuật ngữ ở tab Thuật ngữ được dùng trước tiên."
+            "Ngoại tuyến: miễn phí, không gửi chữ nào ra mạng. Thuật ngữ ở tab Thuật ngữ được dùng trước tiên, rồi từ điển mua sắm và ngành hàng " +
+                "(tên phân loại, màu, chất liệu, thông số dịch đúng từng từ). Câu mô tả dài do bộ dịch trên máy làm, kém hơn AI nâng cao."
         }
         val limits = listOf(10, 30, 60)
         val rows = ArrayList<View>()
@@ -176,6 +222,10 @@ class ScreenTranslationPage(private val activity: MainActivity) {
             changed()
         }))
         if (settings.mode == ScreenSettings.Mode.AI) {
+            rows.add(padded(Segmented(activity, listOf("Nhanh", "Chuẩn nhất"), if (settings.aiBest) 1 else 0) {
+                settings.aiBest = it == 1
+                changed()
+            }))
             rows.add(activity.row("Giới hạn AI", "${settings.aiLimit} lần / 10 phút") {
                 activity.choose("Giới hạn AI mỗi 10 phút", limits.map { "$it lần" }, limits.indexOf(settings.aiLimit).coerceAtLeast(0)) {
                     settings.aiLimit = limits[it]
@@ -227,7 +277,7 @@ class ScreenTranslationPage(private val activity: MainActivity) {
             "thanh toán). Nhận diện màn hình nhạy cảm bằng từ khóa chỉ là lớp bảo vệ thêm, không tuyệt đối. Android 8 đến 10 chỉ dịch chữ, " +
             "không dịch chữ trong ảnh.",
         listOf(
-            step(null, "1. Bật “Tự động dịch màn hình”", "Ở đầu trang này."),
+            step(null, "1. Bật “Dịch Web”", "Ở đầu trang này."),
             step(null, "2. Cấp quyền Trợ năng", "Mục Quyền ở trên. Android 13 trở lên có thể phải cho phép cài đặt bị hạn chế trước."),
             step(null, "3. Tải gói dịch", "Một lần, nên dùng Wi-Fi."),
             step(null, "4. Mở Taobao", "Dùng như bình thường. Muốn sửa cách dịch một từ: thêm ở tab Thuật ngữ, ví dụ 包邮 = Miễn phí ship."),

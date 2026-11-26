@@ -55,6 +55,12 @@ class ProcessTextActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Not activated yet: MSTrans opens on its activation screen instead.
+        if (!AppLock.active(this)) {
+            startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            finish()
+            return
+        }
         val source = (intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT) ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
             ?.toString()?.trim().orEmpty()
         val canReplace = intent.action == Intent.ACTION_PROCESS_TEXT &&

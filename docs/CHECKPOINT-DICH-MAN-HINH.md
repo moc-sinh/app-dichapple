@@ -700,3 +700,80 @@ thực tế còn nhiều bất cập". Xem clip không cần tải gì: Windows 
 `android/app/build/outputs/apk/release/MSTrans-1.7.0-15-ban4.apk`: 1.7.0 (15), chỉ ARM, 27.194.527 byte, SHA-256
 `B9F052C1C3AA0D11E9475DB22B969B7FE945E13F37BFB9E05DFC3540C81E3F27`, chứng thư `ff13e1b4…994a6eb9`. Máy ảo đang cài
 bản x86_64 trước đó vài phút (thiếu riêng dạng ngắn của "店铺年销售超1万件").
+
+## 18. Phiên 26–27/11/2026 (tối): ảnh Taobao thật, dịch miễn phí, nút bật/tắt, mã kích hoạt, Cài đặt
+
+Minh gửi hai ảnh bảng chọn phân loại Taobao (chế độ tối) chụp trên điện thoại: bản dịch **lệch xuống** đều một khoảng,
+chữ Trung lộ ra, mỗi dòng phân loại thành hai khối hai dòng, dịch sai. Minh dặn: **ưu tiên dịch ngoại tuyến miễn phí**
+(ChatGPT tốn phí, chỉ là tùy chọn), tối ưu giao diện bản dịch ở mọi màn; làm cổng bật/tắt dịch đơn giản, không ảnh
+hưởng quyền khi vào app khác; thiết kế lại Cài đặt; thêm mã kích hoạt app.
+
+### 18.1 Lệch vị trí (đã tái hiện và sửa)
+- Bảng chọn phân loại là **cửa sổ hộp thoại có bóng đổ**: Android chụp nó kèm viền bóng bốn phía (ảnh 1248×2060 cho cửa
+  sổ 1080×1892 trên máy ảo), nên mọi chữ đọc từ ảnh bị dời xuống và sang phải đúng bằng viền. `ShotOrigin` tính góc ảnh
+  theo kích thước ảnh thật (bằng cửa sổ / bằng màn hình / rộng hơn đều hai bên). Log: "window shot WxH for a window …".
+- TestShop có màn `--es screen sku` dựng giống ảnh của Minh (hộp thoại tối, chữ vẽ thẳng không có chữ trợ năng, địa chỉ giả).
+
+### 18.2 Chữ đọc từ ảnh (`PictureText.pieces`, `MlKitEngines.read`)
+- Ảnh **tối** (chế độ tối) được **đảo màu** trước khi đọc: trên máy ảo hết các lỗi 瑁→環, 请→靖.
+- Sửa một chữ đọc sai trong từ ≥ 3 chữ theo từ điển (`CommerceDictionary.correct`), chỉ khi cả dòng sau khi sửa là từ đã
+  biết (保温桶 không thành 保温杯). Từ 2 chữ không sửa (手? có thể là 手机/手环/手套).
+- Tách thêm: dấu "|" (kể cả bị đọc thành "1", cao bằng chữ nhỏ bên cạnh, mảnh); **giá ở cuối cụm** (¥…); sau "..." của
+  tên bị cắt; **đổi màu chữ** (tên trắng, giá xám/cam); tiếng Việt cạnh chữ Trung; **số kẹp giữa hai cụm chữ Trung** khi
+  cả cụm không phải câu đã biết (số giữ nguyên ảnh gốc, không bao giờ vẽ số đọc sai). Khung một cụm không lấn sang cụm sau.
+- Ô "无图" để nguyên.
+
+### 18.3 Dịch ngoại tuyến (miễn phí)
+- `IndustryTerms`: khoảng 700 từ của các ngành (thuộc tính, màu, chất liệu, kính mắt, điện tử, thời trang, gia dụng, mỹ
+  phẩm, mẹ và bé, thực phẩm, dụng cụ, vận chuyển, bảng chọn phân loại), đơn vị đo sau số ("500毫升" → "500 ml", "38码" →
+  "Size 38"), từ nối (防 chống, 送 tặng…). Chỉ dùng để tra nguyên dòng và **ghép dòng toàn từ đã biết** (`compose`): danh từ
+  chính lên trước ("男士纯棉T恤" → "Áo thun nam cotton 100%"), chữ thường trong câu, tên riêng giữ chữ hoa. Không chèn
+  vào câu dài cho bộ dịch máy.
+- Bản dịch máy còn **sót chữ tiếng Anh** (bộ dịch đi qua tiếng Anh: "Jing Note", "BLU-RAY") thì không tin: kiểm từng từ
+  bằng bộ kiểm âm tiết tiếng Việt của bàn phím Telex, trừ từ có trong dòng gốc và từ mượn quen dùng.
+- Dòng có chữ tiếng Việt (địa chỉ) chỉ dịch phần chữ Trung.
+- Chế độ AI (trả phí, tùy chọn): gửi kèm chữ khác trên màn hình làm ngữ cảnh; chọn Nhanh (Luna) / Chuẩn nhất (Sol).
+
+### 18.4 Hiển thị
+- Không bao giờ ngắt giữa một từ khi xuống dòng ("Frees / hip").
+- Còn biết: tiêu đề bảng chọn phân loại vẫn xuống hai dòng dù bên phải còn chỗ (chưa rõ vì sao khoảng trống đo được nhỏ);
+  mảng nền đôi khi lấn mép chữ số đầu của giá ngay sau tên phân loại; dòng có "手机" bị đọc "手桃" chưa dịch.
+
+### 18.5 Cổng bật/tắt dịch
+- Ô **"Dịch màn hình"** trong bảng kéo xuống (`ScreenTileService`): đang bật → chạm là MSTrans tắt hẳn quyền Trợ năng
+  (`disableSelf`), app khác (ngân hàng) không còn thấy dịch vụ Trợ năng; đang tắt → chạm mở danh sách Trợ năng của
+  Android, dòng MSTrans được tô sáng (trang riêng của một dịch vụ `ACCESSIBILITY_DETAILS_SETTINGS` bị Android từ chối với
+  app thường: "Permission Denial"). Android 13+: nút "Thêm ô vào bảng kéo xuống".
+- Tự tắt chỉ khi app mới thật sự chiếm màn hình và vẫn ở đó sau 1,5 giây (trước đó một cửa sổ thoáng qua của hệ thống
+  làm quyền tắt ngay khi dịch vụ vừa bật).
+- **Tự tắt khi rời app mua sắm** (mặc định bật): đã dùng app đã chọn rồi sang app khác (về màn hình chính, bảng thông báo,
+  bàn phím, cài đặt Android thì không tính) → tắt hẳn quyền.
+- Công tắc trong trang Dịch màn hình gắn với quyền: bật quyền là đang dịch.
+
+### 18.6 Mã kích hoạt
+- Phải nhập mã do Minh cung cấp thì app (màn chính, bàn phím khi bấm Dịch, "Dịch bằng MSTrans", Dịch màn hình) mới dùng
+  được. **Mã thật không có trong mã nguồn hay tài liệu** (repo công khai): chỉ có muối và băm PBKDF2-SHA256 200.000 vòng
+  (`AppLock`). Sai 3 lần thì chờ 30 giây, gấp đôi mỗi lần, tối đa 1 giờ. Đổi mã: tạo muối và băm mới (Python
+  `hashlib.pbkdf2_hmac('sha256', ma, muoi, 200000)`), máy đã kích hoạt sẽ phải nhập lại.
+- Giới hạn: mã 6 số kiểm trên máy chặn được người dùng thường, không chống được người bẻ khóa APK.
+
+### 18.7 Cài đặt làm lại
+- Tab Cài đặt chỉ còn các nhóm: Bắt đầu (khi chưa xong), Kết nối dịch vụ, Dịch tin nhắn, Dịch màn hình, Khác, Giới thiệu;
+  mỗi mục mở trang chi tiết. Key OpenAI / Soniox / Google có nút **"Xác nhận kết nối"** (OpenAI dịch thử một câu; Soniox
+  `GET /v1/models`, Google danh sách giọng: miễn phí); xác nhận xong key được che, làm mờ, khóa lại ("Đổi key", "Xóa key").
+  Chỉ lưu dấu vân tay SHA-256 của key đã xác nhận, không lưu thêm bản key nào.
+
+### 18.8 Tab "Dịch Web"
+Theo Minh: trang Dịch màn hình thành **tab thứ hai "Dịch Web"** (sau tab Dịch); tên trong cài đặt Trợ năng của Android là
+"MSTrans · Dịch Web", ô trong bảng kéo xuống là "Dịch Web". Cài đặt › Dịch Web chuyển sang tab đó.
+
+### 18.9 Đã kiểm và chưa kiểm (27/11/2026)
+- Test lõi 248 bài, đều đạt. Lint như mốc cũ: 1 lỗi cũ (`MissingPermission`), 13 cảnh báo cũ, không có cái mới.
+- Trên máy ảo (Android 14): bảng chọn phân loại giả lập hết lệch, dịch đúng các dòng nêu ở 18.2–18.3; màn kích hoạt (sai
+  thì báo và xóa ô, đúng thì vào app); tab Cài đặt mới, trang key OpenAI, "Xác nhận kết nối" với key giả báo lỗi đúng; tự tắt
+  khi sang app Đồng hồ, không tắt khi về màn hình chính; ô "Dịch Web" hiện trạng thái và mở danh sách Trợ năng.
+- **Chưa kiểm:** trên điện thoại thật và Taobao thật (cả lỗi lệch: bản sửa dựa trên tái hiện ở máy ảo); trạng thái key "đã
+  xác nhận" (cần key thật); "Thêm ô vào bảng kéo xuống" bằng hộp thoại của Android; Soniox/Google bằng key thật.
+- APK: `android/app/build/outputs/apk/release/MSTrans-1.7.0-17.apk`, 1.7.0 (17), chỉ ARM, 27.243.863 byte, SHA-256
+  `C0EC248F7BCFE5BB72B757211504F03321EC69E962E3FFB2949986160C7CFB1C`, chứng thư `ff13e1b4…994a6eb9`. Cài đè được lên mọi bản
+  trước (số bản lớn hơn). Lần đầu mở sẽ hỏi mã kích hoạt.

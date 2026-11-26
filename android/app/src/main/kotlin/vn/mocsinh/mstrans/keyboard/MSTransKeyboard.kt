@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vn.mocsinh.mstrans.MSTransApp
 import vn.mocsinh.mstrans.MainActivity
+import vn.mocsinh.mstrans.AppLock
 import vn.mocsinh.mstrans.R
 import vn.mocsinh.mstrans.core.ChatLine
 import vn.mocsinh.mstrans.core.HistoryItem
@@ -1034,6 +1035,19 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
     // Translating the user's message
 
     private fun readyKey(): String? {
+        if (!AppLock.active(this)) {
+            showPanel(
+                "Chưa kích hoạt",
+                listOf(
+                    "MSTrans chưa được kích hoạt trên điện thoại này." to true,
+                    "Mở app MSTrans và nhập mã kích hoạt do Mộc Sinh cung cấp, rồi quay lại đây." to false,
+                ),
+                "Mở MSTrans",
+            ) {
+                startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return null
+        }
         settings.apiKey?.let { return it }
         showPanel(
             "Cần API key",
@@ -1285,6 +1299,7 @@ class MSTransKeyboard : InputMethodService(), KeyView.Listener {
      * translation comes up on the info line as it is written.
      */
     private fun translateIncoming(text: String, context: List<ChatLine>, hash: Int) {
+        if (!AppLock.active(this)) return
         val apiKey = settings.apiKey ?: return
         info = Info.IncomingBusy
         incomingTask?.cancel()

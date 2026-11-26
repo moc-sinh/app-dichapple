@@ -2,6 +2,8 @@ package vn.mocsinh.mstrans.screen
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.service.quicksettings.TileService
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -34,6 +36,23 @@ object ScreenState {
     }
 
     fun settings(context: Context) = ScreenSettings(MSTransApp.of(context).store)
+
+    /**
+     * Android's list of accessibility services, with MSTrans · Dịch màn hình lit up where the phone's
+     * settings do that. The page of the service itself is closed to apps (Android refuses it).
+     */
+    fun permissionPage(context: Context): Intent {
+        val ours = ComponentName(context, ScreenTranslationService::class.java).flattenToString()
+        return Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            .putExtra(":settings:fragment_args_key", ours)
+            .putExtra(":settings:show_fragment_args", android.os.Bundle().apply { putString(":settings:fragment_args_key", ours) })
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /** The Quick Settings tile shows the state again. */
+    fun tileChanged(context: Context) {
+        runCatching { TileService.requestListeningState(context, ComponentName(context, ScreenTileService::class.java)) }
+    }
 
     /** MSTrans · Dịch màn hình is turned on in Android's accessibility settings. */
     fun permitted(context: Context): Boolean {
