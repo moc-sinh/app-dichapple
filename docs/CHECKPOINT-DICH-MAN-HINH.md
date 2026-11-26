@@ -613,3 +613,90 @@ Log mới (chỉ số đo): "translated X of Y lines in … ms: engine N calls, 
   phần dưới còn xê dịch. Đã sửa cả bốn; màn taobao 6/6 lần đúng, các màn khác xem lại không hỏng.
 - APK gửi Minh lần ba: 27.168.507 byte, SHA-256 `71FFF241D996B6380722D8F11B2644B0A944279591C25C53C3F582A024F6CD8F`.
 - Thời gian thực trên máy ảo vẫn dao động mạnh; chưa đo trên điện thoại thật.
+
+## 17. Phiên 26/11/2026, 10:00 đến 11:10: clip dùng thật trên Taobao (chưa commit)
+
+Minh gửi một clip 81 giây quay Taobao thật trên điện thoại (file ở máy Minh, không nằm trong repo) và nói "sử dụng
+thực tế còn nhiều bất cập". Xem clip không cần tải gì: Windows PowerShell 5.1 gọi
+`Windows.Media.Editing.MediaComposition.GetThumbnailAsync` để tách khung hình. Cuối phiên Minh xem ảnh kết quả, nói
+"ổn rồi", **tạm dừng tối ưu phần hiển thị, làm tiếp khi khác**.
+
+### 17.1 Thấy gì trong clip, và nguyên nhân
+| Trong clip | Nguyên nhân |
+|---|---|
+| Ô xám/nâu che cả thẻ sản phẩm, có lúc hiện ba chấm tròn to (giây 41–49) | Taobao tự vẽ trang: cả thẻ là **một nút** có mô tả (tên + giá). App coi là một dòng chữ, phủ kín ô; cỡ chữ đoán theo "nét mực" của cả tấm ảnh nên khổng lồ, chỉ còn "…" |
+| Chữ dịch tự biến mất khoảng 1,2 giây rồi hiện lại dù không lướt (giây 62–66) | Một nhãn nhỏ tự lật phát sự kiện "cuộn"; app xoá cả màn hình với mọi sự kiện cuộn |
+| Chữ dịch đứng yên trong khi trang đã trôi (giây 5, 67) | `notificationTimeout=50`: Android giữ sự kiện cho tới khi 50 ms không có sự kiện cùng loại. Danh sách của Taobao có nhiều phần cùng phát "cuộn" nên bị giữ tới lúc dừng |
+| Mở trang mới 4–7 giây mới có chữ; dừng lướt hơn 1 giây | Vòng "trang chưa ổn định" lặp tới 14 lần (11 giây) vì chữ nằm dưới thanh cố định không bao giờ "khớp"; đọc cây giao diện từng nút một (máy ảo: 3,5 ms mỗi nút) |
+| "Miệng" trên giỏ hàng, "Trắng", ô cam "T…", "Quay lại 0" | Bộ đọc ảnh đọc biểu tượng thành chữ (口, 白, 回) |
+| "Mua …", "Pho…", "Cử a…", "Miễn phí vậ…" | Cỡ chữ đoán sai (nút gồm cả biểu tượng lẫn nhãn), rồi cắt cụt thay vì thu nhỏ |
+| "Thương hiệu, tùy chọn, nút"; "Atlas, đã chọn" | Mô tả cho trình đọc màn hình ("品牌，可选，按钮") bị dịch nguyên |
+| Tên sản phẩm đè lên thanh trên cùng, chữ đè lên hàng tab | Chữ của danh sách đã trôi xuống dưới thanh cố định, app vẫn báo "thấy được" |
+| Một số dòng không bao giờ được dịch (下单运费…, 物流客服) | Câu có từ bắt buộc (运费, 物流…) mà bộ dịch không giữ đúng chữ thì bị bỏ |
+
+### 17.2 Đã sửa (lõi có test; test lõi 218 bài, đều đạt)
+- `notificationTimeout=0`.
+- **Khung nhỏ tự trượt**: `Event.Scrolled(pkg, area)` → `Action.ClearArea`, không đổi thế hệ trang; chỉ chữ trong khung
+  đó đi. Dịch vụ hỏi app khung nào vừa trượt (ngoài luồng chính) và nhớ theo trang (`Scroller`: cửa sổ, loại, tầm
+  cuộn, số mục): trang chính thì không hỏi lại; khung không còn trên màn hình thì bỏ qua. Khung chưa gặp mà app trả
+  lời chậm hơn 150 ms thì coi là trang chính. Chữ đọc từ ảnh giữ nguyên giữa các lần quét cùng trang (trước bị xoá
+  mỗi lần, gây nháy).
+- **Đọc cây**: `TreeWalk` (từng tầng, con của một tầng hỏi song song, 4 luồng), Android 13+ thêm
+  `FLAG_PREFETCH_DESCENDANTS_HYBRID | FLAG_PREFETCH_UNINTERRUPTIBLE` (một câu hỏi trả về tới 50 nút). Vị trí chữ cũng
+  hỏi song song.
+- **Lướt xong đọc sớm hơn**: `Speed.scrollMs` (Tiết kiệm 300, Cân bằng 160, Nhanh 130; sự kiện cuộn cách nhau 100 ms),
+  không chờ khoảng cách tối thiểu giữa hai lần quét; đọc mà trang còn trượt thì lần sau chờ thêm 50 ms (tối đa bằng
+  `settleMs`), yên thì giảm lại.
+- **Bắt đầu dịch ngay sau khi đọc chữ** (không chờ ảnh chụp); câu ngắn dịch trước; bản dịch đầu tiên vẽ ngay.
+- **Ảnh chụp**: chờ nốt giới hạn của Android (350 ms cho cửa sổ, 1.030 ms cho màn hình) thay vì bị từ chối rồi quét
+  lại; không chụp thừa khi chỉ đồng hồ đếm ngược nhảy số.
+- **"Trang chưa ổn định"**: tối đa 4 lần (khoảng 2 giây, trước 11 giây), sau đó vẫn hiện từ ảnh chụp đó; đủ một nửa
+  số dòng khớp là ổn (trước 80 %); dòng có thể nằm dưới thanh cố định không tính.
+- **Khối mô tả không phải dòng chữ** (`TextFit`): ô lớn hơn nhiều so với chữ của nó thì chỉ vẽ khi ảnh chụp cho thấy
+  đúng chữ đó trong ô (`LineStyles.lines(grid, box, text)` chọn hàng mực vừa với chữ; biểu tượng phía trên nhãn không
+  tính; hàng có khoảng trống rộng là hai thứ). Không thì bỏ, chữ trong ô do bộ đọc ảnh lo.
+- **Chữ dưới thanh cố định** (`PaintOrder.underPanels`): nút trong danh sách cuộn, bị một khối có chữ vẽ sau và nằm
+  ngoài danh sách che từ một phần ba; chỉ vẽ nếu ảnh chụp cho thấy chữ ở đó.
+- **Chữ đọc từ ảnh** (`PictureText`): bỏ dòng dưới 2 chữ Hán, độ tin dưới 0,5, nghiêng quá 12°. Một dòng được tách
+  tại khoảng trống rộng; **phần chỉ có số/giá không dịch và không bị vẽ đè** (máy ảo từng đọc "¥7.90" thành "47.90"
+  rồi vẽ đè lên giá thật). Dòng bắt đầu bằng giá không ghép vào tên sản phẩm.
+- **Sắp chữ**: thu nhỏ tới cỡ nhỏ nhất còn đọc được trước khi cắt; cỡ chữ chỉ là đoán thì nhường trước tiên; một
+  dòng thành tối đa hai dòng; một nhãn quá dài không kéo nhỏ cả nhóm; bản dịch chỉ hiện được dưới 60 % thì không vẽ
+  (chữ từ ảnh: hễ phải cắt là không vẽ).
+- `SpokenText.label`: bỏ "按钮/可选/已选中…" khỏi mô tả.
+- **Từ điển**: khoảng 80 nhãn của Taobao (trang Của tôi, tìm kiếm, trang sản phẩm), 18 mẫu câu có số, dạng ngắn cho
+  chỗ hẹp kể cả mẫu câu (`short()`: "Freeship từ ¥99", "100+ thêm giỏ", "200+ xem/30 ngày").
+- Cửa sổ của app khác hiện đè lên (thông báo, cửa sổ hệ thống nhỏ) không còn bị coi là rời app, nếu app đang có màn
+  hình vẫn là app đã chọn.
+- TestShop: màn `--es screen real` bắt chước trang thật (thẻ là một nút có mô tả, chip có mô tả kiểu trình đọc, nhãn
+  tự lật mỗi 2,5 giây, thanh cố định trên và dưới đè lên danh sách, biểu tượng và nhãn chung một nút, 24 câu khác nhau).
+
+### 17.3 Số đo trên máy ảo (dao động mạnh, chỉ để so trước và sau)
+| | Trước | Sau |
+|---|---|---|
+| Lướt màn `home`, từ sự kiện cuộn cuối tới lúc có chữ | 910–1.060 ms | 430–740 ms |
+| Đọc cây 158 nút sau khi lướt | 570–720 ms | 60–200 ms |
+| Màn `real`, nhãn tự lật | xoá cả màn hình mỗi 2,5 giây | chỉ nhãn đó đổi |
+| Màn `real` sau khi lướt | vòng "chưa ổn định" 3,4 giây | 370–500 ms lúc máy rảnh, tới 1.080 ms khi bộ dịch đang bận |
+
+### 17.4 Đổi so với quy tắc cũ, Minh cần biết
+- **Từ bắt buộc trong câu**: nhãn nguyên dòng vẫn đúng từng chữ theo danh sách. Còn câu dài mà bộ dịch không giữ
+  được từ đó thì nay **vẫn hiện bản dịch của bộ dịch** (trước để nguyên chữ Trung). Hai thao tác tài khoản (注销 và
+  退出登录) vẫn bị chặn như cũ. Muốn quay lại quy tắc cũ: bỏ đoạn "It keeps none of the words put in" trong
+  `ScreenTranslator.translate`.
+- "约" hiện là "≈" (trước "Khoảng").
+
+### 17.5 Chưa làm
+- **Chưa thử bản này trên điện thoại thật**: mọi kiểm tra là trên máy ảo với màn `real` mô phỏng. Cần Minh cài và
+  quay lại một clip.
+- Bàn phím mở thì vẫn tạm dừng dịch (trang gợi ý tìm kiếm trong clip không được dịch): theo thiết kế, chưa đổi.
+- Tốc độ của chính bộ dịch ngoại tuyến (trong clip khoảng 2 dòng mỗi giây với tên sản phẩm dài) chưa nhanh hơn,
+  chỉ bắt đầu sớm hơn và ít dòng phải gọi hơn.
+- Ý tưởng chưa làm: dịch trước trong lúc trang lướt chậm dần; dùng mô tả đầy đủ của thẻ để dịch tên sản phẩm bị app
+  cắt; nhớ vị trí chữ theo khung để khỏi hỏi lại sau khi lướt.
+- Lint chưa chạy lại trong phiên này.
+
+### 17.6 APK gửi Minh lần bốn
+`android/app/build/outputs/apk/release/MSTrans-1.7.0-15-ban4.apk`: 1.7.0 (15), chỉ ARM, 27.194.527 byte, SHA-256
+`B9F052C1C3AA0D11E9475DB22B969B7FE945E13F37BFB9E05DFC3540C81E3F27`, chứng thư `ff13e1b4…994a6eb9`. Máy ảo đang cài
+bản x86_64 trước đó vài phút (thiếu riêng dạng ngắn của "店铺年销售超1万件").
