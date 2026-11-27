@@ -18,8 +18,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import kotlinx.coroutines.CompletableDeferred
 import vn.mocsinh.mstrans.ui.ConversationScreen
+import vn.mocsinh.mstrans.ui.ActivationScreen
 import vn.mocsinh.mstrans.ui.GlossaryScreen
 import vn.mocsinh.mstrans.ui.HistoryScreen
+import vn.mocsinh.mstrans.ui.ScreenTranslationPage
 import vn.mocsinh.mstrans.ui.SettingsScreen
 import vn.mocsinh.mstrans.ui.TextSize
 import vn.mocsinh.mstrans.ui.TranslateScreen
@@ -44,6 +46,7 @@ interface Screen {
 class MainActivity : Activity() {
     enum class Tab(val title: String, val iconId: Int) {
         TRANSLATE("Dịch", R.drawable.ic_tab_translate),
+        SCREEN("Dịch Web", R.drawable.ic_tab_screen),
         CONVERSATION("Hội thoại", R.drawable.ic_tab_conversation),
         HISTORY("Lịch sử", R.drawable.ic_tab_history),
         GLOSSARY("Thuật ngữ", R.drawable.ic_tab_glossary),
@@ -64,7 +67,19 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tab = Tab.entries.firstOrNull { it.name == savedInstanceState?.getString("tab") } ?: tabFor(intent) ?: Tab.TRANSLATE
-        build()
+        if (AppLock.active(this)) build() else locked()
+    }
+
+    /** Until MSTrans is activated: only the activation code. */
+    private fun locked() {
+        val c = colors
+        window.statusBarColor = c.page
+        root = FrameLayout(this).apply {
+            setBackgroundColor(c.page)
+            tag = c.dark
+        }
+        root.addView(ActivationScreen(this) { build() }.view, fill())
+        setContentView(root)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -86,7 +101,7 @@ class MainActivity : Activity() {
         screens.values.forEach { it.destroyed() }
         screens.clear()
         pages.clear()
-        build()
+        if (AppLock.active(this)) build() else locked()
     }
 
     private fun build() {
@@ -150,6 +165,7 @@ class MainActivity : Activity() {
 
     private fun make(t: Tab): Screen = when (t) {
         Tab.TRANSLATE -> TranslateScreen(this)
+        Tab.SCREEN -> ScreenTranslationPage(this)
         Tab.CONVERSATION -> ConversationScreen(this)
         Tab.HISTORY -> HistoryScreen(this)
         Tab.GLOSSARY -> GlossaryScreen(this)

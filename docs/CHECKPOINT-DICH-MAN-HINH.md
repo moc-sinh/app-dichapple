@@ -1,0 +1,779 @@
+# Checkpoint: MSTrans Android 1.7.0, tự động dịch màn hình
+
+Cập nhật lúc 26/11/2026, 00:53 (máy tính Windows có Android SDK). Nhánh `mstrans/auto-screen-translate`.
+Người yêu cầu: Minh (Mộc Sinh). Đặc tả gốc là tin nhắn "NHIỆM VỤ: NÂNG CẤP MSTRANS ANDROID — AUTO
+SCREEN TRANSLATION" ngày 25/11/2026, tóm tắt ở mục 2.
+
+## 0. Đọc trước khi làm tiếp
+
+- **Trạng thái 26/11/2026, 00:45 (tạm dừng theo yêu cầu của Minh):** mã của tính năng đã viết xong (mục 10, bước 1
+  đến 6 phần build/lint), 103 test lõi xanh, APK 1.7.0 build được, lint không thêm lỗi. Đã có máy ảo Android 14, đã
+  cài đè 1.7.0 lên bản 1.6.0 đã phát hành (đạt) và tải xong gói dịch. **20 tình huống ở mục 11 vẫn chưa kiểm cái
+  nào.** Đã push lên nhánh này; CI chưa chạy với ML Kit. **Đọc mục 14 và 15 trước khi làm tiếp.**
+- **Quy tắc của Minh:** trả lời bằng tiếng Việt dễ hiểu; chạy test trước mỗi lần push; một phiên một
+  nhánh (phiên cloud đã ngừng đẩy lên nhánh này); không merge, không phát hành công khai; không đổi
+  khóa ký; không ghi tên model AI vào commit, PR hay mã; `git fetch` trước khi push; không báo
+  "xong" chức năng chưa kiểm thử.
+- Lịch sử cả app ở `docs/CHECKPOINT.md`. File này chỉ nói về tính năng dịch màn hình.
+
+## 1. Nhánh và commit
+
+| Commit | Nội dung |
+|---|---|
+| `cf4f40f` | Điểm xuất phát: đầu nhánh giao hàng `claude/funny-gates-s6pl2c` (Android 1.6.0, mã ở `389a193`) |
+| `0740c90` | CI: chỉ nhánh giao hàng đăng Release công khai. Nhánh khác tạo Release **nháp** (chỉ người có quyền ghi repo thấy), không giữ artifact công khai. Thêm bước kiểm APK (package, versionCode, chữ ký, SHA-256) và Android Lint, kết quả ghi thành annotation |
+| `f985b9f` | Bảng chuyển chữ Phồn thể → Giản thể (3.221 cặp, từ OpenCC, giấy phép Apache 2.0). Chưa có mã nào dùng |
+| commit chứa file này | Checkpoint + sửa `ci/android-local-check.sh` (Maven Central trả 429), commit `[skip ci]` |
+
+Rollback: mọi thay đổi chỉ nằm trên nhánh này. Nhánh giao hàng `claude/funny-gates-s6pl2c` không bị
+đụng tới. Bỏ nhánh này là quay về 1.6.0 nguyên vẹn.
+
+**CI run Android #14** (commit `f985b9f`): xanh, đã xác nhận nhánh thử chỉ tạo Release nháp. Chi tiết
+và mốc Android Lint ở mục 9.
+
+## 2. Tóm tắt yêu cầu
+
+- Mở MSTrans, bật "tự động dịch màn hình", cấp quyền lần đầu, mở Taobao như bình thường: chữ Trung
+  tự dịch sang tiếng Việt và tự cập nhật khi cuộn, mở sản phẩm, đổi danh mục, chuyển màn hình. Không
+  bấm dịch thủ công, vẫn thao tác app gốc bình thường. Không tạo app riêng, không sửa APK Taobao, không
+  root, không Shizuku, không vượt FLAG_SECURE.
+- App ưu tiên (tên package đã đối chiếu, xem mục 3): Taobao `com.taobao.taobao` (chọn sẵn, nhưng tính
+  năng **tắt** cho tới khi người dùng tự bật và cấp quyền), 1688 `com.alibaba.wireless`, Pinduoduo
+  `com.xunmeng.pinduoduo`, JD `com.jingdong.app.mall`, WeChat `com.tencent.mm`, Alibaba.com
+  `com.alibaba.intl.android.apps.poseidon`. Người dùng chọn được phạm vi app.
+- Mặc định dịch Trung → Việt **ngoại tuyến**: không API key, không tốn phí mỗi lần cuộn, có hướng dẫn
+  tải mô hình lần đầu, chạy được khi mất mạng. Chế độ AI nâng cao (dùng OpenAI sẵn có trong MSTrans)
+  chỉ khi người dùng tự chọn, không gửi cả màn hình, có kiểm soát chi phí.
+- Từ điển thương mại điện tử (30 thuật ngữ bắt buộc ở mục 7). Tuyệt đối không nhầm Đăng xuất với Xóa
+  tài khoản. Bảo toàn số tiền, số lượng, kích thước, mã sản phẩm, %, dấu âm, đơn vị; không chắc thì
+  giữ nguyên chữ gốc. Dùng chung tab Thuật ngữ, không làm hai hệ thống từ điển.
+- Yêu cầu hiệu năng, bảo mật (mục 8), giao diện (mục 5, điểm 12), quy trình GitHub, 20 tình huống thử
+  trên máy (mục 11). Đầu ra: mã, nhánh, APK cài được, báo cáo kiểm thử, lỗi đã sửa và giới hạn, báo cáo
+  hiệu năng và bảo mật **có số đo thật**, hướng dẫn bật, hướng dẫn cập nhật đè, danh sách commit.
+- Phiên bản: 1.7.0.
+
+## 3. Audit (đã xác minh ngày 25/11/2026)
+
+- Repo `moc-sinh/app-dichapple` **Public**. Nhánh mặc định `claude/stoic-hopper-f60iid` (iOS cũ).
+  Android nằm ở `claude/funny-gates-s6pl2c`. Nhánh `claude/android-apk` (commit `0f223c4` trong đặc tả)
+  là bản 1.0.0 cũ, đã gộp qua PR #2 ngày 26/10/2026, **không dùng lại**.
+- APK 1.6.0 đang phát hành (`android-1.6.0-13`) đã tải về và đọc lại: package `vn.mocsinh.mstrans`,
+  versionCode 13, versionName 1.6.0, minSdk 26, targetSdk 34, ký APK Signature Scheme v2 (không v1, không
+  v3), chứng thư SHA-256
+  `FF:13:E1:B4:51:1E:99:15:A7:61:71:09:5E:82:DF:BF:98:F6:CB:49:16:92:9B:A3:78:3C:54:61:99:4A:6E:B9`,
+  **trùng** chứng thư của khóa `android/app/mstrans-sideload.p12` trong repo. SHA-256 của file APK 1.6.0:
+  `0e89f6e8b324b21066181743a75d90f3f6e85398b64e2d643a24e3aa2941012b`. Quyền hiện có: INTERNET,
+  RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, VIBRATE.
+- versionCode = biến môi trường `MSTRANS_BUILD` (CI đặt bằng số thứ tự run của workflow Android, mặc
+  định là 1 khi build tay). versionName ở `android/app/build.gradle.kts`.
+- Công cụ: compileSdk 35, targetSdk 34, minSdk 26 (Android 8), AGP 8.7.3, Kotlin 2.2.0, Gradle 8.14.3,
+  JDK 17, coroutines 1.10.2, OkHttp 4.12.0, kotlinx-serialization 1.8.1. **Không dùng androidx**
+  (`android.useAndroidX=false`), giao diện dựng bằng View trong code.
+- Cấu trúc: `android/core` (Kotlin thuần, có test JUnit), `android/app` (Android). App có 5 tab trong
+  `MainActivity` (Dịch, Hội thoại, Lịch sử, Thuật ngữ, Cài đặt), trang con mở bằng
+  `activity.push(page(...))` (xem `ui/Pages.kt`). Hàm dựng giao diện ở `ui/Ui.kt`: `section`, `row`,
+  `switchRow`, `choose`, `confirm`, `toast`, `Segmented`, `pill`, `emptyState`. Cài đặt lưu trong
+  SharedPreferences `mstrans` qua `core/Settings.kt` (`KeyValueStore`).
+- Thuật ngữ: `Settings.glossary` là chuỗi, mỗi dòng `từ gốc = bản dịch` (vế phải trống = giữ nguyên),
+  đọc bằng `core.Glossary.parse`, sửa ở `ui/GlossaryScreen.kt`, đổi thuật ngữ thì gọi
+  `settings.clearIncomingCache()`.
+- Chế độ AI có sẵn: `core.Translator(apiKey, model, settings)`, hàm `write(instructions, input)` trả
+  về chữ, model rẻ nhanh là `TranslationModel.LUNA`.
+- Kiểm thử gốc trên cloud: `bash ci/android-local-check.sh` → test core đạt, mã app biên dịch được (chỉ
+  2 cảnh báo cũ ở `MainActivity.kt`) sau khi sửa kho Maven trong script.
+- Môi trường cloud: `dl.google.com` bị chặn (không tải được ML Kit, AGP, Android SDK), không có KVM
+  (không chạy được emulator). Tải được file đính kèm Release qua `gh api`, không tải được artifact.
+
+## 4. Môi trường và lệnh
+
+### Trên máy tính có Android SDK (Windows, PowerShell, trong thư mục `android`)
+
+- JDK 17 (hoặc JBR đi kèm Android Studio). SDK: `platforms;android-35`, `build-tools;35.0.0`.
+- **Bắt buộc đặt `ANDROID_HOME`.** `settings.gradle.kts` chỉ thêm module `:app` khi `ANDROID_HOME`
+  hoặc `ANDROID_SDK_ROOT` trỏ tới thư mục có thật. `local.properties` của Android Studio là không đủ.
+  Ví dụ: `$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"`.
+- **Bắt buộc đặt `MSTRANS_BUILD` lớn hơn versionCode đang cài trên điện thoại** (đang là 13). Không đặt
+  thì versionCode = 1 và Android từ chối cài đè. Dùng số = số run Android mới nhất trên GitHub + 1 (sau
+  run #14 thì dùng 15). Không dùng số quá lớn: bản CI sau đó có số nhỏ hơn sẽ không cài đè được.
+  Ví dụ: `$env:MSTRANS_BUILD = "15"`.
+- Lệnh:
+  - `.\gradlew.bat :core:test`: test lõi.
+  - `.\gradlew.bat :app:assembleRelease` → `app\build\outputs\apk\release\app-release.apk` (ký bằng
+    khóa sideload trong repo).
+  - `.\gradlew.bat :app:lintRelease` → `app\build\reports\lint-results-release.html`.
+  - Chữ ký: `& "$env:ANDROID_HOME\build-tools\35.0.0\apksigner.bat" verify --verbose --print-certs app\build\outputs\apk\release\app-release.apk`
+    (phải ra đúng chứng thư SHA-256 ở mục 3).
+  - Package và versionCode: `& "$env:ANDROID_HOME\build-tools\35.0.0\aapt2.exe" dump badging app\build\outputs\apk\release\app-release.apk | Select-Object -First 1`.
+  - SHA-256: `Get-FileHash app\build\outputs\apk\release\app-release.apk -Algorithm SHA256`.
+  - Cài đè lên điện thoại: `adb install -r app\build\outputs\apk\release\app-release.apk`. Không gỡ app
+    cũ, không dùng `-d`: gỡ là mất lịch sử, key và cài đặt.
+  - Đo: `adb shell dumpsys meminfo vn.mocsinh.mstrans`, `adb shell top -b -n 1 | findstr mstrans`,
+    `adb shell dumpsys batterystats vn.mocsinh.mstrans`, `adb logcat -s MSTransScreen` (tag dự kiến; chỉ log thời
+    gian và số lượng, **không log chữ trên màn hình**).
+
+### Trên máy cloud (không có SDK)
+
+- `bash ci/android-local-check.sh`: test core rồi biên dịch mã app với `android-all` lấy từ Maven
+  Central. Khi app có ML Kit, script này sẽ không biên dịch được phần ML Kit (cloud không tới được Google
+  Maven) trừ khi thêm stub. Build thật thì dùng máy tính hoặc CI.
+
+## 5. Kiến trúc đã chốt
+
+1. **Một AccessibilityService** trong MSTrans (`app/.../screen/ScreenTranslationService.kt`). Lớp phủ
+   dùng `TYPE_ACCESSIBILITY_OVERLAY` với `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_IN_SCREEN
+   | FLAG_LAYOUT_NO_LIMITS`: chạm xuyên qua xuống Taobao, **không cần quyền vẽ trên app khác**
+   (SYSTEM_ALERT_WINDOW). Lớp phủ trợ năng là cửa sổ tin cậy nên không bị chặn chạm của Android 12+.
+2. **Nguồn chữ:**
+   - (a) Cây giao diện qua Trợ năng: mọi bản Android 8+, có toạ độ chính xác, rẻ.
+   - (b) OCR ảnh chụp màn hình để đọc chữ trong ảnh sản phẩm. Android 14+: `takeScreenshotOfWindow(windowId)`
+     chỉ chụp cửa sổ app (không dính lớp phủ của mình). Android 11 đến 13: `takeScreenshot(display)`,
+     ẩn lớp phủ khoảng 2 khung hình trước khi chụp, hiện lại ngay sau khi chụp xong. Android 8 đến 10:
+     bản 1.7.0 chỉ đọc chữ qua Trợ năng (MediaProjection để sau, ghi là giới hạn).
+3. **Gộp nguồn:** ưu tiên nút Trợ năng. Bỏ nút cha có chữ trùng chữ các nút con. Bỏ dòng OCR nằm đè hơn
+   50% diện tích lên một nút Trợ năng, hoặc có chữ nằm trong chữ của nút giao với nó. Bỏ phần ngoài cửa
+   sổ app, vùng bàn phím, thanh trạng thái.
+4. **Thứ tự dịch mỗi đoạn chữ:**
+   1. Thuật ngữ của người dùng (tab Thuật ngữ, vế trái có chữ Hán), khớp nguyên đoạn.
+   2. Từ điển thương mại điện tử có sẵn (trong `core`, chỉ đọc), khớp nguyên đoạn sau khi cắt khoảng
+      trắng và đổi Phồn thể → Giản thể.
+   3. Mẫu câu có số (mục 7).
+   4. ML Kit dịch Trung → Việt ngoại tuyến. Trước khi dịch, thay thuật ngữ trong câu bằng bản dịch tiếng
+      Việt của nó; sau khi dịch, kiểm tra: mọi số, giá, %, dấu âm, ký hiệu tiền, mã hàng còn nguyên văn;
+      các thuật ngữ đã thay còn nguyên; luật thuật ngữ nguy hiểm (có `注销` thì bản dịch phải có "xóa"
+      hoặc "hủy" và không có "đăng xuất"; có `退出登录`/`退出当前账户` thì phải có "đăng xuất" hoặc
+      "thoát" và không có "xóa").
+   5. Kiểm tra trượt → dịch từng khúc: chỉ dịch các khúc chữ Hán, mọi thứ khác giữ nguyên văn.
+   6. Không có bản dịch đáng tin → giữ chữ gốc, không phủ.
+5. **Phồn thể:** đổi sang Giản thể trước khi tra từ điển và dịch, bằng bảng
+   `android/core/src/main/resources/vn/mocsinh/mstrans/core/screen/ts_characters.txt` (đã commit).
+6. **Thuật ngữ:** dùng lại `Settings.glossary`, không tạo hệ thống thứ hai. Thuật ngữ người dùng đè
+   lên từ điển có sẵn. Đổi thuật ngữ thì xóa bộ nhớ đệm bản dịch.
+7. **Khi nào quét:**
+   - `TYPE_WINDOW_STATE_CHANGED` (màn hình mới): xóa lớp phủ, tăng số thế hệ, quét sau khoảng 250 ms.
+   - `TYPE_VIEW_SCROLLED`: ẩn lớp phủ ngay, quét khi ngừng cuộn (chờ khoảng 350 đến 450 ms).
+   - `TYPE_WINDOW_CONTENT_CHANGED`: chỉ quét khi "chữ ký" chữ Hán của cây giao diện đổi (bỏ qua chữ số
+     để đồng hồ đếm ngược không gây quét liên tục).
+   - `TYPE_WINDOWS_CHANGED`: đổi app, bàn phím hiện hoặc ẩn.
+   - Mỗi lần quét mang một số thế hệ: kết quả của thế hệ cũ bị bỏ, nên bản dịch trang trước không hiện
+     trên trang mới. Có khoảng cách tối thiểu giữa hai lần quét theo mức tốc độ. Chữ ký ảnh (lưới độ
+     sáng 24×48) để bỏ OCR khi ảnh không đổi.
+8. **Hiệu năng:** duyệt cây ngoài luồng giao diện, có giới hạn số nút và độ sâu; mỗi lúc một lần quét
+   (huỷ lần cũ); tối đa 2 việc dịch song song; vẽ ngay các đoạn có sẵn trong từ điển hoặc bộ nhớ đệm, rồi
+   vẽ dần các đoạn dịch xong (gom khoảng 150 ms); bộ nhớ đệm LRU 600 mục, **chỉ trong RAM**; ảnh chụp:
+   chép HardwareBuffer sang bitmap thường, đóng buffer ngay, recycle bitmap sau OCR; đóng bộ OCR, bộ dịch
+   và huỷ coroutine trong `onDestroy`/`onUnbind`; tạm dừng khi tắt màn hình, khi sang app không chọn, khi
+   có bàn phím, khi gặp màn hình nhạy cảm.
+9. **Quyền riêng tư:** xem mục 8.
+10. **Vẽ lớp phủ:** một View toàn màn hình vẽ mọi khung bằng `StaticLayout`; cỡ chữ tự co (tìm nhị phân
+    từ khoảng 9 sp tới chiều cao khung); quá dài thì cắt "…", **không bao giờ tràn ngang** sang vùng điều
+    khiển bên cạnh; màu nền lấy mẫu quanh khung trong ảnh chụp (nếu có), không có thì theo giao diện
+    sáng/tối; màu chữ theo độ tương phản; hiện dần để bớt nhấp nháy; xoay màn hình thì xóa và quét lại;
+    bù toạ độ theo vị trí thật của View trên màn hình.
+11. **Nút nổi** (lớp phủ trợ năng nhỏ, kéo được): chạm = xem chữ gốc / hiện bản dịch; giữ lâu = tạm dừng
+    / chạy tiếp.
+12. **Giao diện:** thêm dòng "Dịch màn hình" trong tab Cài đặt, mở một trang riêng gồm: công tắc tự động
+    dịch; trạng thái quyền Trợ năng và nút mở cài đặt (kèm hướng dẫn "Cho phép cài đặt bị hạn chế" trên
+    Android 13+ và nút mở Thông tin ứng dụng); trạng thái gói dịch + nút tải (tùy chọn chỉ Wi-Fi) + nút xóa;
+    danh sách app (6 app trên, ghi app nào đã cài, và "Thêm ứng dụng khác" từ danh sách app có biểu tượng);
+    ngôn ngữ nguồn (Trung giản thể và phồn thể) và đích (Việt), cố định; chế độ Ngoại tuyến / AI nâng cao;
+    mức tốc độ (Tiết kiệm pin / Cân bằng / Nhanh); công tắc đọc chữ trong ảnh; công tắc nút nổi; tạm dừng;
+    hướng dẫn tiếng Việt; dòng lỗi gần nhất. Giữ nguyên thiết kế hiện có.
+13. **Thư viện** (phiên bản cần xác minh lại trên maven.google.com từ máy tính; dự án overlay-translator
+    bản 24/10/2026 đang dùng đúng các bản này):
+    `com.google.mlkit:text-recognition-chinese:16.0.1` (mô hình đi kèm APK, chạy ngoại tuyến ngay),
+    `com.google.mlkit:translate:17.0.3` (tải mô hình `zh` và `vi` một lần, dịch qua tiếng Anh có sẵn),
+    `org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2`. Play services kéo theo androidx nên
+    phải đổi `android.useAndroidX=true`. Cân nhắc `abiFilters` `arm64-v8a`, `armeabi-v7a` (thêm `x86_64`
+    nếu thử trên emulator) để APK không phình.
+14. **AI nâng cao:** `Translator(apiKey, TranslationModel.LUNA, settings).write(...)`, đầu vào và đầu ra
+    JSON; chỉ gửi các đoạn chữ từ điển và bộ nhớ đệm chưa có; mỗi lần tối đa 40 đoạn hoặc 3.000 ký tự;
+    một yêu cầu một lúc; có trần số yêu cầu mỗi 10 phút; kết quả qua cùng bộ kiểm tra số; không có key
+    hoặc vượt trần thì quay về ngoại tuyến và báo trên trang Cài đặt. Không bao giờ gửi ảnh.
+15. **Cấu hình dịch vụ** (`res/xml/screen_translation_service.xml`): eventTypes
+    `typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled|typeWindowsChanged`; flags
+    `flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews`;
+    `canRetrieveWindowContent=true`; `canTakeScreenshot=true`; `notificationTimeout` khoảng 150;
+    `isAccessibilityTool=false`; không có `canPerformGestures`; `description` là chuỗi tiếng Việt nói rõ
+    đọc gì, không đọc gì. Manifest: service `exported=true` với
+    `permission="android.permission.BIND_ACCESSIBILITY_SERVICE"`, thêm `<queries>` cho 6 package và
+    intent MAIN/LAUNCHER. Kiểm từng thuộc tính `android:` với `android.R$attr` trước khi push (đã từng
+    hỏng vì sai tên thuộc tính).
+
+## 6. Kế hoạch file và test
+
+`android/core/src/main/kotlin/vn/mocsinh/mstrans/core/screen/` (Kotlin thuần, test được):
+
+| File | Việc |
+|---|---|
+| `ChineseText.kt` | Nhận biết chữ Hán, đổi Phồn → Giản (đọc bảng tài nguyên), chuẩn hoá khoá tra |
+| `CommerceDictionary.kt` | Từ điển có sẵn, mẫu câu có số, tra khớp dài nhất |
+| `NumberGuard.kt` | Lấy số, giá, %, dấu âm, ký hiệu tiền, mã hàng; kiểm tra còn nguyên văn |
+| `ScreenTranslator.kt` | Thứ tự dịch ở mục 5 điểm 4, thuật ngữ, luật thuật ngữ nguy hiểm, LRU, giao diện `TextEngine` |
+| `ScreenTextMerger.kt` | Gộp và khử trùng chữ từ Trợ năng và OCR |
+| `SensitiveScreen.kt` | Quyết định tạm dừng (mật khẩu, bàn phím, từ khóa, cửa sổ bảo vệ) |
+| `FrameSignature.kt` | Chữ ký ảnh và so sánh |
+| `ScreenController.kt` | Máy trạng thái: sự kiện → hành động (xóa phủ, hẹn quét, bỏ kết quả cũ), đồng hồ giả để test |
+| `ScreenSettings.kt` | Khóa cài đặt, mặc định (tắt; Taobao chọn sẵn), mức tốc độ |
+| `OverlayFit.kt` | Co cỡ chữ (hàm đo chữ truyền vào), chọn màu theo tương phản |
+| `ScreenAi.kt` | Dựng yêu cầu và đọc kết quả chế độ AI |
+
+Test ở `android/core/src/test/kotlin/vn/mocsinh/mstrans/core/screen/`: đủ 30 thuật ngữ bắt buộc;
+Đăng xuất khác Xóa tài khoản (cả khi bộ dịch giả cố tình dịch sai); số, giá, %, dấu âm, đơn vị, mã hàng
+giữ nguyên; Phồn thể ra cùng bản dịch với Giản thể; thuật ngữ người dùng đè từ điển; gộp nguồn không
+trùng; màn hình nhạy cảm; máy trạng thái (cuộn, đổi trang, đổi app, khóa màn hình, kết quả cũ bị bỏ);
+chữ ký ảnh; co chữ; chế độ AI với MockWebServer (đã có sẵn trong test core).
+
+`android/app/src/main/kotlin/vn/mocsinh/mstrans/screen/`: `ScreenTranslationService.kt`,
+`ScreenCapture.kt`, `MlKitEngines.kt` (OCR, dịch, quản lý mô hình), `OverlayView.kt`,
+`OverlayController.kt`, `FloatingButton.kt`, `ScreenState.kt` (trạng thái chung cho trang Cài đặt). Thêm
+`ui/ScreenTranslationPage.kt`, `res/xml/screen_translation_service.xml`, `res/values/strings.xml` (chuỗi
+mô tả dịch vụ).
+
+## 7. Từ điển
+
+**30 thuật ngữ bắt buộc (đúng nguyên văn đặc tả):** 我的淘宝 = Taobao của tôi · 设置 = Cài đặt ·
+退出登录 = Đăng xuất · 退出当前账户 = Thoát tài khoản hiện tại · 切换账户 = Chuyển tài khoản ·
+注销账号 = Xóa tài khoản · 登录 = Đăng nhập · 我的订单 = Đơn hàng của tôi · 待付款 = Chờ thanh toán ·
+待发货 = Chờ gửi hàng · 待收货 = Chờ nhận hàng · 收货地址 = Địa chỉ nhận hàng · 购物车 = Giỏ hàng ·
+加入购物车 = Thêm vào giỏ hàng · 立即购买 = Mua ngay · 起批量 = Số lượng nhập tối thiểu ·
+一件代发 = Gửi hàng lẻ trực tiếp · 混批 = Nhập sỉ kết hợp nhiều mẫu · 现货 = Hàng có sẵn ·
+预售 = Hàng đặt trước · 包邮 = Miễn phí vận chuyển · 不含税 = Chưa bao gồm thuế · 含税 = Đã bao gồm thuế ·
+规格 = Quy cách · 库存 = Tồn kho · 型号 = Mã mẫu · 物流 = Vận chuyển · 运费 = Phí vận chuyển ·
+退款 = Hoàn tiền · 售后 = Hậu mãi.
+
+**Đề xuất bổ sung (chưa rà, cần kiểm lại trước khi đưa vào):**
+- Tài khoản, cài đặt: 账号与安全 = Tài khoản và bảo mật · 个人信息 = Thông tin cá nhân · 隐私 = Quyền
+  riêng tư · 通用 = Cài đặt chung · 消息通知 = Thông báo tin nhắn · 清除缓存 = Xóa bộ nhớ đệm ·
+  帮助与反馈 = Trợ giúp và phản hồi · 注册 = Đăng ký · 密码 = Mật khẩu · 修改密码 = Đổi mật khẩu ·
+  验证码 = Mã xác minh · 确定 = Đồng ý · 确认 = Xác nhận · 取消 = Hủy · 返回 = Quay lại · 完成 = Xong ·
+  保存 = Lưu · 编辑 = Sửa · 删除 = Xóa · 搜索 = Tìm kiếm · 分享 = Chia sẻ.
+- Mua sắm: 首页 = Trang chủ · 推荐 = Đề xuất · 分类 = Danh mục · 全部 = Tất cả · 筛选 = Lọc ·
+  综合 = Tổng hợp · 销量 = Lượt bán · 价格 = Giá · 新品 = Hàng mới · 店铺 = Cửa hàng · 进店 = Vào cửa
+  hàng · 旗舰店 = Cửa hàng chính hãng · 宝贝 = Sản phẩm · 商品 = Sản phẩm · 商品详情 = Chi tiết sản phẩm ·
+  参数 = Thông số · 评价 = Đánh giá · 问大家 = Hỏi người đã mua · 收藏 = Lưu yêu thích · 关注 = Theo dõi ·
+  足迹 = Đã xem · 优惠券 = Phiếu giảm giá · 领券 = Nhận phiếu giảm giá · 红包 = Hồng bao · 秒杀 = Flash
+  sale · 正品 = Hàng chính hãng · 结算 = Thanh toán · 提交订单 = Đặt hàng · 付款 = Thanh toán ·
+  支付宝 = Alipay · 数量 = Số lượng · 颜色 = Màu sắc · 尺码 = Cỡ · 尺寸 = Kích thước · 材质 = Chất liệu ·
+  品牌 = Thương hiệu · 产地 = Xuất xứ · 重量 = Trọng lượng.
+- Đơn hàng, vận chuyển: 待评价 = Chờ đánh giá · 已发货 = Đã gửi hàng · 确认收货 = Xác nhận đã nhận hàng ·
+  查看物流 = Xem vận chuyển · 快递 = Chuyển phát nhanh · 运费险 = Bảo hiểm phí vận chuyển · 退货 = Trả
+  hàng · 换货 = Đổi hàng · 七天无理由退货 = Đổi trả trong 7 ngày không cần lý do.
+- Nhập hàng (1688): 供应商 = Nhà cung cấp · 厂家 = Nhà sản xuất · 源头工厂 = Xưởng gốc · 批发 = Bán sỉ ·
+  起订量 = Số lượng đặt tối thiểu · 代发 = Gửi hàng hộ · 定制 = Đặt làm riêng · 询价 = Hỏi giá ·
+  发票 = Hóa đơn · 开票 = Xuất hóa đơn · 增值税 = Thuế GTGT · 样品 = Hàng mẫu · 拿样 = Lấy mẫu.
+
+**Mẫu câu có số** (X, Y giữ nguyên văn; `万` viết thành "vạn", chữ số không đổi): 满X减Y = Mua đủ X giảm
+Y · X人付款 = X người đã mua · 已售X = Đã bán X · 月销X = Bán X/tháng · X件起批 = Sỉ từ X cái ·
+X天内发货 = Gửi hàng trong X ngày · X小时内发货 = Gửi hàng trong X giờ · 共X件 = Tổng X sản phẩm ·
+X条评价 = X đánh giá · 券后X = Sau phiếu giảm X.
+
+## 8. Bảo mật, quyền riêng tư, khóa ký
+
+- Chỉ chạy khi người dùng bật công tắc **và** cấp quyền Trợ năng. Mặc định tắt.
+- Chỉ xử lý app đã chọn: sự kiện của app khác bị bỏ ngay, không đọc nội dung. Bỏ qua chính MSTrans.
+- Không bao giờ nhấn, nhập chữ, cuộn hộ hay giao dịch: không gọi `performAction`, không có quyền cử chỉ.
+- Ảnh chụp chỉ ở RAM, không ghi ra bộ nhớ. Không log chữ hay ảnh màn hình. Chế độ ngoại tuyến không gửi
+  gì ra mạng. Chế độ AI chỉ gửi chữ của đoạn chưa dịch, không gửi ảnh, chỉ khi người dùng chọn.
+- Tạm dừng và xóa lớp phủ khi: có ô mật khẩu (`isPassword`), bàn phím đang hiện, từ khóa nhạy cảm
+  (密码, 支付密码, 验证码, 银行卡, 安全键盘, 付款码, 收款码, CVV, 身份证…), cửa sổ có FLAG_SECURE (biết qua
+  lỗi `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`; khi đó **ngừng dịch cả chữ Trợ năng** của cửa sổ đó). Nhận
+  diện bằng từ khóa chỉ là lớp bổ sung, không phải bảo vệ tuyệt đối. Android 8 đến 10 không biết được cửa
+  sổ có FLAG_SECURE hay không.
+- Xóa bộ nhớ đệm trong RAM khi dừng, khi khóa màn hình, khi rời app đã chọn.
+- Quyền mới dự kiến: chỉ dịch vụ Trợ năng (cộng các quyền ML Kit tự gộp vào manifest, phải đọc lại
+  manifest gộp sau khi build). Không thêm SYSTEM_ALERT_WINDOW, không thêm quyền bộ nhớ.
+- ML Kit có thể gửi số liệu sử dụng ẩn danh theo điều khoản của Google (không gồm ảnh hay chữ): ghi rõ
+  trong báo cáo, không hứa "không gửi gì cả".
+- **Khóa ký:** `android/app/mstrans-sideload.p12` và mật khẩu của nó nằm trong repo Public, nên coi như
+  đã lộ: người khác có thể ký một APK mang tên MSTrans mà điện thoại chấp nhận là bản cập nhật. Chuyển
+  repo sang Private không khắc phục được. **Không đổi khóa trong đợt này** (đổi là mất khả năng cập nhật
+  đè). Đề xuất để Minh quyết: (a) trước mắt chỉ cài APK nhận qua kênh riêng và kiểm SHA-256; (b) về lâu
+  dài xoay khóa bằng APK Signature Scheme v3 (`apksigner rotate` tạo chuỗi khóa cũ → mới, ký bản mới bằng
+  khóa mới kèm chuỗi đó): Android 9+ cập nhật đè được, Android 8 thì không (phải gỡ cài lại hoặc nâng
+  minSdk lên 28). Khóa mới để trong GitHub Secret, CI giải mã ra file rồi đặt `MSTRANS_KEYSTORE` (Gradle
+  đã đọc sẵn biến này), bỏ khóa cũ khỏi cây mã (lịch sử git vẫn còn).
+
+## 9. CI và cách giao APK kín
+
+- Workflow `.github/workflows/android.yml`: test core → `assembleRelease` → kiểm APK (aapt2 badging,
+  apksigner, SHA-256, dừng nếu package khác `vn.mocsinh.mstrans`) → Android Lint (lỗi lint ghi thành
+  annotation, lint hỏng không chặn APK) → nhánh giao hàng `claude/funny-gates-s6pl2c`: artifact và
+  Release công khai như cũ; **nhánh khác: Release nháp** `test-android-<version>-<run>` (kèm
+  `MSTrans.apk.sha256`), không công khai, không thành "latest".
+- Đọc kết quả khi không xem được log: `gh api repos/moc-sinh/app-dichapple/check-runs/<job id>/annotations`.
+- Lấy APK từ Release nháp: `gh release download test-android-<version>-<run> -R moc-sinh/app-dichapple -p MSTrans.apk`
+  (cần quyền ghi repo), rồi gửi Minh qua kênh riêng kèm SHA-256. Dọn bản nháp sau khi Minh cài:
+  `gh release delete test-android-<version>-<run> -R moc-sinh/app-dichapple -y`.
+- Run #14 (`f985b9f`, https://github.com/moc-sinh/app-dichapple/actions/runs/45654585409) **xanh**: test core
+  đạt; APK `vn.mocsinh.mstrans`, versionCode 14, versionName 1.6.0, ký v2, chứng thư
+  `ff13e1b4…994a6eb9` (trùng 1.6.0 và khóa trong repo); SHA-256 của APK
+  `a4f34fb9fb42eb5704c2bd9291536eabe8565bfdc825546615331f5f7b9930d0`, 2.030.442 byte. Đã tạo Release nháp
+  `test-android-1.6.0-14` (draft, prerelease); bước phát hành công khai bị bỏ qua đúng ý; Release công khai mới
+  nhất vẫn là `android-1.6.0-13`. Bản nháp này chỉ là 1.6.0 dựng lại để thử quy trình, không gửi cho Minh, xóa
+  được.
+- **Mốc Android Lint của mã 1.6.0** (trước khi thêm tính năng): 1 lỗi `MissingPermission` ở
+  `app/src/main/kotlin/vn/mocsinh/mstrans/audio/AndroidAudio.kt:128` (có từ trước: gọi ghi âm mà không kiểm
+  quyền ngay tại chỗ) và 13 cảnh báo (DataExtractionRules 1, ObsoleteSdkInt 1, OldTargetApi 1, SetTextI18n 4,
+  UnusedResources 3, VectorPath 1, ViewConstructor 2). Mã mới không được thêm lỗi lint nào; lỗi cũ nên sửa
+  riêng (kiểm `checkSelfPermission` hoặc bắt `SecurityException` trước khi mở micro).
+
+## 10. Việc tiếp theo (theo thứ tự)
+
+1. Chuẩn bị máy: clone hoặc `git fetch`, checkout `mstrans/auto-screen-translate`; JDK 17, SDK, đặt
+   `ANDROID_HOME`; chạy `.\gradlew.bat :core:test` và build 1.6.0 hiện tại để có mốc (ghi lại kích thước
+   APK).
+2. Xác minh phiên bản ML Kit và `kotlinx-coroutines-play-services` trên Google Maven; thêm phụ thuộc; đặt
+   `android.useAndroidX=true`; build lại, đo kích thước APK trước và sau.
+3. Viết lõi `core/screen` theo mục 6, viết test trước (TDD), cho tới khi xanh.
+4. Viết phần app: dịch vụ, chụp màn hình, OCR và dịch ML Kit, lớp phủ, nút nổi, manifest, xml cấu hình.
+5. Trang Cài đặt › Dịch màn hình và hướng dẫn tiếng Việt. Mọi nút phải chạy thật.
+6. Đổi versionName thành 1.7.0. Build, lint, apksigner, cài đè lên 1.6.0 (13) trên điện thoại thật (hoặc
+   emulator Android 11+ có dịch nhị phân ARM nếu chưa có điện thoại), chạy 20 tình huống ở mục 11, đo RAM,
+   CPU, pin, độ trễ.
+7. Push → CI → Release nháp → gửi APK kín cho Minh kèm SHA-256.
+8. Báo cáo cho Minh: kiểm thử, lỗi đã sửa và giới hạn, hiệu năng và bảo mật (số đo thật), hướng dẫn bật,
+   hướng dẫn cập nhật đè, danh sách commit và bản build. Cập nhật `docs/CHECKPOINT.md` và file này bằng
+   commit `[skip ci]`. Mở PR nháp vào `claude/funny-gates-s6pl2c`, không merge.
+
+## 11. Tình huống thử trên thiết bị: **chưa kiểm cái nào**
+
+Cài đè lên 1.6.0 (13) đã đạt trên máy ảo (mục 14); 20 tình huống dưới đây chưa chạy.
+
+| # | Tình huống | Kết quả mong đợi |
+|---|---|---|
+| 1 | Mở Taobao sau khi bật | Chữ Trung hiện bản dịch trong khoảng 1 giây, không phải bấm |
+| 2 | Cuộn nhanh danh sách | Bản dịch ẩn khi cuộn, hiện lại khi dừng, không lệch, không ANR |
+| 3 | Mở chi tiết sản phẩm | Không còn bản dịch của trang trước |
+| 4 | Ảnh có chữ Trung | Android 11+: chữ trong ảnh được dịch (OCR) |
+| 5 | Trang Cài đặt của Taobao | Đúng thuật ngữ bắt buộc |
+| 6 | Đăng xuất và Xóa tài khoản | 退出登录 = Đăng xuất, 注销账号 = Xóa tài khoản, không lẫn |
+| 7 | Chuyển sang 1688 | Dịch tiếp nếu 1688 được chọn |
+| 8 | Sang app không chọn | Lớp phủ biến mất ngay, không xử lý gì |
+| 9 | Bật bàn phím | Tạm dừng, bàn phím không bị che |
+| 10 | Khóa và mở khóa | Tạm dừng khi khóa, chạy lại khi mở |
+| 11 | Tắt Internet sau khi tải mô hình | Vẫn dịch ngoại tuyến |
+| 12 | Tắt rồi bật lại chế độ dịch | Lớp phủ mất ngay khi tắt, chạy lại khi bật |
+| 13 | Xoay màn hình | Bản dịch đúng chỗ sau khi xoay |
+| 14 | Thu hồi quyền Trợ năng | Mọi thứ dừng, trang Cài đặt báo chưa có quyền |
+| 15 | Chạy lâu (30 phút trở lên) | RAM ổn định, không rò bộ nhớ |
+| 16 | Giá tiền, thông số | Số, ¥, %, dấu âm, đơn vị, mã hàng giữ nguyên |
+| 17 | Chạm, vuốt, cuộn, nhấn nút qua lớp phủ | Taobao nhận đầy đủ |
+| 18 | Bàn phím và tab Hội thoại của MSTrans | Không hỏng, không bị dịch phủ lên |
+| 19 | Màn hình nhạy cảm, màn hình có FLAG_SECURE | Không dịch, không chụp |
+| 20 | RAM, CPU, pin, độ trễ | Có số đo thật để báo cáo |
+
+Cũng chưa kiểm: lần chạy CI có ML Kit; cài đè lên 1.6.0 (13) trên điện thoại thật (trên máy ảo đã đạt, mục 14).
+Android Lint với mã mới đã chạy (mục 13).
+
+## 12. Rủi ro và giới hạn đã biết
+
+- Android 13+ chặn bật Trợ năng cho app cài từ file APK ("cài đặt bị hạn chế"). Người dùng phải vào
+  Cài đặt › Ứng dụng › MSTrans › ⋮ › Cho phép cài đặt bị hạn chế (tên mục khác nhau tùy hãng). Phải có
+  trong hướng dẫn và trên trang Cài đặt.
+- Chất lượng dịch Trung → Việt của ML Kit ở mức cơ bản; từ điển, mẫu câu và Thuật ngữ bù cho phần giao
+  diện mua sắm. Câu mô tả dài sẽ kém hơn AI.
+- Chưa biết Taobao để lộ bao nhiêu chữ qua Trợ năng (nhiều phần vẽ riêng hoặc là ảnh); phần đó cần OCR,
+  tức Android 11+. Android 8 đến 10 chỉ dịch được chữ Trợ năng đọc được.
+- Màn hình có FLAG_SECURE (thường là thanh toán) không được dịch: đúng yêu cầu, không phải lỗi.
+- Tải mô hình dịch cần mạng tới máy chủ Google (khoảng vài chục MB mỗi ngôn ngữ, cần đo).
+- Pin: OCR là phần tốn nhất; chỉ chạy khi nội dung đổi. Cần số đo thật trước khi hứa.
+- Khóa ký đã lộ (mục 8).
+
+## 13. Tiến độ ngày 26/11/2026 (máy tính Windows)
+
+Máy: Windows 11, i7-12700H, 32 GB RAM. JDK 21 (Temurin) chạy Gradle, mã vẫn biên dịch cho Java 17. Android SDK
+cài vào `%LOCALAPPDATA%\Android\Sdk` từ gói command-line tools chính thức (`commandlinetools-win-13114758`,
+SHA-256 `98b565cb…a3505b003` khớp), cùng `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`.
+
+| Commit | Nội dung |
+|---|---|
+| `ff9a7fd` | ML Kit `text-recognition-chinese:16.0.1`, `translate:17.0.3`, `kotlinx-coroutines-play-services:1.10.2` (đã kiểm là bản mới nhất trên Google Maven / Maven Central ngày 26/11/2026); `android.useAndroidX=true`; chỉ ARM (`MSTRANS_ABIS` thêm `x86_64` cho emulator); thư viện máy nén trong APK |
+| `e0f0304` | Lõi `core/screen` theo mục 6, 58 test mới (tổng 103 test core đều xanh) |
+| `f3fd2bb` | Phần app: dịch vụ, chụp màn hình, ML Kit, lớp phủ, nút nổi, trang Cài đặt › Dịch màn hình, manifest, xml; versionName 1.7.0 |
+| `855610c` | Checkpoint sau khi viết mã `[skip ci]` |
+| `4fecc54` | App thử nghiệm `android/testshop` (chỉ build khi đặt `MSTRANS_TESTSHOP`) |
+
+**Kích thước APK (bản release, đo thật):** 1.6.0 = 2.031.014 byte. Thêm ML Kit với 3 kiến trúc CPU và thư viện máy
+không nén = 81.207.479 byte. Chỉ ARM + nén = 27.041.751 byte. Bản 1.7.0 đủ tính năng = 27.127.423 byte. Phần lớn là
+`libtranslate_jni.so` và `libmlkit_google_ocr_pipeline.so`. Gói dịch zh/vi tải về sau khi cài (chưa đo dung lượng).
+
+**Bản build cục bộ** (`MSTRANS_BUILD=15`): `vn.mocsinh.mstrans`, versionCode 15, versionName 1.7.0, ký v2, chứng thư
+`ff13e1b4…994a6eb9` (trùng 1.6.0). SHA-256 của APK thay đổi theo mỗi lần build. Quyền trong APK: 4 quyền cũ +
+`ACCESS_NETWORK_STATE` (ML Kit) + `vn.mocsinh.mstrans.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (AndroidX, quyền nội bộ
+chỉ app này có). Không có SYSTEM_ALERT_WINDOW, không có quyền bộ nhớ.
+
+**Lint:** 1 lỗi (`MissingPermission` cũ ở `AndroidAudio.kt`), 13 cảnh báo, đúng như mốc 1.6.0. Đã tắt có ghi lý do:
+`UseCompatLoadingForDrawables` (xuất hiện do bật AndroidX, app không dùng AppCompat), `ChromeOsAbiSupport` (chỉ
+build cho điện thoại), `UnusedAttribute` trong `screen_translation_service.xml` (`canTakeScreenshot` 11+,
+`isAccessibilityTool` 12+, máy cũ tự bỏ qua). Các thuộc tính `android:` của xml và manifest đã đối chiếu với
+`android.R$attr` của SDK 35.
+
+**Quyết định thêm khi viết mã (khác hoặc chi tiết hơn mục 5):**
+- Từ điển chia hai: `TERMS` (30 thuật ngữ bắt buộc + thuật ngữ mua sắm đã rà) được thay cả trong câu dài trước khi
+  dịch; `LABELS` (từ thường như 确定, 删除, 价格) chỉ khớp nguyên dòng, vì trong câu chúng hay mang nghĩa khác.
+  Đã rà danh sách "đề xuất bổ sung" của mục 7 và đưa vào; 红包 dịch là "Lì xì".
+- Thuật ngữ người dùng đọc được cả hai chiều: `báo giá = 报价` cũng cho 报价 → "báo giá".
+- Bản dịch còn sót chữ Hán thì không tin (giữ chữ gốc). Dịch từng khúc thì thêm dấu cách và đổi dấu câu Trung
+  (，。：) sang kiểu Việt.
+- Từ khóa nhạy cảm chia hai mức: 支付密码, 付款码, 收款码, 安全键盘, 银行卡号, 身份证号, CVV… dừng ở mọi nơi; 密码,
+  验证码, 银行卡, 身份证 chỉ dừng khi màn hình có ô nhập chữ (trang Cài đặt của Taobao có dòng "修改密码", không nên
+  dừng ở đó).
+- Thay vì tính "chữ ký" khi mỗi sự kiện đổi nội dung tới, lần quét tự tính chữ ký (chữ Hán + vị trí); giống lần
+  trước thì không vẽ lại. Lần quét chờ màn hình yên nhưng không quá 1,5 giây (banner chạy liên tục không làm hoãn mãi).
+- OCR khi chỉ có nội dung đổi (không đổi trang, không cuộn) cách nhau tối thiểu 5 / 2,5 / 1,2 giây theo mức tốc độ.
+- Chữ của ô nhập (người dùng đang gõ) không bị phủ. `contentDescription` chỉ dùng khi nút không có chữ, không có con
+  và không phải ảnh.
+
+**Chưa kiểm:** cả 20 tình huống mục 11; số đo RAM, CPU, pin, độ trễ; cài đè lên 1.6.0 (13) trên điện thoại thật;
+lần chạy CI có ML Kit; Taobao để lộ bao nhiêu chữ qua Trợ năng; kích thước gói dịch tải về; chữ có vừa khung không.
+
+## 14. Điểm dừng 26/11/2026, 00:45
+
+**Máy ảo trên máy tính Windows**
+- Theo lựa chọn của Minh, đã cài driver tăng tốc "Android Emulator hypervisor driver" 2.2.0 (AEHD, dịch vụ
+  `aehd`) bằng quyền quản trị. Google ngừng driver này sau 31/12/2026 (lâu dài: Windows Hypervisor Platform). Gỡ:
+  PowerShell quyền quản trị, chạy `silent_install.bat -u` trong
+  `%LOCALAPPDATA%\Android\Sdk\extras\google\Android_Emulator_Hypervisor_Driver`.
+- Gói SDK thêm: `emulator`, `system-images;android-34;google_apis_playstore;x86_64`.
+- Máy ảo `mstrans34`: Pixel 7, Android 14, 4 GB RAM, `hw.keyboard=no` (hiện bàn phím ảo). Mở:
+  `& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd mstrans34 -no-snapshot-save`
+- **Chú ý:** máy tính này có phiên khác chạy máy ảo riêng. Lúc 00:44 một app của phiên đó bị cài nhầm vào
+  `mstrans34` (lệnh `adb` không chỉ định thiết bị); không gỡ vì không phải của MSTrans. Luôn dùng
+  `adb -s <serial>` (xem `adb devices`; `adb -s <serial> emu avd name` cho biết máy nào là `mstrans34`), và chỉ đo
+  RAM/CPU khi chỉ chạy một máy ảo.
+
+**Đã thử trên `mstrans34`**
+
+| Việc | Kết quả |
+|---|---|
+| Cài bản đã phát hành 1.6.0 (13), file tải từ Release `android-1.6.0-13` | SHA-256 khớp `0e89f6e8…2941012b`, chứng thư `ff13e1b4…` |
+| Cài đè 1.7.0 (15) bằng `adb install -r` (APK ARM, chạy qua dịch mã trên x86_64) | **Đạt:** versionCode 15, thuật ngữ thêm ở 1.6.0 vẫn còn, không crash |
+| Cài đặt › Dịch màn hình | Hiển thị đúng, mặc định tắt, báo chưa cấp quyền Trợ năng |
+| Tải gói dịch (bật "Chỉ tải qua Wi-Fi") | Tải xong trong chưa tới 3 phút (chưa đo chính xác, chưa đo dung lượng) |
+
+**Lỗi giao diện thấy được, chưa sửa:** dòng "Gói dịch Trung → Việt" bị ngắt hai dòng vì giá trị "Đã tải, dịch được
+khi mất mạng" quá dài. Cách sửa: giá trị chỉ ghi "Đã tải" (chú thích bên dưới đã nói chạy được khi mất mạng).
+
+**App thử nghiệm** `android/testshop` ("TestShop 测试商城", đã cài vào `mstrans34`): đặt `MSTRANS_TESTSHOP=1` rồi
+`.\gradlew.bat :testshop:assembleDebug`. Mở thẳng một màn:
+`adb -s emulator-5554 shell am start -n vn.mocsinh.testshop/.ShopActivity --es screen settings`
+(`home`, `detail`, `settings`, `image`, `search`, `password`, `secure`). Mỗi lần chạm ghi log tag `TestShop`.
+
+**Làm tiếp (theo thứ tự)**
+1. Hỏi Minh: có cho tự bật quyền Trợ năng của MSTrans trên máy ảo (và khi thử thì tắt/bật lại, tắt Wi-Fi ảo, xoay,
+   khoá màn hình) không. Đã hỏi khoảng 00:43, **chưa trả lời**: không bật khi chưa được đồng ý.
+2. Sửa dòng gói dịch ở trên.
+3. Trong MSTrans: thêm app TestShop, bật "Tự động dịch màn hình", chạy 20 tình huống ở mục 11, đo RAM, CPU, độ trễ
+   (log tag `MSTransScreen`), chạy lâu 30 phút.
+4. Taobao thật: Minh tự đăng nhập Google Play trên máy ảo để cài. Điện thoại thật vẫn cần cho "cài đặt bị hạn chế"
+   và các màn FLAG_SECURE của app thật.
+5. Chế độ AI trên máy: cần Minh tự nhập key OpenAI; mới test bằng máy chủ giả.
+6. Đã push ngày 26/11/2026 (mục 15). CI chưa chạy vì commit cuối có `[skip ci]`; muốn chạy (ra Release nháp) thì
+   `gh workflow run android.yml -R moc-sinh/app-dichapple --ref mstrans/auto-screen-translate`.
+
+## 15. Bàn giao sang tài khoản khác (26/11/2026, 00:53)
+
+Tài khoản mới **không thấy cuộc trò chuyện cũ** và không thừa hưởng sự đồng ý nào đã cho ở phiên trước.
+
+**Dán đoạn này vào phiên mới**
+
+```
+Mở repo moc-sinh/app-dichapple, nhánh mstrans/auto-screen-translate (PR nháp #3, không merge). Đọc
+docs/CHECKPOINT-DICH-MAN-HINH.md, nhất là mục 0, 14 và 15, rồi làm tiếp theo "Làm tiếp" ở mục 14. Trả lời bằng
+tiếng Việt dễ hiểu, báo đúng kết quả thật, mục nào chưa thử thì ghi rõ là chưa kiểm.
+```
+
+**Mã nằm ở đâu**
+- GitHub: nhánh `mstrans/auto-screen-translate` của `moc-sinh/app-dichapple`.
+- Trên máy tính Windows đã làm: `%USERPROFILE%\app-dichapple`. Sang máy khác thì clone, checkout nhánh, và phải
+  cài lại Android SDK, driver tăng tốc, máy ảo (mục 13 và 14).
+- Nhánh `backup/truoc-khi-sua-loi-commit` chỉ có trên máy cũ (bản trước khi sửa lời và email commit): **không
+  push**.
+
+**Môi trường trên máy đã làm** (PowerShell, thư mục `android`)
+- JDK 21 Temurin (`JAVA_HOME` đã đặt sẵn trong máy).
+- `$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"`
+- `$env:MSTRANS_BUILD = "15"` (CI mới chạy đến #14; CI chạy thêm thì dùng số run mới nhất + 1).
+- Test `.\gradlew.bat :core:test`, APK `.\gradlew.bat :app:assembleRelease`, lint `.\gradlew.bat :app:lintRelease`.
+- File tạm của phiên cũ (APK 1.6.0 đã tải, ảnh chụp máy ảo) có thể đã mất. Bản 1.6.0 tải lại từ Release
+  `android-1.6.0-13` (hỏi trước khi tải). Máy ảo `mstrans34` vẫn còn app đã cài và gói dịch đã tải.
+
+**Phải xin lại sự đồng ý của Minh** trước khi: bật quyền Trợ năng trên máy ảo, đổi Wi-Fi/xoay/khoá màn hình
+máy ảo (câu hỏi lần trước chưa được trả lời), tải file, sửa cài đặt Windows, push.
+
+**Commit**
+- Không ghi tên model AI vào commit, PR hay mã; công cụ gợi ý thêm dòng đồng tác giả thì bỏ. Các commit ngày
+  26/11 đã được viết lại để bỏ dòng này trước khi push; vài commit cũ hơn trên nhánh vẫn còn, không sửa vì đã push.
+- Repo công khai, còn cấu hình git trên máy đã làm dùng email công ty. Commit bằng địa chỉ noreply của tài khoản
+  `minhdn-del` (xem `git log`): `git -c user.email=<địa chỉ đó> commit ...`, trừ khi Minh bảo khác.
+
+## 16. Phiên 26/11/2026, 02:50 đến 05:10 (tài khoản mới)
+
+**Minh đã đồng ý trong phiên này:** tự bật quyền Trợ năng của MSTrans trên máy ảo và thao tác máy ảo (Wi-Fi, xoay,
+khoá màn hình) để thử; làm lại hiển thị "theo phương án đẹp nhất cho mọi trường hợp"; tối ưu chất lượng và tốc độ;
+gửi file APK; commit. Chưa xin: push, tải file, sửa cài đặt Windows.
+
+**APK đã gửi Minh** (bản thứ hai thay bản thứ nhất): 1.7.0 (15), chỉ ARM, 27.164.243 byte, SHA-256
+`C63EB8C1A982470AC5AB8301F342708E3B373E3F152047C098D7EED7409C909E`, chứng thư `ff13e1b4…994a6eb9` (cài đè 1.6.0 được).
+Build bằng `MSTRANS_BUILD=15`, không đặt `MSTRANS_ABIS`. Mã của APK là commit `531dcbc` (166 test lõi xanh).
+**Chưa push**: hai commit của phiên này chỉ có trên máy này.
+
+### 16.1 Lỗi đã sửa
+- **Mở app đã chọn mà không dịch** (màn tĩnh dịch được 1/3 lần): nút nổi và lớp phủ là cửa sổ
+  `TYPE_ACCESSIBILITY_OVERLAY` của chính MSTrans; sự kiện đổi cửa sổ của chúng bị hiểu là "người dùng sang app
+  MSTrans" nên xoá lớp phủ và huỷ quét. Giờ bỏ qua (`ownOverlay`). Sau khi sửa 7/7.
+- **Trang có đồng hồ đếm ngược** (Taobao có nhiều): mỗi giây đồng hồ nhảy số làm bỏ lần quét đang chạy, bản dịch
+  lâu mới hiện hoặc hiện thiếu. Giờ nội dung đổi trên cùng trang không bỏ lần quét đang chạy mà quét thêm một lần sau
+  (`ScreenController`: thế hệ chỉ tăng khi sang trang, cuộn, xoay).
+- **Đang cuộn nhanh, bản dịch cũ đứng yên chồng lên chữ đã chạy**: gom sự kiện `notificationTimeout` 150 → 50 ms;
+  thử lại 0,15 giây sau khi vuốt thì lớp phủ đã xoá kịp.
+- **Đóng bàn phím đôi khi không dịch lại**: sự kiện cuối tới lúc bàn phím còn đang trượt ra. Giờ 400 ms sau khi thấy
+  bàn phím mở thì xem lại (`keyboardGone`). Sau khi sửa 6/6.
+- Dòng "Gói dịch Trung → Việt" ghi "Đã tải" (hết ngắt hai dòng).
+
+### 16.2 Hiển thị làm lại (Minh: "chữ sắp xếp rất xấu")
+Trước: bản dịch ép vào đúng khung chữ Trung, cỡ chữ to nhất vừa chiều cao, nền là trung bình điểm ảnh trong khung
+(lẫn màu nét chữ, trong 5 %), chữ chỉ đen hoặc trắng. Giờ (lõi có test, `core/screen`):
+- `TextLines`: vị trí từng chữ hỏi app (`EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY`) → từng dòng thật và cỡ chữ thật;
+  app không trả lời thì `LineStyles.lines` tìm dòng theo nét mực trong ảnh chụp.
+- `LineStyles.of`: màu nền thật (một màu, chuyển màu ngang như nút "加入购物车/立即购买", chuyển màu dọc như ảnh
+  banner), màu chữ gốc (giá đỏ vẫn đỏ, chữ phụ vẫn xám), nét mực ở đâu, khoảng trống cùng nền bốn phía.
+- `OverlayPlanner`: cùng cỡ chữ gốc trên một dòng, lấn sang khoảng trống bên cạnh; không đủ thì chữ hẹp
+  (sans-serif-condensed) rồi mới nhỏ dần (tối thiểu 80 % cỡ gốc, chữ to được tới 60 %); chữ cùng kiểu thì cùng cỡ;
+  giữa thì giữ giữa, sát phải thì mọc sang trái; hai bản dịch trên một hàng không đè nhau; đoạn nhiều dòng dàn lại
+  trong các dòng của nó; chỉ cắt "…" khi hết cách. Lề trang được giữ hai bên.
+- `OverlayComposer` + `OverlayView`: che chữ Trung bằng đúng màu nền (kể cả chuyển màu), viết bằng màu chữ gốc;
+  trên ảnh thì nhãn bo góc màu của ảnh; nhãn hẹp (dưới biểu tượng) dùng từ ngắn (`CommerceDictionary.SHORT`).
+- Ảnh chụp không khớp vị trí app báo (trang còn trượt vào) thì không dùng: `LineStyle.agrees`.
+- `ScreenBlocks`: chữ trong ảnh xuống dòng của cùng một câu được dịch thành một câu.
+- TestShop có màn mới `taobao` dựng giống trang sản phẩm Taobao thật (ảnh Minh gửi): tab, ô tìm kiếm, banner chữ
+  trong ảnh, giá, chip viền cam, thanh xanh, lưới sản phẩm, thanh mua chuyển màu.
+
+### 16.3 Chất lượng dịch
+- Dòng nhiều cụm cách nhau bởi khoảng trắng ("月销500+  现货"): cụm nào cũng có trong từ điển thì ghép bằng " · ",
+  không qua bộ dịch. Có cụm lạ thì dịch cả dòng (thử trên máy: dịch từng cụm rời ra kém hơn).
+- Thêm mẫu số và từ trang Taobao thật (`距结束`, `库存N件`, `预计发货后12-15日送达`, `超200人加购`, `满¥99包邮`,
+  `超级立减50%`, `到手价`…); bỏ tên hàng khỏi từ điển (càng chèn nhiều từ, bộ dịch càng làm rơi).
+- Câu đã dịch với một số được nhớ theo "khuôn": cùng câu, số khác thì không phải dịch lại.
+- Bộ dịch làm rơi từ đã chèn sẵn: hỏi lại chỉ với từ bắt buộc.
+- Chế độ AI: hiện bản ngoại tuyến trước, bản AI thay vào sau; mỗi dòng chỉ hỏi AI một lần.
+- Chữ không có Hán của app (giá "¥178") bị OCR đọc thành "羊178" không còn bị dịch.
+- Bộ nhớ đệm bản dịch 3.000 dòng, giữ khi đổi app (chỉ trong bộ nhớ, không ghi xuống máy).
+
+### 16.4 Tốc độ
+- Ghi log thời gian (không ghi chữ): "scan … ms after the page: tree … (letters N in … ms), shot, shown, pictures"
+  và "shown X of Y lines … ms after the page".
+- Đã đổi: chữ app tự báo vẽ trước, chữ trong ảnh vẽ sau; chụp màn hình song song với lúc hỏi vị trí chữ (chỉ sau khi
+  biết màn không nhạy cảm); quét 150 ms sau khi mở trang (trước 250) và chờ cửa sổ hết trượt bằng cách đọc lại khung
+  mỗi 50 ms (không tốn lượt chụp màn hình, Android giới hạn 1 lần mỗi 333 ms); nạp sẵn bộ dịch và bộ đọc chữ trong
+  ảnh khi bật; chờ sau khi cuộn 400 → 300 ms (Cân bằng), 350 → 250 ms (Nhanh).
+- Số đo trên máy ảo (từ sự kiện mở trang đến lúc có chữ): tốt nhất 0,45 đến 0,75 giây, xấu 1,1 đến 2 giây. **Máy ảo
+  thiếu RAM (4 GB, còn khoảng 400 MB, đã dùng swap), cùng một màn dao động gấp 3 lần: không đủ tin để nói các thay
+  đổi tốc độ nhanh hơn bao nhiêu.** Cần đo trên điện thoại thật.
+- RAM của MSTrans khi dịch: PSS 199 đến 218 MB (native heap 142 đến 151 MB, phần lớn là ML Kit).
+
+### 16.5 Tình huống mục 11 trên máy ảo (TestShop thay Taobao)
+Đạt: 1 tự dịch khi mở; 2 cuộn (ẩn khi cuộn, dịch lại khi dừng); 3 sang chi tiết không sót bản dịch cũ; 5, 6 thuật ngữ
+bắt buộc, Đăng xuất / Xóa tài khoản không lẫn; 8 sang app khác lớp phủ mất ngay; 9 bàn phím (ẩn khi mở, dịch lại khi
+đóng); 10 khoá và mở khoá; 11 mất mạng vẫn dịch; 13 xoay; 14 thu hồi và cấp lại quyền; 16 số, ¥, %, mã giữ nguyên;
+17 chạm xuyên lớp phủ; 19 ô mật khẩu và FLAG_SECURE không dịch.
+Chưa kiểm: 4 trên Taobao thật; 7 (1688 chưa cài); 12 tắt/bật lại từ nút nổi; 15 chạy lâu 30 phút; 18 bàn phím
+MSTrans; 20 pin. Chưa thử điện thoại thật, chưa thử Taobao thật.
+
+### 16.6 Biết mà chưa sửa
+- Dịch ngoại tuyến còn sai câu mô tả và tên thương hiệu (ví dụ "机乐堂" ra "Máy âm nhạc hội trường", "控温系统" ra
+  "Hệ thống thắt chặt"); chế độ AI sửa được nhưng cần key OpenAI.
+- Chip viền cam hẹp: bản dịch dài bị cắt "…".
+- Lint: vẫn 1 lỗi cũ (`MissingPermission` ở `AndroidAudio.kt`) và 13 cảnh báo như mốc 1.6.0; không có cái mới.
+
+### 16.7 Máy ảo
+`mstrans34` (serial `emulator-5554`), Trợ năng MSTrans đang bật, TestShop đã chọn trong "Ứng dụng được dịch",
+"Tự động dịch màn hình" bật. Đang cài bản `MSTRANS_ABIS=arm64-v8a,x86_64` cùng mã với APK đã gửi. Build TestShop:
+`MSTRANS_TESTSHOP=1`, màn `--es screen taobao` là màn giống Taobao.
+
+### 16.8 Tăng tốc khâu dịch (commit `e363f90`, chưa push)
+Log mới (chỉ số đo): "translated X of Y lines in … ms: engine N calls, … ms in all, longest … ms; … ms after the page".
+Đo với bộ nhớ đệm trống (tắt rồi bật lại dịch vụ trước mỗi lần), máy ảo:
+
+| Màn | Trước | Sau |
+|---|---|---|
+| Taobao | 20 lần gọi bộ dịch cho 10 dòng | 7 lần cho 8 dòng (2 chip giờ có mẫu câu) |
+| Chi tiết | 12 lần cho 8 dòng | 10 lần cho 8 dòng |
+
+- Thử dịch 4 dòng cùng lúc (thay 2): thời gian thực không đổi, mỗi lần gọi chậm gấp đôi; ML Kit chỉ chạy song song
+  được khoảng 2 việc. Giữ 2.
+- `NumberGuard`: mã chữ không phân biệt hoa thường ("ProMax" = "Promax"); số 万 viết ra được ("1万" = "10.000");
+  "1" không còn được coi là có trong "1.000"; dấu "+" vẫn bắt buộc. Trước đây tên sản phẩm dài bị loại oan rồi dịch
+  lại 11 mảnh nối tiếp, ra câu kém hơn.
+- Dịch từng mảnh: các mảnh chạy song song (trước lần lượt).
+- Từ điển: mẫu "近7天400+人逛过", "店铺年销售超1万件"; chip có mũi tên ">" giữ mũi tên; tên màu (红色, 黑色…).
+- Lỗi tìm được khi đo: chữ của app bị OCR đọc lại và vẽ chồng (tô xoá chữ app trước khi đọc ảnh dựa vào "trang hiện
+  tại", có lúc đã bị xoá giữa chừng); kết quả đọc ảnh của lần quét lỗi thời vẫn được giữ; trang mới mà ảnh chụp giống
+  lần trước thì không đọc ảnh lại nên mất chữ trong ảnh; phép kiểm ảnh chụp chỉ xem 12 dòng đầu trang nên không thấy
+  phần dưới còn xê dịch. Đã sửa cả bốn; màn taobao 6/6 lần đúng, các màn khác xem lại không hỏng.
+- APK gửi Minh lần ba: 27.168.507 byte, SHA-256 `71FFF241D996B6380722D8F11B2644B0A944279591C25C53C3F582A024F6CD8F`.
+- Thời gian thực trên máy ảo vẫn dao động mạnh; chưa đo trên điện thoại thật.
+
+## 17. Phiên 26/11/2026, 10:00 đến 11:10: clip dùng thật trên Taobao (chưa commit)
+
+Minh gửi một clip 81 giây quay Taobao thật trên điện thoại (file ở máy Minh, không nằm trong repo) và nói "sử dụng
+thực tế còn nhiều bất cập". Xem clip không cần tải gì: Windows PowerShell 5.1 gọi
+`Windows.Media.Editing.MediaComposition.GetThumbnailAsync` để tách khung hình. Cuối phiên Minh xem ảnh kết quả, nói
+"ổn rồi", **tạm dừng tối ưu phần hiển thị, làm tiếp khi khác**.
+
+### 17.1 Thấy gì trong clip, và nguyên nhân
+| Trong clip | Nguyên nhân |
+|---|---|
+| Ô xám/nâu che cả thẻ sản phẩm, có lúc hiện ba chấm tròn to (giây 41–49) | Taobao tự vẽ trang: cả thẻ là **một nút** có mô tả (tên + giá). App coi là một dòng chữ, phủ kín ô; cỡ chữ đoán theo "nét mực" của cả tấm ảnh nên khổng lồ, chỉ còn "…" |
+| Chữ dịch tự biến mất khoảng 1,2 giây rồi hiện lại dù không lướt (giây 62–66) | Một nhãn nhỏ tự lật phát sự kiện "cuộn"; app xoá cả màn hình với mọi sự kiện cuộn |
+| Chữ dịch đứng yên trong khi trang đã trôi (giây 5, 67) | `notificationTimeout=50`: Android giữ sự kiện cho tới khi 50 ms không có sự kiện cùng loại. Danh sách của Taobao có nhiều phần cùng phát "cuộn" nên bị giữ tới lúc dừng |
+| Mở trang mới 4–7 giây mới có chữ; dừng lướt hơn 1 giây | Vòng "trang chưa ổn định" lặp tới 14 lần (11 giây) vì chữ nằm dưới thanh cố định không bao giờ "khớp"; đọc cây giao diện từng nút một (máy ảo: 3,5 ms mỗi nút) |
+| "Miệng" trên giỏ hàng, "Trắng", ô cam "T…", "Quay lại 0" | Bộ đọc ảnh đọc biểu tượng thành chữ (口, 白, 回) |
+| "Mua …", "Pho…", "Cử a…", "Miễn phí vậ…" | Cỡ chữ đoán sai (nút gồm cả biểu tượng lẫn nhãn), rồi cắt cụt thay vì thu nhỏ |
+| "Thương hiệu, tùy chọn, nút"; "Atlas, đã chọn" | Mô tả cho trình đọc màn hình ("品牌，可选，按钮") bị dịch nguyên |
+| Tên sản phẩm đè lên thanh trên cùng, chữ đè lên hàng tab | Chữ của danh sách đã trôi xuống dưới thanh cố định, app vẫn báo "thấy được" |
+| Một số dòng không bao giờ được dịch (下单运费…, 物流客服) | Câu có từ bắt buộc (运费, 物流…) mà bộ dịch không giữ đúng chữ thì bị bỏ |
+
+### 17.2 Đã sửa (lõi có test; test lõi 218 bài, đều đạt)
+- `notificationTimeout=0`.
+- **Khung nhỏ tự trượt**: `Event.Scrolled(pkg, area)` → `Action.ClearArea`, không đổi thế hệ trang; chỉ chữ trong khung
+  đó đi. Dịch vụ hỏi app khung nào vừa trượt (ngoài luồng chính) và nhớ theo trang (`Scroller`: cửa sổ, loại, tầm
+  cuộn, số mục): trang chính thì không hỏi lại; khung không còn trên màn hình thì bỏ qua. Khung chưa gặp mà app trả
+  lời chậm hơn 150 ms thì coi là trang chính. Chữ đọc từ ảnh giữ nguyên giữa các lần quét cùng trang (trước bị xoá
+  mỗi lần, gây nháy).
+- **Đọc cây**: `TreeWalk` (từng tầng, con của một tầng hỏi song song, 4 luồng), Android 13+ thêm
+  `FLAG_PREFETCH_DESCENDANTS_HYBRID | FLAG_PREFETCH_UNINTERRUPTIBLE` (một câu hỏi trả về tới 50 nút). Vị trí chữ cũng
+  hỏi song song.
+- **Lướt xong đọc sớm hơn**: `Speed.scrollMs` (Tiết kiệm 300, Cân bằng 160, Nhanh 130; sự kiện cuộn cách nhau 100 ms),
+  không chờ khoảng cách tối thiểu giữa hai lần quét; đọc mà trang còn trượt thì lần sau chờ thêm 50 ms (tối đa bằng
+  `settleMs`), yên thì giảm lại.
+- **Bắt đầu dịch ngay sau khi đọc chữ** (không chờ ảnh chụp); câu ngắn dịch trước; bản dịch đầu tiên vẽ ngay.
+- **Ảnh chụp**: chờ nốt giới hạn của Android (350 ms cho cửa sổ, 1.030 ms cho màn hình) thay vì bị từ chối rồi quét
+  lại; không chụp thừa khi chỉ đồng hồ đếm ngược nhảy số.
+- **"Trang chưa ổn định"**: tối đa 4 lần (khoảng 2 giây, trước 11 giây), sau đó vẫn hiện từ ảnh chụp đó; đủ một nửa
+  số dòng khớp là ổn (trước 80 %); dòng có thể nằm dưới thanh cố định không tính.
+- **Khối mô tả không phải dòng chữ** (`TextFit`): ô lớn hơn nhiều so với chữ của nó thì chỉ vẽ khi ảnh chụp cho thấy
+  đúng chữ đó trong ô (`LineStyles.lines(grid, box, text)` chọn hàng mực vừa với chữ; biểu tượng phía trên nhãn không
+  tính; hàng có khoảng trống rộng là hai thứ). Không thì bỏ, chữ trong ô do bộ đọc ảnh lo.
+- **Chữ dưới thanh cố định** (`PaintOrder.underPanels`): nút trong danh sách cuộn, bị một khối có chữ vẽ sau và nằm
+  ngoài danh sách che từ một phần ba; chỉ vẽ nếu ảnh chụp cho thấy chữ ở đó.
+- **Chữ đọc từ ảnh** (`PictureText`): bỏ dòng dưới 2 chữ Hán, độ tin dưới 0,5, nghiêng quá 12°. Một dòng được tách
+  tại khoảng trống rộng; **phần chỉ có số/giá không dịch và không bị vẽ đè** (máy ảo từng đọc "¥7.90" thành "47.90"
+  rồi vẽ đè lên giá thật). Dòng bắt đầu bằng giá không ghép vào tên sản phẩm.
+- **Sắp chữ**: thu nhỏ tới cỡ nhỏ nhất còn đọc được trước khi cắt; cỡ chữ chỉ là đoán thì nhường trước tiên; một
+  dòng thành tối đa hai dòng; một nhãn quá dài không kéo nhỏ cả nhóm; bản dịch chỉ hiện được dưới 60 % thì không vẽ
+  (chữ từ ảnh: hễ phải cắt là không vẽ).
+- `SpokenText.label`: bỏ "按钮/可选/已选中…" khỏi mô tả.
+- **Từ điển**: khoảng 80 nhãn của Taobao (trang Của tôi, tìm kiếm, trang sản phẩm), 18 mẫu câu có số, dạng ngắn cho
+  chỗ hẹp kể cả mẫu câu (`short()`: "Freeship từ ¥99", "100+ thêm giỏ", "200+ xem/30 ngày").
+- Cửa sổ của app khác hiện đè lên (thông báo, cửa sổ hệ thống nhỏ) không còn bị coi là rời app, nếu app đang có màn
+  hình vẫn là app đã chọn.
+- TestShop: màn `--es screen real` bắt chước trang thật (thẻ là một nút có mô tả, chip có mô tả kiểu trình đọc, nhãn
+  tự lật mỗi 2,5 giây, thanh cố định trên và dưới đè lên danh sách, biểu tượng và nhãn chung một nút, 24 câu khác nhau).
+
+### 17.3 Số đo trên máy ảo (dao động mạnh, chỉ để so trước và sau)
+| | Trước | Sau |
+|---|---|---|
+| Lướt màn `home`, từ sự kiện cuộn cuối tới lúc có chữ | 910–1.060 ms | 430–740 ms |
+| Đọc cây 158 nút sau khi lướt | 570–720 ms | 60–200 ms |
+| Màn `real`, nhãn tự lật | xoá cả màn hình mỗi 2,5 giây | chỉ nhãn đó đổi |
+| Màn `real` sau khi lướt | vòng "chưa ổn định" 3,4 giây | 370–500 ms lúc máy rảnh, tới 1.080 ms khi bộ dịch đang bận |
+
+### 17.4 Đổi so với quy tắc cũ, Minh cần biết
+- **Từ bắt buộc trong câu**: nhãn nguyên dòng vẫn đúng từng chữ theo danh sách. Còn câu dài mà bộ dịch không giữ
+  được từ đó thì nay **vẫn hiện bản dịch của bộ dịch** (trước để nguyên chữ Trung). Hai thao tác tài khoản (注销 và
+  退出登录) vẫn bị chặn như cũ. Muốn quay lại quy tắc cũ: bỏ đoạn "It keeps none of the words put in" trong
+  `ScreenTranslator.translate`.
+- "约" hiện là "≈" (trước "Khoảng").
+
+### 17.5 Chưa làm
+- **Chưa thử bản này trên điện thoại thật**: mọi kiểm tra là trên máy ảo với màn `real` mô phỏng. Cần Minh cài và
+  quay lại một clip.
+- Bàn phím mở thì vẫn tạm dừng dịch (trang gợi ý tìm kiếm trong clip không được dịch): theo thiết kế, chưa đổi.
+- Tốc độ của chính bộ dịch ngoại tuyến (trong clip khoảng 2 dòng mỗi giây với tên sản phẩm dài) chưa nhanh hơn,
+  chỉ bắt đầu sớm hơn và ít dòng phải gọi hơn.
+- Ý tưởng chưa làm: dịch trước trong lúc trang lướt chậm dần; dùng mô tả đầy đủ của thẻ để dịch tên sản phẩm bị app
+  cắt; nhớ vị trí chữ theo khung để khỏi hỏi lại sau khi lướt.
+- Lint chưa chạy lại trong phiên này.
+
+### 17.6 APK gửi Minh lần bốn
+`android/app/build/outputs/apk/release/MSTrans-1.7.0-15-ban4.apk`: 1.7.0 (15), chỉ ARM, 27.194.527 byte, SHA-256
+`B9F052C1C3AA0D11E9475DB22B969B7FE945E13F37BFB9E05DFC3540C81E3F27`, chứng thư `ff13e1b4…994a6eb9`. Máy ảo đang cài
+bản x86_64 trước đó vài phút (thiếu riêng dạng ngắn của "店铺年销售超1万件").
+
+## 18. Phiên 26–27/11/2026 (tối): ảnh Taobao thật, dịch miễn phí, nút bật/tắt, mã kích hoạt, Cài đặt
+
+Minh gửi hai ảnh bảng chọn phân loại Taobao (chế độ tối) chụp trên điện thoại: bản dịch **lệch xuống** đều một khoảng,
+chữ Trung lộ ra, mỗi dòng phân loại thành hai khối hai dòng, dịch sai. Minh dặn: **ưu tiên dịch ngoại tuyến miễn phí**
+(ChatGPT tốn phí, chỉ là tùy chọn), tối ưu giao diện bản dịch ở mọi màn; làm cổng bật/tắt dịch đơn giản, không ảnh
+hưởng quyền khi vào app khác; thiết kế lại Cài đặt; thêm mã kích hoạt app.
+
+### 18.1 Lệch vị trí (đã tái hiện và sửa)
+- Bảng chọn phân loại là **cửa sổ hộp thoại có bóng đổ**: Android chụp nó kèm viền bóng bốn phía (ảnh 1248×2060 cho cửa
+  sổ 1080×1892 trên máy ảo), nên mọi chữ đọc từ ảnh bị dời xuống và sang phải đúng bằng viền. `ShotOrigin` tính góc ảnh
+  theo kích thước ảnh thật (bằng cửa sổ / bằng màn hình / rộng hơn đều hai bên). Log: "window shot WxH for a window …".
+- TestShop có màn `--es screen sku` dựng giống ảnh của Minh (hộp thoại tối, chữ vẽ thẳng không có chữ trợ năng, địa chỉ giả).
+
+### 18.2 Chữ đọc từ ảnh (`PictureText.pieces`, `MlKitEngines.read`)
+- Ảnh **tối** (chế độ tối) được **đảo màu** trước khi đọc: trên máy ảo hết các lỗi 瑁→環, 请→靖.
+- Sửa một chữ đọc sai trong từ ≥ 3 chữ theo từ điển (`CommerceDictionary.correct`), chỉ khi cả dòng sau khi sửa là từ đã
+  biết (保温桶 không thành 保温杯). Từ 2 chữ không sửa (手? có thể là 手机/手环/手套).
+- Tách thêm: dấu "|" (kể cả bị đọc thành "1", cao bằng chữ nhỏ bên cạnh, mảnh); **giá ở cuối cụm** (¥…); sau "..." của
+  tên bị cắt; **đổi màu chữ** (tên trắng, giá xám/cam); tiếng Việt cạnh chữ Trung; **số kẹp giữa hai cụm chữ Trung** khi
+  cả cụm không phải câu đã biết (số giữ nguyên ảnh gốc, không bao giờ vẽ số đọc sai). Khung một cụm không lấn sang cụm sau.
+- Ô "无图" để nguyên.
+
+### 18.3 Dịch ngoại tuyến (miễn phí)
+- `IndustryTerms`: khoảng 700 từ của các ngành (thuộc tính, màu, chất liệu, kính mắt, điện tử, thời trang, gia dụng, mỹ
+  phẩm, mẹ và bé, thực phẩm, dụng cụ, vận chuyển, bảng chọn phân loại), đơn vị đo sau số ("500毫升" → "500 ml", "38码" →
+  "Size 38"), từ nối (防 chống, 送 tặng…). Chỉ dùng để tra nguyên dòng và **ghép dòng toàn từ đã biết** (`compose`): danh từ
+  chính lên trước ("男士纯棉T恤" → "Áo thun nam cotton 100%"), chữ thường trong câu, tên riêng giữ chữ hoa. Không chèn
+  vào câu dài cho bộ dịch máy.
+- Bản dịch máy còn **sót chữ tiếng Anh** (bộ dịch đi qua tiếng Anh: "Jing Note", "BLU-RAY") thì không tin: kiểm từng từ
+  bằng bộ kiểm âm tiết tiếng Việt của bàn phím Telex, trừ từ có trong dòng gốc và từ mượn quen dùng.
+- Dòng có chữ tiếng Việt (địa chỉ) chỉ dịch phần chữ Trung.
+- Chế độ AI (trả phí, tùy chọn): gửi kèm chữ khác trên màn hình làm ngữ cảnh; chọn Nhanh (Luna) / Chuẩn nhất (Sol).
+
+### 18.4 Hiển thị
+- Không bao giờ ngắt giữa một từ khi xuống dòng ("Frees / hip").
+- Còn biết: tiêu đề bảng chọn phân loại vẫn xuống hai dòng dù bên phải còn chỗ (chưa rõ vì sao khoảng trống đo được nhỏ);
+  mảng nền đôi khi lấn mép chữ số đầu của giá ngay sau tên phân loại; dòng có "手机" bị đọc "手桃" chưa dịch.
+
+### 18.5 Cổng bật/tắt dịch
+- Ô **"Dịch màn hình"** trong bảng kéo xuống (`ScreenTileService`): đang bật → chạm là MSTrans tắt hẳn quyền Trợ năng
+  (`disableSelf`), app khác (ngân hàng) không còn thấy dịch vụ Trợ năng; đang tắt → chạm mở danh sách Trợ năng của
+  Android, dòng MSTrans được tô sáng (trang riêng của một dịch vụ `ACCESSIBILITY_DETAILS_SETTINGS` bị Android từ chối với
+  app thường: "Permission Denial"). Android 13+: nút "Thêm ô vào bảng kéo xuống".
+- Tự tắt chỉ khi app mới thật sự chiếm màn hình và vẫn ở đó sau 1,5 giây (trước đó một cửa sổ thoáng qua của hệ thống
+  làm quyền tắt ngay khi dịch vụ vừa bật).
+- **Tự tắt khi rời app mua sắm** (mặc định bật): đã dùng app đã chọn rồi sang app khác (về màn hình chính, bảng thông báo,
+  bàn phím, cài đặt Android thì không tính) → tắt hẳn quyền.
+- Công tắc trong trang Dịch màn hình gắn với quyền: bật quyền là đang dịch.
+
+### 18.6 Mã kích hoạt
+- Phải nhập mã do Minh cung cấp thì app (màn chính, bàn phím khi bấm Dịch, "Dịch bằng MSTrans", Dịch màn hình) mới dùng
+  được. **Mã thật không có trong mã nguồn hay tài liệu** (repo công khai): chỉ có muối và băm PBKDF2-SHA256 200.000 vòng
+  (`AppLock`). Sai 3 lần thì chờ 30 giây, gấp đôi mỗi lần, tối đa 1 giờ. Đổi mã: tạo muối và băm mới (Python
+  `hashlib.pbkdf2_hmac('sha256', ma, muoi, 200000)`), máy đã kích hoạt sẽ phải nhập lại.
+- Giới hạn: mã 6 số kiểm trên máy chặn được người dùng thường, không chống được người bẻ khóa APK.
+
+### 18.7 Cài đặt làm lại
+- Tab Cài đặt chỉ còn các nhóm: Bắt đầu (khi chưa xong), Kết nối dịch vụ, Dịch tin nhắn, Dịch màn hình, Khác, Giới thiệu;
+  mỗi mục mở trang chi tiết. Key OpenAI / Soniox / Google có nút **"Xác nhận kết nối"** (OpenAI dịch thử một câu; Soniox
+  `GET /v1/models`, Google danh sách giọng: miễn phí); xác nhận xong key được che, làm mờ, khóa lại ("Đổi key", "Xóa key").
+  Chỉ lưu dấu vân tay SHA-256 của key đã xác nhận, không lưu thêm bản key nào.
+
+### 18.8 Tab "Dịch Web"
+Theo Minh: trang Dịch màn hình thành **tab thứ hai "Dịch Web"** (sau tab Dịch); tên trong cài đặt Trợ năng của Android là
+"MSTrans · Dịch Web", ô trong bảng kéo xuống là "Dịch Web". Cài đặt › Dịch Web chuyển sang tab đó.
+
+### 18.9 Đã kiểm và chưa kiểm (27/11/2026)
+- Test lõi 248 bài, đều đạt. Lint như mốc cũ: 1 lỗi cũ (`MissingPermission`), 13 cảnh báo cũ, không có cái mới.
+- Trên máy ảo (Android 14): bảng chọn phân loại giả lập hết lệch, dịch đúng các dòng nêu ở 18.2–18.3; màn kích hoạt (sai
+  thì báo và xóa ô, đúng thì vào app); tab Cài đặt mới, trang key OpenAI, "Xác nhận kết nối" với key giả báo lỗi đúng; tự tắt
+  khi sang app Đồng hồ, không tắt khi về màn hình chính; ô "Dịch Web" hiện trạng thái và mở danh sách Trợ năng.
+- **Chưa kiểm:** trên điện thoại thật và Taobao thật (cả lỗi lệch: bản sửa dựa trên tái hiện ở máy ảo); trạng thái key "đã
+  xác nhận" (cần key thật); "Thêm ô vào bảng kéo xuống" bằng hộp thoại của Android; Soniox/Google bằng key thật.
+- APK: `android/app/build/outputs/apk/release/MSTrans-1.7.0-17.apk`, 1.7.0 (17), chỉ ARM, 27.243.863 byte, SHA-256
+  `C0EC248F7BCFE5BB72B757211504F03321EC69E962E3FFB2949986160C7CFB1C`, chứng thư `ff13e1b4…994a6eb9`. Cài đè được lên mọi bản
+  trước (số bản lớn hơn). Lần đầu mở sẽ hỏi mã kích hoạt.

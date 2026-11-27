@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dịch màn hình: reads text and its place in the chosen apps, takes screenshots for text in
+     pictures (Android 11+). No gestures: it never taps, types or scrolls. canTakeScreenshot (11+) and
+     isAccessibilityTool (12+) are simply ignored by older Android.
+     notificationTimeout is 0: with a wait, Android holds an event back until none of its kind has
+     come for that long, and a page whose parts all tell of scrolling (Taobao's lists) then told
+     nothing until it stopped: the translations stayed where they were while the page went by. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/screen_translation_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="0"
+    android:settingsActivity="vn.mocsinh.mstrans.MainActivity" />

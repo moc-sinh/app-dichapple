@@ -1,8 +1,11 @@
 name: Android
 
 # Every push that touches the Android app: the core's tests (typing, translation, Hội thoại), then
-# the APK, published as a GitHub release so the newest one always downloads from
+# the APK, the APK's checks (package, version code, signature, SHA-256) and Android Lint.
+# Only the delivery branch publishes a public GitHub release, so the newest one always downloads from
 # https://github.com/moc-sinh/app-dichapple/releases/latest/download/MSTrans.apk
+# Any other branch (a test build) gets a DRAFT release instead: not public, only people with write
+# access to the repository see it, and it never becomes "latest".
 on:
   push:
     paths:
@@ -17,6 +20,10 @@ concurrency:
 
 permissions:
   contents: write
+
+env:
+  # The one branch whose builds are published for everyone.
+  DELIVERY_BRANCH: claude/funny-gates-s6pl2c
 
 jobs:
   build:
@@ -76,12 +83,71 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk MSTrans.apk
           ls -l MSTrans.apk
 
+      # What the phone will check before installing over the old version: the package name, a higher
+      # version code, and the same signing certificate. Written as annotations (readable from anywhere).
+      - name: Check the APK
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          BADGING=$("$BT/aapt2" dump badging MSTrans.apk | head -n 1)
+          CERT=$("$BT/apksigner" verify --verbose --print-certs MSTrans.apk | grep -E "Verified using|certificate SHA-256|Number of signers" | tr '\n' ' ')
+          SHA=$(sha256sum MSTrans.apk | cut -d' ' -f1)
+          SIZE=$(stat -c %s MSTrans.apk)
+          echo "::notice title=APK badging::$BADGING"
+          echo "::notice title=APK signature::$CERT"
+          echo "::notice title=APK sha256::$SHA ($SIZE bytes)"
+          echo "$SHA  MSTrans.apk" > MSTrans.apk.sha256
+          echo "$BADGING" | grep -q "name='vn.mocsinh.mstrans'" || { echo "::error::package name changed"; exit 1; }
+
+      - name: Android Lint
+        # Lint's findings are reported (annotations), not hidden; a lint crash does not hold back the APK.
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :app:lintRelease --console=plain 2>&1 | tail -n 5
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET, glob
+          files = glob.glob("app/build/reports/lint-results-release.xml")
+          if not files:
+              print("::warning title=Lint::no report"); raise SystemExit
+          issues = ET.parse(files[0]).getroot().findall("issue")
+          counts = {}
+          for i in issues:
+              counts[i.get("severity")] = counts.get(i.get("severity"), 0) + 1
+          print(f"::notice title=Lint summary::{counts}")
+          for i in issues:
+              if i.get("severity") in ("Error", "Fatal"):
+                  loc = i.find("location")
+                  where = f"{loc.get('file','').split('/android/')[-1]}:{loc.get('line','')}" if loc is not None else ""
+                  print(f"::error title=Lint {i.get('id')}::{where} {i.get('message')}")
+          seen = {}
+          for i in issues:
+              if i.get("severity") == "Warning":
+                  seen.setdefault(i.get("id"), 0); seen[i.get("id")] += 1
+          print("::notice title=Lint warnings by id::" + ", ".join(f"{k}={v}" for k, v in sorted(seen.items())))
+          PY
+
+      # Only the delivery branch keeps a downloadable artifact; a test build goes to a draft release.
       - uses: actions/upload-artifact@v4
+        if: github.ref_name == env.DELIVERY_BRANCH
         with:
           name: MSTrans-apk
           path: android/MSTrans.apk
 
+      - name: Keep the test build private (draft release)
+        if: github.ref_name != env.DELIVERY_BRANCH
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="test-android-$VERSION-${{ github.run_number }}"
+          gh release create "$TAG" MSTrans.apk MSTrans.apk.sha256 \
+            --draft --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Thử nghiệm MSTrans Android $VERSION (bản ${{ github.run_number }})" \
+            --notes "Bản thử nghiệm, không công khai, từ ${GITHUB_SHA::7} (nhánh ${GITHUB_REF_NAME})."
+          echo "::notice title=Draft release::$TAG"
+
       - name: Publish the release
+        if: github.ref_name == env.DELIVERY_BRANCH
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

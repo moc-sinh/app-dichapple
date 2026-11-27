@@ -5,3 +5,8 @@ local.properties
 .idea/
 *.keystore.local
 .kotlin/
+
+# The large dictionary, built on the owner's computer by tools/dictionary.py from dictionaries they have:
+# its sources' terms are theirs to judge, so it is never published with the code.
+core/src/main/resources/vn/mocsinh/mstrans/core/screen/zh_vi_words.txt
+core/src/main/resources/vn/mocsinh/mstrans/core/screen/han_viet.txt

@@ -11,6 +11,22 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- Dịch màn hình: which of the suggested shopping apps are installed, and the list of apps to add. -->
+        <package android:name="com.taobao.taobao" />
+        <package android:name="com.alibaba.wireless" />
+        <package android:name="com.xunmeng.pinduoduo" />
+        <package android:name="com.jingdong.app.mall" />
+        <package android:name="com.tencent.mm" />
+        <package android:name="com.alibaba.intl.android.apps.poseidon" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Dịch màn hình: home screens (going home is not leaving the chosen apps). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <application
@@ -65,6 +81,32 @@
             <meta-data
                 android:name="android.view.im"
                 android:resource="@xml/method" />
+        </service>
+
+        <!-- Dịch màn hình: on only when the user turns it on in Cài đặt and in Android's accessibility settings. -->
+        <service
+            android:name=".screen.ScreenTranslationService"
+            android:exported="true"
+            android:label="@string/screen_translation_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_translation_service" />
+        </service>
+
+        <!-- The tile "Dịch màn hình" in the panel pulled down from the top: one tap on or off. -->
+        <service
+            android:name=".screen.ScreenTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tab_translate"
+            android:label="@string/screen_translation_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
         </service>
     </application>
 </manifest>

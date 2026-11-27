@@ -15,7 +15,10 @@ android {
         targetSdk = 34
         // CI numbers each build (the run number), so a new APK installs over the one before.
         versionCode = (System.getenv("MSTRANS_BUILD") ?: "1").toInt()
-        versionName = "1.6.0"
+        versionName = "1.7.0"
+        // ML Kit ships native code (about 45 MB) for every CPU. Phones are ARM; a build for the x86_64
+        // emulator sets MSTRANS_ABIS=arm64-v8a,armeabi-v7a,x86_64.
+        ndk { abiFilters += (System.getenv("MSTRANS_ABIS") ?: "arm64-v8a,armeabi-v7a").split(",").map { it.trim() } }
     }
 
     // One key for every build: Android installs an update only when it is signed like the app on the
@@ -51,9 +54,14 @@ android {
         // The build is checked by compiling and by the core's tests; lint's release check only slows CI.
         checkReleaseBuilds = false
         abortOnError = false
+        // AndroidX is on only for ML Kit; the app does not use AppCompat. Phones only, no ChromeOS build.
+        disable += setOf("UseCompatLoadingForDrawables", "ChromeOsAbiSupport")
     }
 
     packaging {
+        // Compressed in the APK (unpacked once at install): ML Kit's native code would otherwise make
+        // the download about three times larger.
+        jniLibs.useLegacyPackaging = true
         resources.excludes += setOf("META-INF/*.version", "META-INF/LICENSE*", "META-INF/NOTICE*", "DebugProbesKt.bin")
     }
 }
@@ -67,4 +75,8 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Dịch màn hình: chữ Trung trong ảnh (mô hình đi kèm APK) và dịch Trung → Việt ngoại tuyến.
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 }
