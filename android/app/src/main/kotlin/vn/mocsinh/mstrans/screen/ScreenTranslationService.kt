@@ -82,7 +82,7 @@ import kotlin.math.roundToInt
  * Dịch màn hình: reads the Chinese of the apps the user chose (accessibility tree, and pictures on
  * Android 11+) and lays the Vietnamese over it. Runs only while the switch in Cài đặt › Dịch màn
  * hình is on. Never taps, types or scrolls for the user; never reads another app's content; keeps
- * screenshots in memory only; logs times and counts, never text.
+ * screenshots in memory only; logs times and counts, never text (unless turned on over USB, see `render`).
  */
 class ScreenTranslationService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
@@ -1152,8 +1152,10 @@ class ScreenTranslationService : AccessibilityService() {
         scope.launch(composing) {
             val now = page ?: return@launch
             if (!controller.isCurrent(now.generation)) return@launch
-            // The made-up test shop only (never a real app's text): what was read and what it became.
-            val trying = foreground == TEST_SHOP
+            // What was read and what it became: for the made-up test shop, and for a real app only
+            // while the phone's owner has it turned on from a computer over USB debugging
+            // (`adb shell setprop log.tag.MSTransTest DEBUG`; off again on restart). Never otherwise.
+            val trying = foreground == TEST_SHOP || Log.isLoggable(TEST_TAG, Log.DEBUG)
             val entries = now.lines.mapNotNull { line ->
                 val known = translator.quick(line.text)?.text
                 if (trying) Log.d(TEST_TAG, "${if (line.fromImage) "picture" else "app"} [${line.text}] -> [${known ?: "…"}]")
@@ -1162,7 +1164,7 @@ class ScreenTranslationService : AccessibilityService() {
                 if (known == line.text || ChineseText.hasHan(known)) return@mapNotNull null
                 OverlayComposer.Entry(now.looks.getValue(line), known, translator.shorter(line.text), picture = line.fromImage)
             }
-            val drawn = composer.compose(entries, now.window)
+            val drawn = composer.compose(entries, now.window, now.lines.map { now.looks.getValue(it).geometry.box })
             onMain {
                 if (page === now && controller.isCurrent(now.generation)) {
                     overlay.set(drawn)

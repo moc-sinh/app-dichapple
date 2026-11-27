@@ -97,13 +97,34 @@ class CommerceDictionary(
      * way round ("男士纯棉T恤"), better left to the translator, and only then put together.
      */
     fun compose(key: String, strict: Boolean): String? {
+        // The same lines are drawn again and again: each is put together once.
+        val tag = (if (strict) "1" else "0") + key
+        synchronized(composed) { composed[tag] }?.let { return it.takeUnless { it == NONE } }
+        val made = composeNow(key, strict)
+        synchronized(composed) { composed[tag] = made ?: NONE }
+        return made
+    }
+
+    private val composed = object : LinkedHashMap<String, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 2_000
+    }
+
+    private fun composeNow(key: String, strict: Boolean): String? {
         if (!ChineseText.hasHan(key)) return null
         // The line as words, numbers with units, and the rest as written.
         val tokens = ArrayList<Token>()
         var i = 0
         while (i < key.length) {
+            val numberStarts = i == 0 || !key[i - 1].isDigit() && key[i - 1] != '.'
+            // A known sentence with its numbers, inside the line ("红包省20元" in "红包省20元抵1.2元").
+            val phrase = if (numberStarts) phraseAt(key, i) else null
+            if (phrase != null) {
+                tokens.add(Token(phrase.second, phrase = true))
+                i = phrase.first
+                continue
+            }
             val unit = UNIT.matchAt(key, i)
-            if (unit != null && (i == 0 || !key[i - 1].isDigit() && key[i - 1] != '.')) {
+            if (unit != null && numberStarts) {
                 val number = unit.groupValues[1]
                 val name = UNIT_NAMES.getValue(unit.groupValues[2])
                 tokens.add(Token(if (name == "size") "size $number" else "$number $name", unit = true))
@@ -154,9 +175,26 @@ class CommerceDictionary(
         return ScreenTranslator.tidy(out.toString())
     }
 
-    /** A piece of a line being put together. `word`: from the dictionary (not a number, not as written). */
-    private class Token(val text: String, val head: Boolean = false, val unit: Boolean = false, val raw: Boolean = false) {
-        val word: Boolean get() = !unit && !raw
+    /**
+     * A piece of a line being put together. `word`: from the dictionary (not a number, not as
+     * written, not a known sentence with its numbers).
+     */
+    private class Token(val text: String, val head: Boolean = false, val unit: Boolean = false, val raw: Boolean = false, val phrase: Boolean = false) {
+        val word: Boolean get() = !unit && !raw && !phrase
+    }
+
+    /** The longest known sentence with numbers (`PATTERNS`) that begins at `at`: where it ends, and its Vietnamese. */
+    private fun phraseAt(key: String, at: Int): Pair<Int, String>? {
+        var best: Pair<Int, String>? = null
+        for ((regex, template) in PATTERNS) {
+            val matcher = regex.toPattern().matcher(key).region(at, key.length)
+            if (!matcher.lookingAt()) continue
+            val end = matcher.end()
+            if (best != null && end <= best.first) continue
+            if (!ChineseText.hasHan(key.substring(at, end)) || !key.substring(at, end).any { it.isDigit() }) continue
+            best = end to fill(template, (1..matcher.groupCount()).map { matcher.group(it).orEmpty() })
+        }
+        return best
     }
 
     /**
@@ -209,11 +247,18 @@ class CommerceDictionary(
     private fun pattern(key: String, patterns: List<Pair<Regex, String>> = PATTERNS): String? {
         for ((regex, template) in patterns) {
             val match = regex.matchEntire(key) ?: continue
-            var out = template
-            match.groupValues.drop(1).forEachIndexed { i, value -> out = out.replace("{${i + 1}}", number(value)) }
-            return out
+            return fill(template, match.groupValues.drop(1))
         }
         return null
+    }
+
+    /** `{1}`: the first number as written; `{U2}`: the second group, a unit, in Vietnamese ("台" is "chiếc"). */
+    private fun fill(template: String, groups: List<String>): String {
+        var out = template
+        groups.forEachIndexed { i, value ->
+            out = out.replace("{${i + 1}}", number(value)).replace("{U${i + 1}}", UNIT_NAMES[value] ?: value)
+        }
+        return out
     }
 
     /** Digits as written; 万 (ten thousand) is said "vạn". */
@@ -333,6 +378,8 @@ class CommerceDictionary(
             "物流中心" to "Vận chuyển", "退款/售后" to "Hoàn tiền", "待付款" to "Chờ trả", "待发货" to "Chờ gửi", "待收货" to "Chờ nhận",
             "待评价" to "Chờ đ.giá", "立即购买" to "Mua ngay", "首页" to "T.chủ", "品牌" to "Hãng", "外卖打包" to "Mang đi",
             "推荐搭配清单" to "Gợi ý bộ", "为你推荐" to "Gợi ý", "查看全部" to "Tất cả", "查看更多" to "Thêm",
+            "进店" to "Vào shop", "旗舰店" to "Shop chính hãng", "跨境包邮" to "Freeship QT", "全场包邮" to "Freeship cả shop",
+            "官方跨境服务" to "Dịch vụ QT chính thức", "七天无理由退货" to "Đổi trả 7 ngày",
         )
 
         private const val ARROWS = ">›»"
@@ -370,6 +417,7 @@ class CommerceDictionary(
             "${N}人逛过" to "{1} người đã xem",
             "店铺年销(?:售|量)?超${N}(?:件)?" to "Cửa hàng bán hơn {1} sản phẩm/năm",
             "满${N}(?:元)?包邮" to "Đủ {1} miễn phí vận chuyển",
+            "(?:超级)?立减${N}元" to "Giảm ngay {1} tệ",
             "(?:超级)?立减${N}" to "Giảm ngay {1}",
             "官方立减${N}" to "Giảm chính hãng {1}",
             "到手价${N}(?:元)?" to "Giá cuối {1}",
@@ -393,6 +441,35 @@ class CommerceDictionary(
             "官方跨境服务[·・]丢损必赔" to "Dịch vụ xuyên biên giới chính thức · Mất hỏng đền bù",
             "官方直邮[-－]陆运" to "Gửi thẳng chính thức - Đường bộ",
             "官方直邮[-－]空运" to "Gửi thẳng chính thức - Đường hàng không",
+            // Lists of goods on 1688 and Taobao (read off a phone, 27/11/2026)
+            "${N}(件|个|套|只|台|双|条|张|把|包|箱|盒|瓶|米|公斤|千克|斤|kg)起批" to "Sỉ từ {1} {U2}",
+            "${N}(件|个|套|只|台|双|条|张|把|包|箱|盒|瓶|米|公斤|千克|斤|kg)起订" to "Đặt tối thiểu {1} {U2}",
+            "${N}(件|个|套|只|台|双|条|张|把|包|箱|盒|瓶)起购" to "Mua tối thiểu {1} {U2}",
+            "${N}人(?:已)?(?:购买|已买|已购|买过)" to "{1} người đã mua",
+            "${N}人(?:看过|浏览|在看)" to "{1} người đã xem",
+            "${N}人(?:评价|好评)" to "{1} người đánh giá",
+            "${N}人收藏" to "{1} người lưu",
+            "已(?:有)?${N}人(?:购买|买过|付款)" to "{1} người đã mua",
+            "回头率${N}" to "Tỷ lệ khách quay lại {1}",
+            "复购率${N}" to "Tỷ lệ mua lại {1}",
+            "好评率${N}" to "Tỷ lệ đánh giá tốt {1}",
+            "揽收率${N}" to "Tỷ lệ lấy hàng {1}",
+            "履约率${N}" to "Tỷ lệ giao đúng hẹn {1}",
+            "成交${N}(?:万)?元" to "Đã giao dịch {1} tệ",
+            "成交${N}(?:笔|单)" to "{1} giao dịch",
+            "${N}小时(?:内)?揽收" to "Lấy hàng trong {1} giờ",
+            "${N}(?:小时|h|H)(?:内)?发货" to "Gửi hàng trong {1} giờ",
+            "(\\d+)天(?:内)?发货" to "Gửi hàng trong {1} ngày",
+            "诚信通(\\d+)年" to "Thành viên uy tín {1} năm",
+            "(\\d+)年(?:质保|保修)" to "Bảo hành {1} năm",
+            "(\\d+)天无理由(?:退货|退换|退换货)?" to "Đổi trả {1} ngày không cần lý do",
+            "${N}元?起" to "Từ {1}",
+            "(?:已降|降价|直降)${N}元?" to "Đã giảm {1}",
+            "(?:共)?省${N}元" to "Tiết kiệm {1} tệ",
+            "领券(?:减|立减)${N}元?" to "Nhận phiếu giảm {1}",
+            "满${N}(?:元)?可用" to "Dùng cho đơn từ {1}",
+            "${N}元(?:优惠)?券" to "Phiếu giảm {1} tệ",
+            "${N}元/(件|个|套|只|台|双|条|张|把|包|箱|盒|瓶|米|公斤|千克|斤|kg)" to "{1} tệ/{U2}",
         ).map { (pattern, template) -> Regex(pattern) to template }
 
         /** The same sentences said shorter, for a chip or a tab with no room for the usual words. */
@@ -409,6 +486,16 @@ class CommerceDictionary(
             "组合再省${N}元" to "Bộ giảm {1} tệ",
             "店铺年销(?:售|量)?超${N}(?:件)?" to "Bán {1}+/năm",
             "下单运费最高立减${N}" to "Giảm phí vận chuyển tới {1}",
+            "${N}跨境包邮" to "Freeship QT từ {1}",
+            "(\\d+)年老店" to "Shop {1} năm",
+            "红包省${N}元" to "Lì xì -{1} tệ",
+            "(?:超级)?立减${N}元" to "Giảm {1} tệ",
+            "${N}(件|个|套|只|台|双|条|张|把|包|箱|盒|瓶|米|公斤|千克|斤|kg)起批" to "Sỉ từ {1} {U2}",
+            "回头率${N}" to "Quay lại {1}",
+            "${N}(?:小时|h|H)(?:内)?发货" to "Gửi trong {1}h",
         ).map { (pattern, template) -> Regex(pattern) to template }
+
+        /** What `composed` keeps for a line that cannot be put together. */
+        private const val NONE = "\u0000"
     }
 }

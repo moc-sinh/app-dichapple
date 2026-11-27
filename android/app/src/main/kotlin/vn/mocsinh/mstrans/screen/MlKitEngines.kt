@@ -74,7 +74,7 @@ class MlKitEngines {
             // Each line as the things written on it: a price and, further along, how many bought are two.
             val lines = block.lines.mapNotNull { line ->
                 // What the reader is not sure of, or reads on a slant (the writing on the goods in a photograph), is left alone.
-                if (!PictureText.worth(line.text, line.confidence, line.angle)) return@mapNotNull null
+                if (!PictureText.worth(line.text, line.confidence, line.angle, known)) return@mapNotNull null
                 val pieces = PictureText.pieces(line.elements.map { word -> letters(word) }, ink = { box -> ink(bitmap, box) }, whole = known)
                 if (pieces.isNotEmpty()) pieces.map { (piece, box) -> piece to box.offset(left, top) }
                 else line.boundingBox?.let { listOf(line.text to Box(it.left, it.top, it.right, it.bottom).offset(left, top)) }
@@ -82,7 +82,7 @@ class MlKitEngines {
             // A sentence wrapped over lines is one text; a line of several things is never part of one.
             val whole = if (lines.all { it.size == 1 }) ScreenBlocks.texts(lines.map { it[0] }) else lines.flatten().flatMap { ScreenBlocks.texts(listOf(it)) }
             // An icon taken for a letter (a cart for 口) is not text either.
-            whole.filter { PictureText.worth(it.text, null, null) }
+            whole.filter { PictureText.worth(it.text, null, null, known) }
         }
     }
 

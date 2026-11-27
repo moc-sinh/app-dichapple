@@ -3,6 +3,7 @@ package vn.mocsinh.mstrans.core.screen
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -87,21 +88,82 @@ class VariantSheetTest {
     }
 
     @Test
-    fun `English left over by the offline translator is not trusted`() = runBlocking {
+    fun `English left over by the offline translator is shown only when nothing better comes`() = runBlocking {
         // Chinese to English to Vietnamese: 颜色请备注 came back as "Màu Sắc Jing Note", 蓝光 as "BLU-RAY".
         val engine = TextEngine { text ->
             when (text) {
                 "这款请备注尺码" -> "Mẫu này Jing Note kích thước"
                 "这款手机壳很好" -> "Ốp điện thoại này rất tốt"
                 "这款支持USB充电" -> "Mẫu này hỗ trợ sạc USB"
+                "7年老店 舜鑫科技 进店" -> "Cửa hàng cũ 7 năm Shunxin Technology vào cửa hàng"
+                "舜鑫科技" -> "Công nghệ Shunxin"
                 else -> null
             }
         }
         val translator = ScreenTranslator(engine = engine)
-        assertNull(translator.translate("这款请备注尺码"))
         assertEquals("Ốp điện thoại này rất tốt", translator.translate("这款手机壳很好")?.text)
         // Latin letters that were in the line, and common borrowed words, are fine.
         assertEquals("Mẫu này hỗ trợ sạc USB", translator.translate("这款支持USB充电")?.text)
+        // A shop's name between known words (1688, 27/11/2026: the whole pill stayed in Chinese):
+        // each thing on its own, the known ones from the dictionary, the name in pinyin.
+        assertEquals("Cửa hàng 7 năm · Công nghệ Shunxin · Vào cửa hàng", translator.translate("7年老店 舜鑫科技 进店")?.text)
+        // Nothing better: rather the translation with a word left over than the Chinese.
+        assertEquals("Mẫu này Jing Note kích thước", translator.translate("这款请备注尺码")?.text)
+    }
+
+    @Test
+    fun `the translator's numbers are put back as the line writes them`() = runBlocking {
+        assertEquals("Cân 0.01g", NumberGuard.repair("0.01g天平", "Cân 0,01 g"))
+        assertEquals("Giá 1,299 tệ", NumberGuard.repair("价格1,299元", "Giá 1.299 tệ"))
+        assertEquals("20+ người đã mua", NumberGuard.repair("20+人付款", "20 + người đã mua"))
+        // A number it really changed is left for the check to refuse.
+        assertEquals("Giá 1.300 tệ", NumberGuard.repair("价格1,299元", "Giá 1.300 tệ"))
+        val translator = ScreenTranslator(engine = TextEngine { "Cân điện tử có độ chính xác cao 0,01 g" })
+        assertEquals("Cân điện tử có độ chính xác cao 0.01g", translator.translate("0.01g高精度电子天平实")?.text)
+    }
+
+    @Test
+    fun `a scale is never the size of something`() = runBlocking {
+        // 1688, 27/11/2026: 电子秤 came out "Quy mô điện tử", "Thang đo điện tử".
+        val engine = TextEngine { text ->
+            when (text) {
+                "司马安150kg电子秤" -> "Quy mô điện tử Sima An 150kg"
+                "精密电子天平实验用" -> "Cân bằng điện tử chính xác dùng trong phòng thí nghiệm"
+                "扩大经营规模" -> "Mở rộng quy mô kinh doanh"
+                else -> null
+            }
+        }
+        val translator = ScreenTranslator(engine = engine)
+        assertEquals("Cân điện tử Sima An 150kg", translator.translate("司马安150kg电子秤")?.text)
+        assertEquals("Cân tiểu ly điện tử chính xác dùng trong phòng thí nghiệm", translator.translate("精密电子天平实验用")?.text)
+        assertEquals("Mở rộng quy mô kinh doanh", translator.translate("扩大经营规模")?.text)
+        // Words of the trade, with no translator at all.
+        assertEquals("Cân tiểu ly điện tử độ chính xác cao", ScreenTranslator().quick("高精度电子天平")?.text)
+        assertEquals("Đèn báo động 3 màu", ScreenTranslator().quick("三色报警灯")?.text)
+    }
+
+    @Test
+    fun `known sentences with numbers inside a line are put together`() {
+        val translator = ScreenTranslator()
+        // 1688, 27/11/2026: two offers read as one line, left in Chinese.
+        assertEquals("Lì xì giảm 20 tệ trừ 1.2 tệ", translator.quick("红包省20元抵1.2元")?.text)
+        assertEquals("Giảm ngay 27.35 tệ", translator.quick("超级立减27.35元")?.text)
+        assertEquals("Sỉ từ 2 chiếc", translator.quick("2台起批")?.text)
+        assertEquals("Cửa hàng 14 năm", translator.quick("14年老店")?.text)
+        assertEquals("Shop 14 năm", translator.shorter("14年老店"))
+        assertEquals("Freeship QT từ ¥99", translator.shorter("¥99跨境包邮"))
+    }
+
+    @Test
+    fun `one letter of Chinese read in a picture is kept only as a known sentence`() {
+        val known = { text: String -> ScreenTranslator().quick(text) != null }
+        assertTrue(PictureText.worth("约 $ 6.5", null, null, known))
+        // An icon taken for a letter: not a sentence the dictionary knows.
+        assertFalse(PictureText.worth("口 3", null, null, known))
+        assertFalse(PictureText.worth("约 $ 6.5", null, null))
+        // A line the reader was unsure of: only when known.
+        assertTrue(PictureText.worth("预计后天送达", 0.3f, null, known))
+        assertFalse(PictureText.worth("预计后天送达", 0.3f, null))
     }
 
     @Test

@@ -162,13 +162,101 @@ object IndustryTerms {
         "合计" to "Tổng cộng", "收银台" to "Quầy thanh toán", "订单信息" to "Thông tin đơn hàng", "商品名称" to "Tên sản phẩm",
     )
 
+    /** Scales and measuring (a list of scales on 1688 came out "Quy mô điện tử", 27/11/2026). */
+    private val MEASURE = linkedMapOf(
+        "秤" to "Cân", "电子秤" to "Cân điện tử", "电子称" to "Cân điện tử", "台秤" to "Cân bàn", "地磅" to "Cân sàn", "地秤" to "Cân sàn",
+        "吊秤" to "Cân treo", "计价秤" to "Cân tính tiền", "计重秤" to "Cân trọng lượng", "计数秤" to "Cân đếm", "收银秤" to "Cân thu ngân",
+        "条码秤" to "Cân in mã vạch", "厨房秤" to "Cân nhà bếp", "体重秤" to "Cân sức khỏe", "人体秤" to "Cân sức khỏe", "珠宝秤" to "Cân trang sức",
+        "智能秤" to "Cân thông minh", "天平" to "Cân tiểu ly", "电子天平" to "Cân tiểu ly điện tử", "衡器" to "Thiết bị cân", "称重" to "Cân",
+        "精密称重" to "Cân chính xác", "计数" to "Đếm số lượng", "计数功能" to "Chức năng đếm", "单位转换" to "Chuyển đổi đơn vị",
+        "校准" to "Hiệu chuẩn", "简易校准" to "Hiệu chuẩn dễ", "精度" to "Độ chính xác", "高精度" to "Độ chính xác cao", "精度显示" to "Hiển thị độ chính xác",
+        "量程" to "Phạm vi đo", "最大称量" to "Tải trọng tối đa", "分度值" to "Bước chia", "去皮" to "Trừ bì", "累计" to "Cộng dồn",
+        "报警" to "Báo động", "重量报警" to "Báo động trọng lượng", "数量报警" to "Báo động số lượng", "报警灯" to "Đèn báo động",
+        "三色报警灯" to "Đèn báo động 3 màu", "上下限" to "Ngưỡng trên dưới", "声光" to "Âm thanh và ánh sáng", "声光报警" to "Báo động âm thanh và ánh sáng",
+        "港斤" to "Cân Hồng Kông", "港磅" to "Pound Hồng Kông", "台斤" to "Cân Đài Loan", "实验室" to "Phòng thí nghiệm", "商业" to "Thương mại",
+        "工业" to "Công nghiệp", "工业级" to "Chuẩn công nghiệp", "测量" to "Đo lường", "卷尺" to "Thước cuộn", "游标卡尺" to "Thước kẹp",
+        "温度计" to "Nhiệt kế", "湿度计" to "Ẩm kế", "万用表" to "Đồng hồ vạn năng", "测距仪" to "Máy đo khoảng cách", "水平仪" to "Thước thủy",
+        "传感器" to "Cảm biến", "称重传感器" to "Cảm biến cân", "显示屏" to "Màn hình hiển thị", "液晶" to "LCD", "背光" to "Đèn nền",
+        "充电款" to "Bản sạc pin", "插电款" to "Bản cắm điện", "电池款" to "Bản dùng pin", "碳钢" to "Thép carbon", "台面" to "Mặt bàn",
+        "碳钢台面" to "Mặt bàn thép carbon", "不锈钢台面" to "Mặt bàn inox", "设计尺寸" to "Kích thước thiết kế", "秤盘" to "Đĩa cân",
+        "耐用" to "Bền", "防水耐用" to "Chống nước, bền", "精准" to "Chính xác", "省电" to "Tiết kiệm điện", "精准省电" to "Chính xác, tiết kiệm điện",
+        "英式" to "Kiểu Anh", "欧式" to "Kiểu châu Âu", "美式" to "Kiểu Mỹ", "英式插头" to "Phích cắm kiểu Anh", "专用" to "Chuyên dụng",
+        "港澳" to "Hồng Kông, Ma Cao", "港澳专用" to "Dùng cho Hồng Kông, Ma Cao", "一斤十六两" to "1 cân 16 lạng",
+    )
+
+    /** What a 1688 supplier says of itself and of its service. */
+    private val FACTORY = linkedMapOf(
+        "源头厂家" to "Xưởng gốc", "源头" to "Tận gốc", "源头好货" to "Hàng tốt tận gốc", "厂家直供" to "Xưởng cung cấp trực tiếp",
+        "实力商家" to "Nhà bán uy tín", "实力工厂" to "Xưởng uy tín", "超级工厂" to "Siêu xưởng", "深度验商" to "Đã kiểm định kỹ",
+        "诚信通" to "Thành viên uy tín", "专业研发" to "Nghiên cứu phát triển chuyên nghiệp", "研发" to "Nghiên cứu phát triển",
+        "可开发票" to "Có xuất hóa đơn", "开发票" to "Xuất hóa đơn", "专票" to "Hóa đơn VAT", "增票" to "Hóa đơn VAT", "普票" to "Hóa đơn thường",
+        "品质保障" to "Đảm bảo chất lượng", "品质" to "Chất lượng", "质量" to "Chất lượng", "售后无忧" to "Hậu mãi yên tâm",
+        "技术支持" to "Hỗ trợ kỹ thuật", "技术售后" to "Hậu mãi kỹ thuật", "专业技术售后" to "Hậu mãi kỹ thuật chuyên nghiệp",
+        "支持二次开发" to "Hỗ trợ phát triển phần mềm riêng", "二次开发" to "Phát triển phần mềm riêng", "免费送软件" to "Tặng phần mềm",
+        "送软件" to "Tặng phần mềm", "软件" to "Phần mềm", "免费" to "Miễn phí", "可选" to "Tùy chọn", "黑白" to "Đen trắng",
+        "全兼容" to "Tương thích hoàn toàn", "算法" to "Thuật toán", "杜邦" to "Dupont", "连接" to "Kết nối", "蓝牙连接" to "Kết nối Bluetooth",
+        "通讯" to "Truyền thông", "通信" to "Truyền thông", "串口" to "Cổng nối tiếp", "两种" to "2 loại", "三种" to "3 loại", "多种" to "Nhiều loại",
+        "回头率" to "Tỷ lệ khách quay lại", "复购率" to "Tỷ lệ mua lại", "好评率" to "Tỷ lệ đánh giá tốt", "揽收率" to "Tỷ lệ lấy hàng",
+        "跨境包邮" to "Miễn phí vận chuyển quốc tế", "跨境" to "Xuyên biên giới", "支持混批" to "Hỗ trợ nhập sỉ nhiều mẫu",
+        "现货秒发" to "Có sẵn, gửi ngay", "包退换" to "Bao đổi trả", "工厂价" to "Giá xưởng", "出厂价" to "Giá xuất xưởng",
+        "代工" to "Gia công", "贴牌" to "Gắn nhãn riêng", "来样定制" to "Làm theo mẫu", "打样" to "Làm mẫu", "量大从优" to "Mua nhiều giá tốt",
+        "量大价优" to "Mua nhiều giá tốt", "热销" to "Bán chạy", "爆品" to "Sản phẩm hot", "精选" to "Tuyển chọn", "好评" to "Đánh giá tốt",
+        "专卖店" to "Cửa hàng chuyên doanh", "专营店" to "Cửa hàng chuyên doanh", "企业店" to "Cửa hàng doanh nghiệp", "老店" to "Cửa hàng lâu năm",
+        "超级立减" to "Siêu giảm ngay", "立减" to "Giảm ngay", "直降" to "Giảm thẳng", "百亿补贴" to "Trợ giá 10 tỷ", "官方补贴" to "Trợ giá chính hãng",
+        "限时折扣" to "Giảm giá có hạn", "优惠" to "Ưu đãi", "种草" to "Gợi ý", "发货地" to "Nơi gửi hàng", "保障" to "Bảo đảm",
+    )
+
+    /** Machines, electrical goods, hardware, building. */
+    private val MACHINES = linkedMapOf(
+        "电线" to "Dây điện", "电缆" to "Cáp điện", "开关" to "Công tắc", "灯泡" to "Bóng đèn", "灯带" to "Dải đèn LED", "LED灯" to "Đèn LED",
+        "太阳能" to "Năng lượng mặt trời", "逆变器" to "Bộ biến tần", "变压器" to "Máy biến áp", "发电机" to "Máy phát điện", "水泵" to "Máy bơm nước",
+        "风扇" to "Quạt", "电风扇" to "Quạt điện", "空调" to "Điều hòa", "冰箱" to "Tủ lạnh", "洗衣机" to "Máy giặt", "吸尘器" to "Máy hút bụi",
+        "电熨斗" to "Bàn là", "电热水壶" to "Ấm siêu tốc", "包装机" to "Máy đóng gói", "封口机" to "Máy hàn miệng túi", "打包机" to "Máy đóng đai",
+        "切割机" to "Máy cắt", "电焊机" to "Máy hàn điện", "焊机" to "Máy hàn", "缝纫机" to "Máy may", "注塑机" to "Máy ép nhựa",
+        "雕刻机" to "Máy khắc", "激光" to "Laser", "标签机" to "Máy in tem nhãn", "扫码枪" to "Máy quét mã vạch", "收银机" to "Máy tính tiền",
+        "监控" to "Camera giám sát", "监控摄像头" to "Camera giám sát", "门锁" to "Khóa cửa", "智能门锁" to "Khóa cửa thông minh",
+        "零件" to "Linh kiện", "汽车配件" to "Phụ tùng ô tô", "轴承" to "Vòng bi", "齿轮" to "Bánh răng", "阀门" to "Van", "管件" to "Phụ kiện ống",
+        "水管" to "Ống nước", "五金" to "Ngũ kim", "五金工具" to "Dụng cụ ngũ kim", "建材" to "Vật liệu xây dựng", "瓷砖" to "Gạch men",
+        "地板" to "Sàn nhà", "油漆" to "Sơn", "胶水" to "Keo dán", "包装材料" to "Vật liệu đóng gói", "标签纸" to "Giấy in tem", "热敏纸" to "Giấy in nhiệt",
+    )
+
+    /** Jewellery, fabric, decoration, outdoors. */
+    private val MORE = linkedMapOf(
+        "首饰" to "Trang sức", "饰品" to "Phụ kiện trang sức", "项链" to "Dây chuyền", "耳环" to "Bông tai", "耳钉" to "Khuyên tai", "戒指" to "Nhẫn",
+        "手链" to "Lắc tay", "手镯" to "Vòng tay", "发饰" to "Phụ kiện tóc", "发夹" to "Kẹp tóc", "假发" to "Tóc giả", "美甲" to "Làm móng",
+        "化妆刷" to "Cọ trang điểm", "布料" to "Vải", "面料" to "Vải", "辅料" to "Phụ liệu may", "花边" to "Ren", "蕾丝" to "Ren", "织带" to "Dây dệt",
+        "口罩" to "Khẩu trang", "户外" to "Ngoài trời", "露营" to "Cắm trại", "帐篷" to "Lều", "钓鱼" to "Câu cá", "鱼竿" to "Cần câu",
+        "健身" to "Thể hình", "瑜伽垫" to "Thảm yoga", "宠物用品" to "Đồ dùng thú cưng", "灯具" to "Đèn", "吊灯" to "Đèn chùm", "装饰" to "Trang trí",
+        "摆件" to "Đồ trang trí", "相框" to "Khung ảnh", "花瓶" to "Bình hoa", "仿真花" to "Hoa giả", "人造花" to "Hoa giả", "圣诞" to "Giáng sinh",
+        "派对" to "Tiệc", "气球" to "Bóng bay", "书包" to "Cặp sách", "母婴用品" to "Đồ mẹ và bé", "童装" to "Quần áo trẻ em", "鞋子" to "Giày",
+        "包包" to "Túi xách", "手表" to "Đồng hồ", "眼镜框" to "Gọng kính",
+    )
+
+    /** Places goods are sent from (the line under a product on 1688), and countries. */
+    private val PLACES = linkedMapOf(
+        "中国" to "Trung Quốc", "香港" to "Hồng Kông", "澳门" to "Ma Cao", "台湾" to "Đài Loan", "日本" to "Nhật Bản", "韩国" to "Hàn Quốc",
+        "德国" to "Đức", "美国" to "Mỹ", "英国" to "Anh", "法国" to "Pháp", "意大利" to "Ý", "越南" to "Việt Nam", "泰国" to "Thái Lan",
+        "广东" to "Quảng Đông", "浙江" to "Chiết Giang", "福建" to "Phúc Kiến", "江苏" to "Giang Tô", "山东" to "Sơn Đông", "河北" to "Hà Bắc",
+        "河南" to "Hà Nam", "湖南" to "Hồ Nam", "湖北" to "Hồ Bắc", "安徽" to "An Huy", "江西" to "Giang Tây", "广西" to "Quảng Tây", "四川" to "Tứ Xuyên",
+        "云南" to "Vân Nam", "上海" to "Thượng Hải", "北京" to "Bắc Kinh", "天津" to "Thiên Tân", "重庆" to "Trùng Khánh", "广州" to "Quảng Châu",
+        "深圳" to "Thâm Quyến", "东莞" to "Đông Quan", "佛山" to "Phật Sơn", "中山" to "Trung Sơn", "汕头" to "Sán Đầu", "揭阳" to "Yết Dương",
+        "潮州" to "Triều Châu", "江门" to "Giang Môn", "惠州" to "Huệ Châu", "珠海" to "Chu Hải", "义乌" to "Nghĩa Ô", "杭州" to "Hàng Châu",
+        "宁波" to "Ninh Ba", "温州" to "Ôn Châu", "金华" to "Kim Hoa", "台州" to "Đài Châu", "湖州" to "Hồ Châu", "绍兴" to "Thiệu Hưng",
+        "厦门" to "Hạ Môn", "泉州" to "Tuyền Châu", "莆田" to "Phủ Điền", "苏州" to "Tô Châu", "南京" to "Nam Kinh", "无锡" to "Vô Tích",
+        "常州" to "Thường Châu", "青岛" to "Thanh Đảo", "临沂" to "Lâm Nghi", "石家庄" to "Thạch Gia Trang", "保定" to "Bảo Định", "成都" to "Thành Đô",
+        "武汉" to "Vũ Hán", "长沙" to "Trường Sa", "郑州" to "Trịnh Châu", "西安" to "Tây An", "南宁" to "Nam Ninh", "昆明" to "Côn Minh",
+    )
+
     /** Everything above; later groups win where two give the same word. */
-    val ALL: Map<String, String> = ATTRIBUTES + COLOURS + MATERIALS + GLASSES + ELECTRONICS + CLOTHES + HOME + PERSONAL + TRADE + SHOP
+    val ALL: Map<String, String> = ATTRIBUTES + COLOURS + MATERIALS + GLASSES + ELECTRONICS + CLOTHES + HOME + PERSONAL + TRADE + SHOP +
+        MEASURE + FACTORY + MACHINES + MORE + PLACES
 
     /** Shorter forms for places with little room (a price row, a chip). */
     val SHORT: Map<String, String> = linkedMapOf(
         "平台加补后" to "Sau trợ giá", "优惠前" to "Giá gốc", "预计后天送达" to "Giao ngày kia", "预计明天送达" to "Giao ngày mai",
         "预计今天送达" to "Giao hôm nay", "有货" to "Còn hàng", "颜色请备注" to "Ghi chú màu", "防蓝光" to "Chống AS xanh",
+        "跨境包邮" to "Freeship QT", "专业技术售后" to "Hậu mãi kỹ thuật", "支持二次开发" to "Hỗ trợ tùy biến", "可开发票" to "Có hóa đơn",
+        "品质保障" to "Đảm bảo CL", "源头厂家" to "Xưởng gốc", "三色报警灯" to "Đèn báo 3 màu", "声光报警" to "Báo động",
     )
 
     /**
@@ -185,7 +273,12 @@ object IndustryTerms {
             "办公椅 床垫 衣柜 书架 鞋柜 茶几 餐具 筷子 勺子 刀具 砧板 保鲜盒 保鲜膜 纸巾 洗衣液 化妆品 口红 面膜 精华 精华液 乳液 面霜 " +
             "洗面奶 防晒霜 粉底 粉底液 眼影 香水 洗发水 护发素 沐浴露 牙膏 牙刷 奶瓶 尿不湿 纸尿裤 婴儿车 玩具 积木 拼图 毛绒玩具 零食 " +
             "坚果 茶叶 咖啡 饮料 调料 猫粮 狗粮 礼盒 轮胎 工具 工具箱 电钻 螺丝 螺丝刀 扳手 胶带 设备 电机 马达 纸箱 纸袋 塑料袋 快递袋 " +
-            "气泡膜 钢笔 中性笔 铅笔 打印机 包装盒 说明书 新款 爆款 同款 升级款 基础款 定制款 经典款 男款 女款 通用款 通用型"
+            "气泡膜 钢笔 中性笔 铅笔 打印机 包装盒 说明书 新款 爆款 同款 升级款 基础款 定制款 经典款 男款 女款 通用款 通用型 " +
+            "秤 电子秤 电子称 台秤 地磅 地秤 吊秤 计价秤 计重秤 计数秤 收银秤 条码秤 厨房秤 体重秤 人体秤 珠宝秤 智能秤 天平 电子天平 衡器 " +
+            "报警灯 三色报警灯 传感器 称重传感器 显示屏 软件 英式插头 卷尺 游标卡尺 温度计 湿度计 万用表 测距仪 水平仪 灯泡 灯带 LED灯 " +
+            "逆变器 变压器 发电机 水泵 风扇 电风扇 空调 冰箱 洗衣机 吸尘器 电熨斗 电热水壶 包装机 封口机 打包机 切割机 电焊机 焊机 缝纫机 " +
+            "注塑机 雕刻机 标签机 扫码枪 收银机 监控摄像头 门锁 智能门锁 轴承 齿轮 阀门 水管 瓷砖 胶水 标签纸 热敏纸 项链 耳环 耳钉 戒指 " +
+            "手链 手镯 发夹 假发 化妆刷 口罩 帐篷 鱼竿 瑜伽垫 吊灯 摆件 相框 花瓶 仿真花 人造花 气球 书包 童装 鞋子 包包 手表 眼镜框"
         ).split(' ').toSet()
 
     /** Names kept with their capital inside a line. */
@@ -210,6 +303,6 @@ object IndustryTerms {
         "小时" to "giờ", "分钟" to "phút", "度" to "độ", "件" to "cái", "个" to "cái", "只" to "chiếc", "双" to "đôi", "套" to "bộ", "包" to "gói",
         "盒" to "hộp", "箱" to "thùng", "瓶" to "chai", "斤" to "cân", "克" to "g", "升" to "lít", "米" to "m", "寸" to "inch", "瓦" to "W",
         "伏" to "V", "天" to "ngày", "年" to "năm", "岁" to "tuổi", "码" to "size", "色" to "màu", "款" to "mẫu", "片" to "miếng", "支" to "cây",
-        "袋" to "túi", "台" to "chiếc", "张" to "tờ", "条" to "cái", "卷" to "cuộn",
+        "袋" to "túi", "台" to "chiếc", "张" to "tờ", "条" to "cái", "卷" to "cuộn", "把" to "cái",
     )
 }

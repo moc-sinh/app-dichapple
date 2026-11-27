@@ -107,13 +107,19 @@ object PictureText {
     private const val MIN_CONFIDENCE = 0.5f
     private const val MAX_ANGLE = 12f
 
-    /** `confidence` (0 to 1) and `angle` (degrees) as the reader gives them; null: not given. */
-    fun worth(text: String, confidence: Float?, angle: Float?): Boolean {
+    /**
+     * `confidence` (0 to 1) and `angle` (degrees) as the reader gives them; null: not given.
+     * `known`: the dictionary knows the text whole. One letter of Chinese ("约 $ 6.5" under a
+     * price), or a line the reader was not sure of, is kept only then: an icon taken for a letter
+     * is no sentence the dictionary knows.
+     */
+    fun worth(text: String, confidence: Float?, angle: Float?, known: (String) -> Boolean = { false }): Boolean {
         var han = 0
         text.codePoints().forEach { if (ChineseText.isHan(it)) han++ }
-        if (han < 2) return false
-        if (confidence != null && confidence < MIN_CONFIDENCE) return false
-        return angle == null || kotlin.math.abs(angle) <= MAX_ANGLE
+        if (han == 0) return false
+        if (angle != null && kotlin.math.abs(angle) > MAX_ANGLE) return false
+        val sure = han >= 2 && (confidence == null || confidence >= MIN_CONFIDENCE)
+        return sure || known(text.trim())
     }
 
     /**

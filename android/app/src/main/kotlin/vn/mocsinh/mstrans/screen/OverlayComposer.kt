@@ -50,8 +50,11 @@ class OverlayComposer(context: Context) {
     private val widths = HashMap<String, FloatArray>()
     private var built = HashMap<Key, Built>()
 
-    /** `entries` in reading order; `window` is the app's window (nothing is drawn outside it). */
-    fun compose(entries: List<Entry>, window: Box): List<OverlayView.Drawn> {
+    /**
+     * `entries` in reading order; `window` is the app's window (nothing is drawn outside it);
+     * `others`: where every text of the page is, translated or not (a translation never spreads onto one).
+     */
+    fun compose(entries: List<Entry>, window: Box, others: List<Box> = emptyList()): List<OverlayView.Drawn> {
         if (entries.isEmpty()) {
             built = HashMap()
             return emptyList()
@@ -61,16 +64,18 @@ class OverlayComposer(context: Context) {
         // a long translation stops where the page's text would, not at the glass.
         val margin = entries.minOf { it.look.geometry.box.left - window.left }.coerceIn(0, window.width / 8)
         val inside = Box(window.left + margin, window.top, window.right - margin, window.bottom)
-        fun plans(texts: List<String>) =
-            OverlayPlanner.plan(entries.mapIndexed { i, entry -> item(entry.look, texts[i], sizes[i], inside) }, smallest)
-        var texts = entries.map { it.translation }
-        var plans = plans(texts)
+        val rooms = entries.map { room(it.look.geometry.box, others) }
+        fun plans(words: List<String>) =
+            OverlayPlanner.plan(entries.mapIndexed { i, entry -> item(entry.look, words[i], sizes[i], inside, rooms[i]) }, smallest)
+        var words = entries.map { it.translation }
+        var plans = plans(words)
         // A word cut or wrapped for want of room gives way to its shorter form, where it has one.
         val tight = entries.indices.filter { entries[it].shorter != null && (plans[it].ellipsize || plans[it].maxLines > entries[it].look.geometry.lines.size) }
         if (tight.isNotEmpty()) {
-            texts = texts.mapIndexed { i, text -> if (i in tight) entries[i].shorter!! else text }
-            plans = plans(texts)
+            words = words.mapIndexed { i, text -> if (i in tight) entries[i].shorter!! else text }
+            plans = plans(words)
         }
+        val texts = words
         val next = HashMap<Key, Built>()
         val out = entries.indices.mapNotNull { i ->
             val entry = entries[i]
@@ -86,18 +91,41 @@ class OverlayComposer(context: Context) {
         return out
     }
 
-    private fun item(look: Look, text: String, size: Float, window: Box): OverlayPlanner.Item {
+    /** How far the nearest other text is on each side of `box`: left, right, above, below. */
+    private class Room(val left: Int, val right: Int, val above: Int, val below: Int)
+
+    private fun room(box: Box, texts: List<Box>): Room {
+        var left = Int.MAX_VALUE
+        var right = Int.MAX_VALUE
+        var above = Int.MAX_VALUE
+        var below = Int.MAX_VALUE
+        for (other in texts) {
+            // The text itself, or one lying over it (a line read twice), is no neighbour.
+            if (other.intersect(box) != null) continue
+            val beside = other.top < box.bottom && other.bottom > box.top
+            val stacked = other.left < box.right && other.right > box.left
+            if (beside && other.left >= box.right) right = minOf(right, other.left - box.right)
+            if (beside && other.right <= box.left) left = minOf(left, box.left - other.right)
+            if (stacked && other.top >= box.bottom) below = minOf(below, other.top - box.bottom)
+            if (stacked && other.bottom <= box.top) above = minOf(above, box.top - other.bottom)
+        }
+        return Room(left, right, above, below)
+    }
+
+    private fun item(look: Look, text: String, size: Float, window: Box, near: Room): OverlayPlanner.Item {
         val geometry = look.geometry
         val style = look.style
         val box = geometry.box
         // Over a picture there is no plain room to take: a little of the picture on each side.
         val side = box.width / 4
+        // Nor does a translation spread onto other text, translated or not (a price under a badge).
+        val vertical = if (style.plain) minOf(style.freeAbove, style.freeBelow) else box.height / 4
         return OverlayPlanner.Item(
             lines = geometry.lines,
             sizePx = size,
-            freeLeft = minOf(if (style.plain) style.freeLeft else side, box.left - window.left).coerceAtLeast(0),
-            freeRight = minOf(if (style.plain) style.freeRight else side, window.right - box.right).coerceAtLeast(0),
-            freeVertical = if (style.plain) minOf(style.freeAbove, style.freeBelow) else box.height / 4,
+            freeLeft = minOf(if (style.plain) style.freeLeft else side, box.left - window.left, near.left).coerceAtLeast(0),
+            freeRight = minOf(if (style.plain) style.freeRight else side, window.right - box.right, near.right).coerceAtLeast(0),
+            freeVertical = minOf(vertical, near.above, near.below).coerceAtLeast(0),
             centerY = style.ink?.takeIf { geometry.lines.size == 1 }?.let { (it.top + it.bottom) / 2 } ?: ((box.top + box.bottom) / 2),
             // The same look: the same size, on the same colour, in the same colour.
             group = Objects.hash(Math.round(size), style.background shr 4 and 0x0F0F0F, style.text shr 5 and 0x070707, style.plain),

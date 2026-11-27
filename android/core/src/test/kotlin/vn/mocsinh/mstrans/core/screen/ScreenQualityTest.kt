@@ -34,7 +34,7 @@ class ScreenQualityTest {
         assertEquals("≈ $29.96", translator.quick("约 $ 29.96")?.text)
         assertEquals("Đã bán 16", translator.quick("已售 16")?.text)
         // One phrase not known: nothing yet.
-        assertNull(translator.quick("儿童书包 包邮"))
+        assertNull(translator.quick("轻便护脊 包邮"))
     }
 
     @Test

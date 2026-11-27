@@ -121,29 +121,49 @@ class ScreenTranslator(
         // The line whole: the offline translator does worse on a phrase taken out of its line.
         val simplified = ChineseText.toSimplified(text.trim())
         // Vietnamese on the line (an address): the translator would mangle it. Only the Chinese is translated.
-        if (VIETNAMESE.containsMatchIn(simplified)) return inPieces(simplified)?.let { remember(text, Result(it, Source.CHUNKS)) }
+        if (VIETNAMESE.containsMatchIn(simplified)) return inPieces(simplified)?.best?.let { remember(text, Result(it, Source.CHUNKS)) }
         val (replaced, used) = substitute(simplified)
         if (!ChineseText.hasHan(replaced)) return remember(text, Result(tidy(replaced), Source.DICTIONARY))
-        val whole = ask(replaced)
-        if (whole != null && trusted(simplified, whole, used)) return remember(text, Result(whole.trim(), Source.ENGINE))
+        // An answer good but for a word of English or pinyin left in it (a name: "Sima An"): kept,
+        // and shown if nothing better comes. A line left in Chinese tells the user nothing.
+        var rough: String? = null
+        suspend fun engine(input: String, kept: List<String>): String? {
+            val answer = ask(input)?.let { fix(simplified, it) } ?: return null
+            return when (verdict(simplified, answer, kept)) {
+                Verdict.GOOD -> answer
+                Verdict.LEFT_OVER -> {
+                    if (rough == null) rough = answer
+                    null
+                }
+                Verdict.BAD -> null
+            }
+        }
+        engine(replaced, used)?.let { return remember(text, Result(it, Source.ENGINE)) }
         // The translator lost a word put in for it: once more with only the words that must be kept
         // (the user's glossary, the required terms), the rest left for it to translate.
         val (plainer, kept) = substitute(simplified, onlyRequired = true)
-        if (plainer != replaced) {
-            val again = ask(plainer)
-            if (again != null && trusted(simplified, again, kept)) return remember(text, Result(again.trim(), Source.ENGINE))
-        }
+        if (plainer != replaced) engine(plainer, kept)?.let { return remember(text, Result(it, Source.ENGINE)) }
         // It keeps none of the words put in: the sentence as it is, in the translator's own words
         // (still checked: its numbers, no Chinese left, and never one account action for the other).
         // A sentence left in Chinese because 运费 did not come out as the list has it helps nobody.
-        if (simplified != plainer) {
-            val plain = ask(simplified)
-            if (plain != null && trusted(simplified, plain, emptyList())) return remember(text, Result(plain.trim(), Source.ENGINE))
-        }
+        if (simplified != plainer) engine(simplified, emptyList())?.let { return remember(text, Result(it, Source.ENGINE)) }
         // Every word of it is in the dictionary, only in the Chinese order: better than pieces.
         dictionary.compose(ChineseText.key(simplified), strict = false)?.let { return remember(text, Result(it, Source.DICTIONARY)) }
-        val pieces = inPieces(simplified) ?: return null
-        return remember(text, Result(pieces, Source.CHUNKS))
+        // Things set apart by spaces (a shop's name between "7年老店" and "进店"): each on its own.
+        phrases(simplified)?.let { parts -> inPhrases(parts)?.let { return remember(text, Result(it, Source.CHUNKS)) } }
+        val pieces = inPieces(simplified)
+        pieces?.strict?.takeUnless { ChineseText.hasHan(it) }?.let { return remember(text, Result(it, Source.CHUNKS)) }
+        rough?.let { return remember(text, Result(it, Source.ENGINE)) }
+        return pieces?.best?.let { remember(text, Result(it, Source.CHUNKS)) }
+    }
+
+    /** Each phrase of a line on its own, joined again; null when one of them stays in Chinese. */
+    private suspend fun inPhrases(parts: List<String>): String? {
+        val done = coroutineScope {
+            parts.map { part -> async { if (!ChineseText.hasHan(part)) part else translate(part)?.text } }.awaitAll()
+        }
+        if (done.any { it == null || ChineseText.hasHan(it) }) return null
+        return join(parts, done.map { it!! })
     }
 
     /** The phrases of a line set apart by spaces (Simplified); null: it is one phrase. */
@@ -279,40 +299,73 @@ class ScreenTranslator(
         }
     }
 
-    private fun trusted(source: String, translation: String, used: List<String>, fromEngine: Boolean = true): Boolean {
-        if (translation.isBlank() || ChineseText.hasHan(translation)) return false
-        if (!NumberGuard.kept(source, translation)) return false
-        if (fromEngine && leftOver(source, translation)) return false
+    private enum class Verdict { GOOD, LEFT_OVER, BAD }
+
+    private fun trusted(source: String, translation: String, used: List<String>, fromEngine: Boolean = true): Boolean =
+        verdict(source, translation, used, fromEngine) == Verdict.GOOD
+
+    /** BAD: never shown (Chinese left, a number changed, a word put in lost, an account action swapped). */
+    private fun verdict(source: String, translation: String, used: List<String>, fromEngine: Boolean = true): Verdict {
+        if (translation.isBlank() || ChineseText.hasHan(translation)) return Verdict.BAD
+        if (!NumberGuard.kept(source, translation)) return Verdict.BAD
         val vietnamese = vietnamese(translation)
-        if (used.any { vietnamese(it) !in vietnamese }) return false
-        return !dangerous(source, translation)
+        if (used.any { vietnamese(it) !in vietnamese }) return Verdict.BAD
+        if (dangerous(source, translation)) return Verdict.BAD
+        return if (fromEngine && leftOver(source, translation)) Verdict.LEFT_OVER else Verdict.GOOD
     }
 
+    /**
+     * The offline translator's answer with the line's numbers as the line writes them ("0,01 g" is
+     * "0.01g" again) and the slips it is known to make put right (秤, a scale for weighing, came out
+     * "quy mô", the size of something).
+     */
+    private fun fix(source: String, answer: String): String {
+        var out = NumberGuard.repair(source, answer.trim())
+        for (slip in SLIPS) {
+            if (slip.word !in source || slip.unless.any { it in source }) continue
+            out = slip.wrong.replace(out) { match -> if (match.value[0].isUpperCase()) slip.right.replaceFirstChar { it.uppercaseChar() } else slip.right }
+        }
+        return out
+    }
+
+    /**
+     * A line in pieces. `strict`: only answers with nothing left over, the rest in Chinese as it was.
+     * `best`: also answers with a word of pinyin or English left in them (a shop's name), where nothing better came.
+     */
+    private class Pieces(val strict: String, val best: String)
+
     /** Each Chinese piece alone (side by side), the rest (numbers, codes, symbols) as written. */
-    private suspend fun inPieces(simplified: String): String? {
+    private suspend fun inPieces(simplified: String): Pieces? {
         val runs = ChineseText.runs(simplified)
         if (runs.count { it.second } == runs.size) return null
+        // For each piece: the answer, and whether something was left over in it.
         val done = coroutineScope {
             runs.map { (piece, han) ->
                 async {
-                    if (!han) null else quick(piece)?.text ?: run {
+                    if (!han) null else quick(piece)?.text?.let { it to false } ?: run {
                         val (replaced, used) = substitute(piece)
-                        if (!ChineseText.hasHan(replaced)) replaced.replace(MARK.toString(), "")
-                        else ask(replaced)?.takeIf { trusted(piece, it, used) }
+                        if (!ChineseText.hasHan(replaced)) replaced.replace(MARK.toString(), "") to false
+                        else ask(replaced)?.let { fix(piece, it) }?.let { answer ->
+                            when (verdict(piece, answer, used)) {
+                                Verdict.GOOD -> answer to false
+                                Verdict.LEFT_OVER -> answer to true
+                                Verdict.BAD -> null
+                            }
+                        }
                     }
                 }
             }.awaitAll()
         }
-        var translated = 0
-        val out = StringBuilder()
-        for ((i, run) in runs.withIndex()) {
-            val known = done[i]
-            if (known == null) out.append(run.first) else {
-                translated++
-                out.append(MARK).append(known).append(MARK)
+        if (done.none { it != null }) return null
+        fun join(loose: Boolean): String {
+            val out = StringBuilder()
+            for ((i, run) in runs.withIndex()) {
+                val known = done[i]?.takeIf { loose || !it.second }?.first
+                if (known == null) out.append(run.first) else out.append(MARK).append(known).append(MARK)
             }
+            return tidy(out.toString())
         }
-        return if (translated == 0) null else tidy(out.toString())
+        return Pieces(join(false), join(true))
     }
 
     companion object {
@@ -348,6 +401,21 @@ class ScreenTranslator(
         private val SPACES = Regex("\\s+")
 
         private val LOG_OUT = listOf("退出登录", "退出当前账户", "退出当前账号", "退出账号", "退出账户")
+
+        /** A word the offline translator gets wrong through English, unless the line also has a word that means what it wrote. */
+        private class Slip(val word: String, val unless: List<String>, wrong: String, val right: String) {
+            val wrong = Regex("(?<!\\p{L})(?:$wrong)(?!\\p{L})", setOf(RegexOption.IGNORE_CASE))
+        }
+
+        private val SLIPS = listOf(
+            // 秤 "scale": a scale for weighing, not the size of something nor a scale on a map.
+            Slip("秤", listOf("规模", "比例", "比率", "刻度", "平衡"), "quy mô|thang đo|tỷ lệ|tỉ lệ|cân bằng", "cân"),
+            Slip("称重", listOf("规模", "比例"), "quy mô|tỷ lệ|tỉ lệ", "cân"),
+            // 天平 "balance": the small precise scale, not a bank balance.
+            Slip("天平", listOf("平衡", "余额"), "cân bằng|số dư|thăng bằng", "cân tiểu ly"),
+            // 衡器 "weighing apparatus".
+            Slip("衡器", listOf("平衡"), "cân bằng", "thiết bị cân"),
+        )
 
         /** Lower case, one form of each accent ("xoá" is "xóa"). */
         fun vietnamese(text: String): String = Normalizer.normalize(text.lowercase(), Normalizer.Form.NFC)

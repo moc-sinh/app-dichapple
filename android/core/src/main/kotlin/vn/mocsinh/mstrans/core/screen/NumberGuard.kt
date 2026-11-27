@@ -49,6 +49,33 @@ object NumberGuard {
         }
     }
 
+    /**
+     * A number of the line put back as the line writes it, where the translator wrote it its own
+     * way: "0,01 g" is "0.01g" again, "1.299" is "1,299", "20 +" is "20+". Only a number found
+     * once so; nothing else is changed. `kept` then judges the answer as before.
+     */
+    fun repair(source: String, translation: String): String {
+        var out = translation
+        for (token in tokens(source).distinct()) {
+            if (occurrences(normalize(out), token) > 0) continue
+            val found = loose(token).findAll(out).toList()
+            if (found.size == 1) out = out.replaceRange(found[0].range, token)
+        }
+        return out
+    }
+
+    /** The token with either separator for its points and commas, and a space allowed where digits meet other signs. */
+    private fun loose(token: String): Regex {
+        val pattern = StringBuilder("(?<![0-9A-Za-z])")
+        for ((i, c) in token.withIndex()) {
+            val before = token.getOrNull(i - 1)
+            if (before != null && before.isDigit() != c.isDigit() && before !in ".," && c !in ".,") pattern.append("\\s?")
+            pattern.append(if (c == '.' || c == ',') "[.,]" else Regex.escape(c.toString()))
+        }
+        pattern.append("(?![0-9A-Za-z])")
+        return Regex(pattern.toString(), RegexOption.IGNORE_CASE)
+    }
+
     private val tenThousands = Regex("(?<![0-9.,])(\\d+(?:\\.\\d+)?)万")
 
     /** A number before 万, with the ways the same value is written out: 10000, 10.000, 10,000. */
