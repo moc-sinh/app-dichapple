@@ -49,6 +49,7 @@ import vn.mocsinh.mstrans.core.TranslationModel
 import vn.mocsinh.mstrans.core.Translator
 import vn.mocsinh.mstrans.core.screen.Box
 import vn.mocsinh.mstrans.core.screen.ChineseText
+import vn.mocsinh.mstrans.core.screen.CommerceDictionary
 import vn.mocsinh.mstrans.core.screen.FrameSignature
 import vn.mocsinh.mstrans.core.screen.LineStyle
 import vn.mocsinh.mstrans.core.screen.LineStyles
@@ -73,6 +74,7 @@ import vn.mocsinh.mstrans.core.screen.TextGeometry
 import vn.mocsinh.mstrans.core.screen.TextLines
 import vn.mocsinh.mstrans.core.screen.TextMarks
 import vn.mocsinh.mstrans.core.screen.TreeWalk
+import vn.mocsinh.mstrans.core.screen.WordBook
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -125,6 +127,8 @@ class ScreenTranslationService : AccessibilityService() {
     private val engineMs = AtomicLong()
     private val engineLongest = AtomicLong()
     private val translator = ScreenTranslator(
+        // The large dictionary built on the owner's computer, when the APK has it (read when first needed).
+        dictionary = CommerceDictionary(book = { WordBook.DEFAULT }),
         engine = TextEngine { text ->
             val asked = SystemClock.elapsedRealtime()
             try {
@@ -313,6 +317,8 @@ class ScreenTranslationService : AccessibilityService() {
                 runCatching { ml.checkModel() }
                 ScreenState.changed()
                 ml.warmUp()
+                // The large dictionary is read now, not when the first page needs it.
+                WordBook.DEFAULT
             }
             apply(controller.handle(Event.Started, settings::isSelected))
             // Already in a chosen app (turned on from the floating button): start there.

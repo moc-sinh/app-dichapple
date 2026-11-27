@@ -244,6 +244,9 @@ object IndustryTerms {
         "联系客服" to "Liên hệ CSKH", "免安装" to "Không cần lắp", "光源" to "Nguồn sáng", "照度" to "Độ rọi", "显色指数" to "Chỉ số hoàn màu",
         "护眼" to "Bảo vệ mắt", "无频闪" to "Không nhấp nháy", "调光" to "Chỉnh độ sáng", "色温" to "Nhiệt độ màu", "暖光" to "Ánh sáng vàng",
         "白光" to "Ánh sáng trắng", "中性光" to "Ánh sáng trung tính", "三色变光" to "Đổi 3 màu ánh sáng",
+        "樱花" to "Hoa anh đào", "订制" to "Đặt làm riêng", "订做" to "Đặt làm", "精密" to "Chính xác", "摄像" to "Quay phim",
+        "加装" to "Lắp thêm", "选配" to "Tùy chọn thêm", "选配功能" to "Tính năng tùy chọn", "推拉门" to "Cửa lùa", "制冷方式" to "Cách làm lạnh",
+        "开门方式" to "Kiểu mở cửa", "最大容积" to "Dung tích tối đa", "三温" to "3 vùng nhiệt",
     )
 
     /** Cold cabinets and shop fittings (a fruit display fridge's variants, 27/11/2026: 网红 came out "Red Red"). */
@@ -322,6 +325,28 @@ object IndustryTerms {
 
     /** Left as they are: the grey square that says a variant has no picture. */
     val KEEP: Set<String> = setOf("无图", "暂无图片", "暂无图")
+
+    /**
+     * One letter alone between known words, in a line put together word by word from the large
+     * dictionary (`CommerceDictionary.gloss`): its meaning ("店" a shop, "款" a model); empty, a
+     * particle said nothing for ("的"). A letter among letters no dictionary has is part of a name
+     * instead ("金珂华" is "Kim Kha Hoa", not gold), read in Sino-Vietnamese.
+     */
+    val SINGLE: Map<Char, String> = (
+        "的=|了=|之=của|是=là|在=ở|有=có|无=không|不=không|非=không|可=có thể|能=có thể|用=dùng|为=cho|给=cho|被=bị|很=rất|最=nhất|更=hơn|太=quá|" +
+            "超=siêu|特=đặc biệt|全=toàn bộ|多=nhiều|少=ít|新=mới|老=cũ|旧=cũ|好=tốt|大=lớn|小=nhỏ|高=cao|低=thấp|长=dài|短=ngắn|宽=rộng|厚=dày|" +
+            "薄=mỏng|重=nặng|轻=nhẹ|快=nhanh|慢=chậm|热=nóng|冷=lạnh|软=mềm|硬=cứng|圆=tròn|方=vuông|黑=đen|白=trắng|红=đỏ|蓝=xanh dương|" +
+            "绿=xanh lá|黄=vàng|灰=xám|粉=hồng|紫=tím|银=bạc|金=vàng|店=cửa hàng|款=mẫu|型=loại|式=kiểu|版=bản|号=số|级=cấp|层=tầng|门=cửa|" +
+            "灯=đèn|球=bi|桌=bàn|椅=ghế|柜=tủ|架=giá|箱=thùng|盒=hộp|包=túi|袋=túi|杯=cốc|瓶=chai|罐=hũ|碗=bát|盘=đĩa|锅=nồi|壶=ấm|刀=dao|剪=kéo|" +
+            "笔=bút|纸=giấy|布=vải|线=dây|绳=dây thừng|管=ống|板=tấm|片=miếng|块=miếng|条=sợi|根=cây|张=tờ|套=bộ|件=cái|个=cái|只=chiếc|台=chiếc|" +
+            "双=đôi|对=cặp|车=xe|鞋=giày|帽=mũ|衣=áo|裤=quần|裙=váy|袜=tất|表=đồng hồ|机=máy|器=thiết bị|秤=cân|称=cân|尺=thước|镜=gương|水=nước|" +
+            "电=điện|气=khí|油=dầu|火=lửa|风=gió|光=ánh sáng|声=âm thanh|色=màu|码=cỡ|面=mặt|边=cạnh|角=góc|底=đáy|顶=đỉnh|侧=bên|内=trong|" +
+            "外=ngoài|上=trên|下=dưới|前=trước|后=sau|左=trái|右=phải|中=giữa|手=tay|头=đầu|脚=chân|身=thân|家=nhà|室=phòng|厅=sảnh|房=phòng|" +
+            "楼=tầng|厂=xưởng|送=tặng|防=chống|带=kèm|含=gồm|和=và|与=và|及=và|或=hoặc|加=thêm|减=giảm|买=mua|卖=bán|装=lắp|洗=rửa|吃=ăn|喝=uống|" +
+            "穿=mặc|戴=đeo|坐=ngồi|睡=ngủ|玩=chơi|看=xem|爱=yêu|真=thật|假=giả|纯=nguyên chất|净=sạch|鲜=tươi|干=khô|湿=ẩm|甜=ngọt|酸=chua|" +
+            "辣=cay|咸=mặn|苦=đắng|香=thơm|果=quả|茶=trà|酒=rượu|奶=sữa|肉=thịt|鱼=cá|米=gạo|糖=đường|盐=muối|蛋=trứng|菜=rau|梨=lê|桃=đào|瓜=dưa|" +
+            "橙=cam|橘=quýt|杏=mơ|枣=táo tàu|实=thật|价=giá|点=giờ|元=tệ|天=ngày|年=năm|月=tháng|日=ngày|时=giờ|分=phút|秒=giây"
+        ).split('|').associate { it.substringBefore('=').single() to it.substringAfter('=') }
 
     /** One letter that joins words, for a line put together from the words above. */
     val GLUE: Map<Char, String> = mapOf('防' to "chống", '送' to "tặng", '与' to "và", '和' to "và", '及' to "và", '或' to "hoặc", '带' to "kèm", '含' to "gồm")

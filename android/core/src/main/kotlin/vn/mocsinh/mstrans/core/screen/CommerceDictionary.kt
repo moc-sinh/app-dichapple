@@ -13,6 +13,8 @@ class CommerceDictionary(
     private val labels: Map<String, String> = LABELS,
     private val required: Map<String, String> = REQUIRED,
     private val industry: Map<String, String> = IndustryTerms.ALL,
+    /** The large dictionary and the Sino-Vietnamese readings, for `gloss` (read when first needed). */
+    private val book: () -> WordBook = { WordBook.EMPTY },
 ) {
     /** What a line may be put together from: every word but the one-letter labels. */
     private val parts: Map<String, String> = labels.filterKeys { it.length >= 2 } + industry + terms
@@ -100,25 +102,68 @@ class CommerceDictionary(
         // The same lines are drawn again and again: each is put together once.
         val tag = (if (strict) "1" else "0") + key
         synchronized(composed) { composed[tag] }?.let { return it.takeUnless { it == NONE } }
-        val made = composeNow(key, strict)
+        val made = composeNow(key, strict, null)
         synchronized(composed) { composed[tag] = made ?: NONE }
         return made
     }
+
+    /**
+     * The line word by word from every dictionary, the large one too (`WordBook`), and a name
+     * (letters no dictionary has as a word: a shop's, a brand's) read in Sino-Vietnamese:
+     * "舜鑫科技" is "Thuấn Hâm khoa học kỹ thuật". Worse than a translation, better than the
+     * Chinese: for a line the offline translator gave nothing for that can be shown. Null when a
+     * letter has neither a word nor a reading (or there is no large dictionary).
+     */
+    fun gloss(key: String): String? {
+        val words = book()
+        if (words.isEmpty) return null
+        val tag = "g$key"
+        synchronized(composed) { composed[tag] }?.let { return it.takeUnless { it == NONE } }
+        val made = composeNow(key, strict = false, words)
+        synchronized(composed) { composed[tag] = made ?: NONE }
+        return made
+    }
+
+    /** The large dictionary's meaning of a word written by people, or null. */
+    fun bookMeaning(key: String): String? = book().meaning(key)?.takeIf { it.trusted }?.text
 
     private val composed = object : LinkedHashMap<String, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 2_000
     }
 
-    private fun composeNow(key: String, strict: Boolean): String? {
+    /** `book`: words of the large dictionary too, and an unknown letter read in Sino-Vietnamese (`gloss`). */
+    private fun composeNow(key: String, strict: Boolean, book: WordBook?): String? {
         if (!ChineseText.hasHan(key)) return null
         // The line as words, numbers with units, and the rest as written.
         val tokens = ArrayList<Token>()
+        // With the large dictionary: letters no dictionary has as a word, side by side, waiting.
+        val letters = StringBuilder()
+
+        /**
+         * Those letters: each a word alone ("店" a shop, "秤称" scales), their meanings; one at least
+         * that is not ("舜鑫", "金珂华"), a name, all read in Sino-Vietnamese ("Kim Kha Hoa", not gold).
+         */
+        fun flush(): Boolean {
+            if (letters.isEmpty() || book == null) return true
+            val run = letters.toString()
+            letters.setLength(0)
+            val meanings = run.map { IndustryTerms.SINGLE[it] ?: IndustryTerms.GLUE[it] }
+            if (meanings.all { it != null }) {
+                for (meaning in meanings) if (meaning!!.isNotEmpty() && tokens.lastOrNull()?.text != meaning) tokens.add(Token(meaning))
+                return true
+            }
+            val name = run.map { book.reading(it) ?: return false }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+            tokens.add(Token(name, name = true))
+            return true
+        }
+
         var i = 0
         while (i < key.length) {
             val numberStarts = i == 0 || !key[i - 1].isDigit() && key[i - 1] != '.'
             // A known sentence with its numbers, inside the line ("红包省20元" in "红包省20元抵1.2元").
             val phrase = if (numberStarts) phraseAt(key, i) else null
             if (phrase != null) {
+                if (!flush()) return null
                 tokens.add(Token(phrase.second, phrase = true))
                 i = phrase.first
                 continue
@@ -127,32 +172,42 @@ class CommerceDictionary(
             if (unit != null && numberStarts) {
                 val number = unit.groupValues[1]
                 val name = UNIT_NAMES.getValue(unit.groupValues[2])
+                if (!flush()) return null
                 tokens.add(Token(if (name == "size") "size $number" else "$number $name", unit = true))
                 i = unit.range.last + 1
                 continue
             }
-            var n = minOf(longest, key.length - i)
+            var n = minOf(if (book == null) longest else maxOf(longest, minOf(book.longest, MAX_BOOK_WORD)), key.length - i)
             var found: String? = null
+            var ours = false
             while (n >= 2 && found == null) {
                 val part = key.substring(i, i + n)
-                found = if (ChineseText.hasHan(part)) parts[part] else null
+                if (ChineseText.hasHan(part)) {
+                    found = parts[part]
+                    ours = found != null
+                    // Ours first; the large dictionary's where ours has no word this long.
+                    if (found == null && book != null && n <= book.longest) found = book.meaning(part)?.text
+                }
                 if (found == null) n--
             }
             if (found != null) {
-                tokens.add(Token(found, head = key.substring(i, i + n) in IndustryTerms.HEADS))
+                if (!flush()) return null
+                tokens.add(Token(found, head = ours && key.substring(i, i + n) in IndustryTerms.HEADS))
                 i += n
                 continue
             }
             val cp = key.codePointAt(i)
             if (ChineseText.isHan(cp)) {
-                tokens.add(Token(IndustryTerms.GLUE[key[i]] ?: return null))
+                if (book == null) tokens.add(Token(IndustryTerms.GLUE[key[i]] ?: return null)) else letters.append(key[i])
                 i++
                 continue
             }
+            if (!flush()) return null
             val raw = String(Character.toChars(cp))
             if (tokens.lastOrNull()?.raw == true) tokens[tokens.lastIndex] = Token(tokens.last().text + raw, raw = true) else tokens.add(Token(raw, raw = true))
             i += Character.charCount(cp)
         }
+        if (!flush()) return null
         // Words standing together: the thing they describe goes first, as Vietnamese says it.
         var start = 0
         while (start < tokens.size) {
@@ -171,7 +226,7 @@ class CommerceDictionary(
             start = end
         }
         val out = StringBuilder()
-        for (token in tokens) if (token.raw) out.append(token.text) else word(out, token.text, openLeft = token.unit)
+        for (token in tokens) if (token.raw) out.append(token.text) else word(out, token.text, openLeft = token.unit, asIs = token.name)
         return ScreenTranslator.tidy(out.toString())
     }
 
@@ -179,8 +234,12 @@ class CommerceDictionary(
      * A piece of a line being put together. `word`: from the dictionary (not a number, not as
      * written, not a known sentence with its numbers).
      */
-    private class Token(val text: String, val head: Boolean = false, val unit: Boolean = false, val raw: Boolean = false, val phrase: Boolean = false) {
-        val word: Boolean get() = !unit && !raw && !phrase
+    private class Token(
+        val text: String, val head: Boolean = false, val unit: Boolean = false, val raw: Boolean = false, val phrase: Boolean = false,
+        /** A name read in Sino-Vietnamese, its capitals kept. */
+        val name: Boolean = false,
+    ) {
+        val word: Boolean get() = !unit && !raw && !phrase && !name
     }
 
     /** The longest known sentence with numbers (`PATTERNS`) that begins at `at`: where it ends, and its Vietnamese. */
@@ -202,12 +261,13 @@ class CommerceDictionary(
      * name in capitals ("ASTATRE Đen vàng"), small inside ("gọng kính [ghi chú màu]"); a borrowed
      * word (Bluetooth, Cotton) as it is. `openLeft`: no space before it ("+0 độ").
      */
-    private fun word(out: StringBuilder, word: String, openLeft: Boolean = false) {
+    private fun word(out: StringBuilder, word: String, openLeft: Boolean = false, asIs: Boolean = false) {
         val last = out.lastOrNull { it.isLetterOrDigit() }
         val first = word.substringBefore(' ')
         // A value after a colon or a slash starts again: "Màu sắc: Đen".
         val after = out.lastOrNull { !it.isWhitespace() && it != ScreenTranslator.MARK }
         val text = when {
+            asIs -> word
             last == null || after != null && after in ":：/|" -> word.replaceFirstChar { it.uppercaseChar() }
             last.code < 0x80 && last.isUpperCase() -> word
             first in IndustryTerms.BORROWED || first.count { it.isUpperCase() } > 1 -> word
@@ -387,6 +447,9 @@ class CommerceDictionary(
 
         private val UNIT_NAMES: Map<String, String> = IndustryTerms.UNITS.toMap()
         private val SPACED = Regex("\\s")
+
+        /** The large dictionary's words are looked for up to this long (its longest are sayings, not on a shop's page). */
+        private const val MAX_BOOK_WORD = 8
 
         /** At most this many words standing together are put together without the translator. */
         private const val MAX_TOGETHER = 6

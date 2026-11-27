@@ -122,6 +122,12 @@ class ScreenTranslator(
         val simplified = ChineseText.toSimplified(text.trim())
         // Vietnamese on the line (an address): the translator would mangle it. Only the Chinese is translated.
         if (VIETNAMESE.containsMatchIn(simplified)) return inPieces(simplified)?.best?.let { remember(text, Result(it, Source.CHUNKS)) }
+        // A short word the large dictionary has, written by people: better than the translator's
+        // guess through English ("上市" came out "Liệt kê").
+        val key = ChineseText.key(simplified)
+        if (key.length in 2..BOOK_WORD_ALONE && key.all { ChineseText.isHan(it.code) }) {
+            dictionary.bookMeaning(key)?.let { return remember(text, Result(it.replaceFirstChar { c -> c.uppercaseChar() }, Source.DICTIONARY)) }
+        }
         val (replaced, used) = substitute(simplified)
         if (!ChineseText.hasHan(replaced)) return remember(text, Result(tidy(replaced), Source.DICTIONARY))
         // An answer good but for a word of English or pinyin left in it (a name: "Sima An"): kept,
@@ -154,6 +160,9 @@ class ScreenTranslator(
         val pieces = inPieces(simplified)
         pieces?.strict?.takeUnless { ChineseText.hasHan(it) }?.let { return remember(text, Result(it, Source.CHUNKS)) }
         rough?.let { return remember(text, Result(it, Source.ENGINE)) }
+        // Nothing the translator gave can be shown: word by word from the large dictionary, names
+        // in Sino-Vietnamese, rather than Chinese left on the screen.
+        dictionary.gloss(key)?.let { return remember(text, Result(it, Source.CHUNKS)) }
         return pieces?.best?.let { remember(text, Result(it, Source.CHUNKS)) }
     }
 
@@ -359,7 +368,7 @@ class ScreenTranslator(
                                 Verdict.LEFT_OVER -> answer to true
                                 Verdict.BAD -> null
                             }
-                        }
+                        } ?: dictionary.gloss(ChineseText.key(piece))?.let { it to true }
                     }
                 }
             }.awaitAll()
@@ -410,6 +419,8 @@ class ScreenTranslator(
 
         /** Letters only Vietnamese uses (ă â đ ê ô ơ ư, and the tones). */
         internal val VIETNAMESE = Regex("[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]")
+        /** A word alone this long at most is taken from the large dictionary before the translator is asked. */
+        private const val BOOK_WORD_ALONE = 4
         /** Where a number goes in a sentence kept without its numbers. */
         private const val HOLE = '\u0001'
         private val NUMBER = Regex("\\d+(?:[.,:]\\d+)*")
