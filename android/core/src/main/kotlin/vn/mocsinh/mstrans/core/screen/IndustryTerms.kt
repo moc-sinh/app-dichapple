@@ -247,6 +247,9 @@ object IndustryTerms {
         "樱花" to "Hoa anh đào", "订制" to "Đặt làm riêng", "订做" to "Đặt làm", "精密" to "Chính xác", "摄像" to "Quay phim",
         "加装" to "Lắp thêm", "选配" to "Tùy chọn thêm", "选配功能" to "Tính năng tùy chọn", "推拉门" to "Cửa lùa", "制冷方式" to "Cách làm lạnh",
         "开门方式" to "Kiểu mở cửa", "最大容积" to "Dung tích tối đa", "三温" to "3 vùng nhiệt",
+        "优选款" to "Mẫu chọn lọc", "优选" to "Chọn lọc", "好款" to "Mẫu tốt", "推荐款" to "Mẫu đề xuất", "铜管" to "Ống đồng",
+        "铜管制冷" to "Làm lạnh ống đồng", "移门" to "Cửa lùa", "三室" to "3 ngăn", "全景窗" to "Cửa kính toàn cảnh",
+        "大家都在买" to "Mọi người đang mua", "点菜柜" to "Tủ trưng bày món", "大图" to "Ảnh lớn",
     )
 
     /** Cold cabinets and shop fittings (a fruit display fridge's variants, 27/11/2026: 网红 came out "Red Red"). */
@@ -324,7 +327,7 @@ object IndustryTerms {
     )
 
     /** Left as they are: the grey square that says a variant has no picture. */
-    val KEEP: Set<String> = setOf("无图", "暂无图片", "暂无图")
+    val KEEP: Set<String> = setOf("无图", "暂无图片", "暂无图", "无四", "无囚", "无因")
 
     /**
      * One letter alone between known words, in a line put together word by word from the large
