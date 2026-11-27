@@ -246,6 +246,21 @@ object IndustryTerms {
         "白光" to "Ánh sáng trắng", "中性光" to "Ánh sáng trung tính", "三色变光" to "Đổi 3 màu ánh sáng",
     )
 
+    /** Cold cabinets and shop fittings (a fruit display fridge's variants, 27/11/2026: 网红 came out "Red Red"). */
+    private val COLD = linkedMapOf(
+        "展示柜" to "Tủ trưng bày", "冷藏柜" to "Tủ mát", "冷藏展示柜" to "Tủ mát trưng bày", "保鲜柜" to "Tủ mát giữ tươi", "冰柜" to "Tủ đông",
+        "冷冻柜" to "Tủ đông", "饮料柜" to "Tủ đồ uống", "风幕柜" to "Tủ mát màn gió", "立式" to "Loại đứng", "卧式" to "Loại nằm",
+        "冷藏" to "Làm mát", "冷冻" to "Đông lạnh", "保鲜" to "Giữ tươi", "风冷" to "Làm lạnh bằng quạt", "直冷" to "Làm lạnh trực tiếp",
+        "商用" to "Dùng cho kinh doanh", "单门" to "1 cửa", "双门" to "2 cửa", "三门" to "3 cửa", "四门" to "4 cửa", "五门" to "5 cửa",
+        "三色灯" to "Đèn 3 màu", "网红" to "hot trend", "网红款" to "Mẫu hot trend", "升级" to "Nâng cấp", "升级版" to "Bản nâng cấp",
+        "节能" to "Tiết kiệm điện", "节能款" to "Bản tiết kiệm điện", "门框" to "Khung cửa", "层架" to "Kệ tầng", "可调节" to "Điều chỉnh được",
+        "高度" to "Chiều cao", "自定义" to "Tùy chỉnh", "密封条" to "Gioăng cửa", "加厚密封条" to "Gioăng cửa dày", "吸力" to "Lực hút",
+        "吸力强" to "Lực hút mạnh", "冷气" to "Khí lạnh", "外观" to "Ngoại hình", "整体" to "Tổng thể", "简洁大方" to "Gọn gàng, thanh lịch",
+        "方便" to "Tiện lợi", "货物" to "Hàng hóa", "安置" to "Sắp xếp", "水果" to "Trái cây", "蔬菜" to "Rau củ", "超市" to "Siêu thị",
+        "便利店" to "Cửa hàng tiện lợi", "水果店" to "Cửa hàng trái cây", "生鲜" to "Hàng tươi sống", "温度" to "Nhiệt độ", "压缩机" to "Máy nén",
+        "制冷" to "Làm lạnh", "静音" to "Chạy êm", "除雾" to "Chống đọng hơi", "玻璃门" to "Cửa kính", "尺寸" to "Kích thước",
+    )
+
     /** Places goods are sent from (the line under a product on 1688), and countries. */
     private val PLACES = linkedMapOf(
         "中国" to "Trung Quốc", "香港" to "Hồng Kông", "澳门" to "Ma Cao", "台湾" to "Đài Loan", "日本" to "Nhật Bản", "韩国" to "Hàn Quốc",
@@ -263,7 +278,7 @@ object IndustryTerms {
 
     /** Everything above; later groups win where two give the same word. */
     val ALL: Map<String, String> = ATTRIBUTES + COLOURS + MATERIALS + GLASSES + ELECTRONICS + CLOTHES + HOME + PERSONAL + TRADE + SHOP +
-        MEASURE + FACTORY + MACHINES + MORE + SPORTS_LIGHTS + PLACES
+        MEASURE + FACTORY + MACHINES + MORE + SPORTS_LIGHTS + COLD + PLACES
 
     /** Shorter forms for places with little room (a price row, a chip). */
     val SHORT: Map<String, String> = linkedMapOf(

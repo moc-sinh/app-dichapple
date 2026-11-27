@@ -75,8 +75,8 @@ class ScreenTranslatorTest {
 
     @Test
     fun chineseLeftInTheAnswerIsNotTrusted() = runBlocking {
-        val translator = ScreenTranslator(engine = FakeEngine(mapOf("天猫超市" to "Siêu thị 天猫")))
-        assertNull(translator.translate("天猫超市"))
+        val translator = ScreenTranslator(engine = FakeEngine(mapOf("猫超频道" to "Kênh 猫超")))
+        assertNull(translator.translate("猫超频道"))
     }
 
     @Test

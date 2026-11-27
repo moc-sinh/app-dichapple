@@ -79,8 +79,14 @@ class MlKitEngines {
                 if (pieces.isNotEmpty()) pieces.map { (piece, box) -> piece to box.offset(left, top) }
                 else line.boundingBox?.let { listOf(line.text to Box(it.left, it.top, it.right, it.bottom).offset(left, top)) }
             }
-            // A sentence wrapped over lines is one text; a line of several things is never part of one.
-            val whole = if (lines.all { it.size == 1 }) ScreenBlocks.texts(lines.map { it[0] }) else lines.flatten().flatMap { ScreenBlocks.texts(listOf(it)) }
+            // A sentence wrapped over lines is one text; a line of several things is never part of one,
+            // but for its first thing: a variant's name wrapped over two lines with its price beside
+            // the first is still one name (Taobao, 27/11/2026: "…【网红升级节" / "能款】" was translated alone).
+            val whole = if (lines.all { it.size == 1 }) ScreenBlocks.texts(lines.map { it[0] }) else {
+                val names = ScreenBlocks.texts(lines.map { it[0] })
+                if (lines.size > 1 && names.size == 1) names + lines.flatMap { it.drop(1) }.flatMap { ScreenBlocks.texts(listOf(it)) }
+                else lines.flatten().flatMap { ScreenBlocks.texts(listOf(it)) }
+            }
             // An icon taken for a letter (a cart for 口) is not text either.
             whole.filter { PictureText.worth(it.text, null, null, known) }
         }

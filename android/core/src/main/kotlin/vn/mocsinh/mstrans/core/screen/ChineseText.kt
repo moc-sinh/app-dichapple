@@ -26,6 +26,26 @@ object ChineseText {
         return out.toString()
     }
 
+    /**
+     * Letters of Japanese the reader of pictures takes Chinese ones for, put back where Chinese is
+     * next to them: 力 read カ ("吸カ强" came out "Suck"), 一 read ー ("三合ー折叠"), 口 read ロ.
+     */
+    fun unconfused(text: String): String {
+        if (text.none { it in LOOK_ALIKES }) return text
+        val out = StringBuilder(text)
+        for (i in out.indices) {
+            val han = LOOK_ALIKES[out[i]] ?: continue
+            val before = out.getOrNull(i - 1)
+            val after = out.getOrNull(i + 1)
+            if (before != null && isHan(before.code) || after != null && isHan(after.code)) out.setCharAt(i, han)
+        }
+        return out.toString()
+    }
+
+    private val LOOK_ALIKES = mapOf(
+        'カ' to '力', 'ロ' to '口', 'エ' to '工', 'ー' to '一', 'ニ' to '二', 'ハ' to '八', 'タ' to '夕', 'ト' to '卜', 'ヒ' to '匕',
+    )
+
     /** What a text is looked up by: Simplified, no spaces, no colon at the end ("规格：" is "规格"). */
     fun key(text: String): String = toSimplified(text).filterNot { it.isWhitespace() }.trimEnd(':', '：')
 

@@ -353,7 +353,7 @@ class CommerceDictionary(
             "待集运" to "Chờ gom hàng", "直邮包裹" to "Kiện gửi thẳng", "支付设置" to "Cài đặt thanh toán", "物流客服" to "CSKH vận chuyển",
             "物流中心" to "Trung tâm vận chuyển", "淘金币" to "Xu Taobao", "芭芭农场" to "Nông trại Baba", "短剧" to "Phim ngắn",
             "官方客服" to "CSKH chính thức", "退款/售后" to "Hoàn tiền/Hậu mãi", "领券购买" to "Nhận phiếu & mua",
-            "咨询客服" to "Hỏi CSKH",
+            "咨询客服" to "Hỏi CSKH", "切换地址" to "Đổi địa chỉ",
             // Searching
             "历史搜索" to "Lịch sử tìm kiếm", "猜你想搜" to "Gợi ý tìm kiếm", "为你推荐" to "Đề xuất cho bạn", "语音搜索" to "Tìm bằng giọng nói",
             "反馈" to "Góp ý", "女装" to "Thời trang nữ", "男装" to "Thời trang nam", "住宅家具" to "Nội thất nhà ở", "潮玩盲盒" to "Đồ chơi & hộp mù",

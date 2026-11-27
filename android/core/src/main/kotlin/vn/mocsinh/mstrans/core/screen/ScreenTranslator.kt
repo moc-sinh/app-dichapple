@@ -106,7 +106,7 @@ class ScreenTranslator(
     }
 
     /** Text read in a picture with a letter of a known word misread, put right (`CommerceDictionary.correct`). */
-    fun corrected(text: String): String = dictionary.correct(text)
+    fun corrected(text: String): String = dictionary.correct(ChineseText.unconfused(text))
 
     /** A shorter word for a place too narrow for the usual one (a label under an icon); null: none. */
     fun shorter(text: String): String? {
@@ -311,7 +311,15 @@ class ScreenTranslator(
         val vietnamese = vietnamese(translation)
         if (used.any { vietnamese(it) !in vietnamese }) return Verdict.BAD
         if (dangerous(source, translation)) return Verdict.BAD
-        return if (fromEngine && leftOver(source, translation)) Verdict.LEFT_OVER else Verdict.GOOD
+        if (!fromEngine) return Verdict.GOOD
+        val (left, words) = leftOvers(source, translation)
+        return when {
+            left == 0 -> Verdict.GOOD
+            // A name left in a sentence of Vietnamese ("Cân điện tử Sima An"): shown if nothing better
+            // comes. Mostly English ("Suck", "redpplings") says nothing: the Chinese stays.
+            left * 3 <= words -> Verdict.LEFT_OVER
+            else -> Verdict.BAD
+        }
     }
 
     /**
@@ -377,20 +385,27 @@ class ScreenTranslator(
          * "BLU-RAY"): a word that is no Vietnamese syllable, not written in the line, and not a word
          * Vietnamese shops borrow, means the translation is not to be trusted.
          */
-        fun leftOver(source: String, translation: String): Boolean {
+        fun leftOver(source: String, translation: String): Boolean = leftOvers(source, translation).first > 0
+
+        /** How many words of the translation are left over so, and how many words of Latin letters it has in all. */
+        fun leftOvers(source: String, translation: String): Pair<Int, Int> {
             val written = source.lowercase()
-            return LATIN_WORD.findAll(translation).any { match ->
+            var left = 0
+            var words = 0
+            for (match in LATIN_WORD.findAll(translation)) {
                 val word = match.value.lowercase()
-                word.length >= 2 && word !in written && word !in ALLOWED &&
-                    !vn.mocsinh.mstrans.core.telex.SyllableValidator.isValidSyllable(word, teencode = false)
+                if (word.length < 2) continue
+                words++
+                if (word !in written && word !in ALLOWED && !vn.mocsinh.mstrans.core.telex.SyllableValidator.isValidSyllable(word, teencode = false)) left++
             }
+            return left to words
         }
 
         private val LATIN_WORD = Regex("\\p{IsLatin}+")
         private val ALLOWED: Set<String> = IndustryTerms.BORROWED.map { it.lowercase() }.toSet() + IndustryTerms.LOANWORDS + (
             "size ship freeship shop sale online offline video live voucher combo set mini max pro plus ultra smart wifi wi fi " +
                 "bluetooth usb type led lcd oled ram rom cpu gpu app game gaming mode mm cm kg ml mah inch ok hd sim nfc gps ai pc tv " +
-                "gb tb mb kb hz ios android iphone ipad laptop tablet email logo tmall taobao alipay wechat jd sf ems vip"
+                "gb tb mb kb hz ios android iphone ipad laptop tablet email logo tmall taobao alipay wechat jd sf ems vip kông"
             ).split(' ').toSet()
 
         /** Letters only Vietnamese uses (ă â đ ê ô ơ ư, and the tones). */
