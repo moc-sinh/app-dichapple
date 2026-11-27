@@ -237,9 +237,15 @@ class ScreenTranslationPage(private val activity: MainActivity) : Screen {
     }
 
     private fun optionsSection(): View = activity.section("Tùy chọn",
-        "Tiết kiệm pin đọc màn hình thưa hơn; Nhanh hiện bản dịch sớm hơn nhưng tốn pin hơn. Đọc chữ trong ảnh cần Android 11 trở lên " +
-            "(máy này: Android ${Build.VERSION.RELEASE}). Nút nổi: chạm để xem chữ gốc, giữ để tạm dừng, kéo lên xuống để dời chỗ.",
+        "Chỉ dịch phần chính: dịch tên hàng, các mẫu để chọn, thông số, đánh giá, nút bấm; để nguyên miễn ship, lì xì, giảm giá, giá đô la, " +
+            "số người mua và chữ trong ảnh nhỏ ở trang danh sách, cho màn hình gọn. Tiết kiệm pin đọc màn hình thưa hơn; Nhanh hiện bản dịch " +
+            "sớm hơn nhưng tốn pin hơn. Đọc chữ trong ảnh cần Android 11 trở lên (máy này: Android ${Build.VERSION.RELEASE}). Nút nổi: chạm để " +
+            "xem chữ gốc, giữ để tạm dừng, kéo lên xuống để dời chỗ.",
         listOf(
+            activity.switchRow("Chỉ dịch phần chính", settings.focus) {
+                settings.focus = it
+                changed()
+            },
             padded(Segmented(activity, Speed.entries.map { it.label }, settings.speed.ordinal) {
                 settings.speed = Speed.entries[it]
                 ScreenState.service?.refresh()

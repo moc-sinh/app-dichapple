@@ -58,6 +58,7 @@ import vn.mocsinh.mstrans.core.screen.PaintOrder
 import vn.mocsinh.mstrans.core.screen.PixelGrid
 import vn.mocsinh.mstrans.core.screen.ScreenAi
 import vn.mocsinh.mstrans.core.screen.ScreenController
+import vn.mocsinh.mstrans.core.screen.ScreenFocus
 import vn.mocsinh.mstrans.core.screen.ScreenController.Action
 import vn.mocsinh.mstrans.core.screen.ScreenController.Event
 import vn.mocsinh.mstrans.core.screen.ScreenSettings
@@ -70,6 +71,7 @@ import vn.mocsinh.mstrans.core.screen.TextEngine
 import vn.mocsinh.mstrans.core.screen.TextFit
 import vn.mocsinh.mstrans.core.screen.TextGeometry
 import vn.mocsinh.mstrans.core.screen.TextLines
+import vn.mocsinh.mstrans.core.screen.TextMarks
 import vn.mocsinh.mstrans.core.screen.TreeWalk
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -171,6 +173,8 @@ class ScreenTranslationService : AccessibilityService() {
     @Volatile private var lastImageAt = 0L
     /** The page whose pictures `imageText` was read from. */
     @Volatile private var imageGeneration = -1L
+    /** How many times the pictures of that page were looked at again after it showed (`FOLLOW_UPS_MS`). */
+    @Volatile private var followUps = 0
     @Volatile private var lastLayout = 0
     /** The window that refused a screenshot (FLAG_SECURE): nothing of it is translated. */
     @Volatile private var secureWindow: Int? = null
@@ -189,7 +193,15 @@ class ScreenTranslationService : AccessibilityService() {
     // What is on the screen now
 
     /** The Chinese of the screen in reading order, each with its look. */
-    private class Page(val generation: Long, val lines: List<ScreenText>, val looks: Map<ScreenText, Look>, val window: Box)
+    private class Page(
+        val generation: Long, val lines: List<ScreenText>, val looks: Map<ScreenText, Look>, val window: Box,
+        /** Lines on the screen left untranslated ("Chỉ dịch phần chính"); still text the translations keep clear of. */
+        val skipped: Set<ScreenText> = emptySet(),
+        /** Lines read in pictures, with a few of their pixels as the screenshot showed them (`TextMarks`). */
+        val marks: Map<ScreenText, ByteArray> = emptyMap(),
+        /** The app's window the page is in (looked at again by `watch`). */
+        val windowId: Int = -1,
+    )
 
     /** Where a text is: its look is the same whatever it says (a countdown, a price). */
     private data class Place(val left: Int, val top: Int, val bottom: Int, val lines: Int) {
@@ -359,8 +371,13 @@ class ScreenTranslationService : AccessibilityService() {
         val pkg = event.packageName?.toString()
         val type = event.eventType
         // The translation layer and the floating button are windows of this package too: showing one is not
-        // the user moving to MSTrans (it used to cancel the scan of the app just opened).
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg == packageName && ownOverlay(event.windowId)) return
+        // the user moving to MSTrans (it used to cancel the scan of the app just opened). Android does not
+        // list a window touches pass through (the translation layer) among the windows: its first showing
+        // took every translation of the page away, and a page that does not move was never read again
+        // (Taobao's sheet of variants, 27/11/2026). Only one of MSTrans's own screens is MSTrans in front.
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg == packageName &&
+            (ownOverlay(event.windowId) || event.className?.endsWith("Activity") != true)
+        ) return
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null && pkg !in imePackages && pkg != foreground) {
             // Something of another app showing over a chosen one (a notice, a small system window)
             // is not the user leaving it: the app that has the screen says which app is in front.
@@ -390,7 +407,10 @@ class ScreenTranslationService : AccessibilityService() {
                 if (settings.isSelected(controller.foreground)) Event.WindowsChanged(keyboardUp()) else return
             else -> return
         }
-        apply(controller.handle(translated, settings::isSelected))
+        val actions = controller.handle(translated, settings::isSelected)
+        // Which event took the translations away (its kind and app only, never what is on the screen).
+        if (Action.Clear in actions && diagnosing()) Log.d(TEST_TAG, "cleared by $translated from ${AccessibilityEvent.eventTypeToString(type)} of $pkg")
+        apply(actions)
         // The last event of a keyboard going away can come while it is still in the list of windows
         // (it is sliding out), and no other may follow: it is looked for once more a moment later.
         if (translated == Event.WindowsChanged(true)) {
@@ -527,7 +547,7 @@ class ScreenTranslationService : AccessibilityService() {
                 page?.let { old ->
                     val kept = old.lines.filterNot { inside(old.looks.getValue(it).geometry.box, area) }
                     if (kept.size != old.lines.size) {
-                        page = Page(old.generation, kept, old.looks, old.window)
+                        page = Page(old.generation, kept, old.looks, old.window, old.skipped, old.marks, old.windowId)
                         render()
                     }
                 }
@@ -607,7 +627,7 @@ class ScreenTranslationService : AccessibilityService() {
                     } else if (again) {
                         again = false
                         schedule(controller.again())
-                    }
+                    } else watchFrom(0)
                 }
             }
         }
@@ -624,6 +644,8 @@ class ScreenTranslationService : AccessibilityService() {
         val asking: List<Asking>,
         /** For each of `nodes`: it may lie under a bar that stays in place (`PaintOrder.underPanels`). */
         val under: BooleanArray,
+        /** Where the app's pictures are (for "Chỉ dịch phần chính": text in a small one is left as it is). */
+        val images: List<Box>,
     )
 
     /** A text whose letters are still to be asked for: its node (kept until then), its place in `Tree.nodes`. */
@@ -640,6 +662,7 @@ class ScreenTranslationService : AccessibilityService() {
         val started = SystemClock.elapsedRealtime()
         val all = windows
         if (all.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }) {
+            if (diagnosing()) Log.d(TEST_TAG, "scan found a keyboard up")
             onMain { apply(controller.handle(Event.WindowsChanged(true), settings::isSelected)) }
             return 0
         }
@@ -648,6 +671,8 @@ class ScreenTranslationService : AccessibilityService() {
         var root = window?.root
         // Only the package name of a window not chosen is looked at, never its content.
         if (window == null || root == null || !settings.isSelected(root.packageName?.toString())) {
+            // Which app's window it was is not looked at: only whether there was one.
+            if (diagnosing()) Log.d(TEST_TAG, "scan found no chosen app in front: window ${window != null}, root ${root != null}")
             onMain {
                 if (controller.isCurrent(generation)) {
                     page = null
@@ -715,7 +740,8 @@ class ScreenTranslationService : AccessibilityService() {
         // card described in words, or may lie under a bar, waits until the picture of the screen has told.
         val normal = GUESSED_SIZE_SP.sp()
         val doubted = BooleanArray(tree.nodes.size) { tree.under[it] || TextFit.isRegion(tree.nodes[it].text, tree.nodes[it].bounds, normal) }
-        request(ScreenTextMerger.merge(tree.nodes.filterIndexed { i, _ -> !doubted[i] }, emptyList(), windowBox, excluded, tree.others).map { it.text })
+        request(ScreenTextMerger.merge(tree.nodes.filterIndexed { i, _ -> !doubted[i] }, emptyList(), windowBox, excluded, tree.others)
+            .filterNot { skipped(it, tree.images, windowBox) }.map { it.text })
 
         // A new page or a scroll needs a screenshot anyway (pictures are read again): it is taken
         // while the app is asked where its letters are. Only now, the screen known not to be sensitive.
@@ -732,6 +758,7 @@ class ScreenTranslationService : AccessibilityService() {
             imageText = emptyList()
             lastFrame = null
             imageGeneration = generation
+            followUps = 0
         }
         // A screenshot: for the colours of text not seen before, for the boxes still in doubt, for text in pictures.
         var known = ScreenTextMerger.merge(judge(nodes, doubted, null, keep = true), imageText, windowBox, excluded, tree.others)
@@ -789,7 +816,7 @@ class ScreenTranslationService : AccessibilityService() {
             if (!controller.isCurrent(generation)) return 0
             // First what the app itself says (and pictures as last read): on screen before the
             // pictures are read again, which is the slow part.
-            var stale = show(generation, known, grid, windowBox, under)
+            var stale = show(generation, known, grid, windowBox, under, tree.images, window.id)
             val shownAt = SystemClock.elapsedRealtime()
             var pictures = imageText
             if (picturesDue && shot != null && ml != null) {
@@ -806,7 +833,9 @@ class ScreenTranslationService : AccessibilityService() {
                     if (!controller.isCurrent(generation)) return 0
                     imageText = pictures
                     lastFrame = frame
-                    stale = show(generation, ScreenTextMerger.merge(judged, pictures, windowBox, excluded, tree.others), grid, windowBox, under)
+                    val merged = ScreenTextMerger.merge(judged, pictures, windowBox, excluded, tree.others)
+                    if (diagnosing()) leftOut(pictures, merged, tree.others, judged)
+                    stale = show(generation, merged, grid, windowBox, under, tree.images, window.id)
                 }
                 lastImageAt = readAt
             }
@@ -818,9 +847,13 @@ class ScreenTranslationService : AccessibilityService() {
             ScreenState.changed()
             Log.d(TAG, "scan ${done - started} ms, ${started - pageAt} ms after the page: tree ${readAt - started} ms (${tree.visited} nodes, " +
                 "letters ${lettersCalls.get()} in $lettersMs ms), ${nodes.size - judged.size} boxes not text, shot ${shotAt - readAt} ms, " +
-                "shown ${shownAt - shotAt} ms, pictures ${done - shownAt} ms, ${known.size} lines, ${pictures.size} in pictures")
+                "shown ${shownAt - shotAt} ms, pictures ${done - shownAt} ms, ${known.size} lines, ${pictures.size} in pictures, " +
+                "${tree.images.size} pictures of the app (${tree.images.count { it.width * 10 < windowBox.width * SMALL_PICTURE_TENTHS }} small)")
             // Lines left out are asked again shortly (not for ever: as for a page that does not settle).
             if (stale && unsettled(generation) <= QUICK_RETRIES + SLOW_RETRIES) return SETTLE_MS
+            // The page may still be coming in (a sheet sliding up, photos loading) with nothing to
+            // tell of it: its pictures are looked at again, and read again only if they changed.
+            if (picturesDue && shot != null && followUps < FOLLOW_UPS_MS.size) return FOLLOW_UPS_MS[followUps++]
         } finally {
             shot?.bitmap?.recycle()
         }
@@ -860,6 +893,7 @@ class ScreenTranslationService : AccessibilityService() {
         val others = ArrayList<Box>()
         val texts = ArrayList<String>()
         val asking = ArrayList<Asking>()
+        val images = ArrayList<Box>()
         val kept = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<AccessibilityNodeInfo, Boolean>())
         // The tree as arrays, one entry a node visited: for what is painted over what.
         val parents = ArrayList<Int>()
@@ -870,6 +904,7 @@ class ScreenTranslationService : AccessibilityService() {
         var password = false
         var editable = false
         val rect = Rect()
+        val normal = GUESSED_SIZE_SP.sp()
         val visited = TreeWalk.walk(
             root, MAX_NODES, MAX_DEPTH, readers,
             child = { node, i -> child(node, i) },
@@ -884,6 +919,7 @@ class ScreenTranslationService : AccessibilityService() {
                     if (node.isEditable) editable = true
                     node.getBoundsInScreen(rect)
                     box = Box(rect.left, rect.top, rect.right, rect.bottom)
+                    if (isImage(node.className) && box.width >= MIN_PICTURE_PX && box.height >= MIN_PICTURE_PX) images.add(box)
                     val own = node.text?.toString()
                     val said = own ?: node.contentDescription?.toString()?.takeIf { node.childCount == 0 && !isImage(node.className) }
                     if (!said.isNullOrBlank()) {
@@ -900,7 +936,11 @@ class ScreenTranslationService : AccessibilityService() {
                                     asking.add(Asking(node, nodes.lastIndex, own, box))
                                     kept.add(node)
                                 }
-                            } else others.add(box)
+                            // The app's own text without Chinese: what the reader of pictures makes of
+                            // it is not read. Only where its box is about the size of its text: a
+                            // product's description picture labelled with its file's name (Taobao,
+                            // 27/11/2026) left all the Chinese written on it untranslated.
+                            } else if (node.isEditable || !TextFit.isRegion(text, box, normal)) others.add(box)
                         }
                     }
                     into = node.childCount
@@ -916,7 +956,7 @@ class ScreenTranslationService : AccessibilityService() {
             },
         )
         val under = PaintOrder.underPanels(parents.toIntArray(), orders.toIntArray(), boxes, scrolls.toBooleanArray(), worded.toBooleanArray(), window)
-        return Tree(nodes, others, texts, password, editable, visited, asking, BooleanArray(nodes.size) { under[numbers[it]] })
+        return Tree(nodes, others, texts, password, editable, visited, asking, BooleanArray(nodes.size) { under[numbers[it]] }, images)
     }
 
     /**
@@ -956,6 +996,38 @@ class ScreenTranslationService : AccessibilityService() {
             val found = LineStyles.lines(grid, node.bounds, node.text)
             if (found != null) inked[key] = found else inkless[key] = true
             found != null
+        }
+    }
+
+    /**
+     * "Chỉ dịch phần chính": an offer, a delivery promise or a count (`ScreenFocus`), or text read
+     * inside a small picture (the photos of a list of goods: what the seller wrote on them). Text in
+     * a picture as wide as the page (a product's own pictures) is still translated.
+     */
+    private fun skipped(line: ScreenText, images: List<Box>, window: Box): Boolean {
+        if (!settings.focus) return false
+        if (ScreenFocus.minor(line.text)) return true
+        return line.fromImage && images.any { it.width * 10 < window.width * SMALL_PICTURE_TENTHS && inside(line.bounds, it) }
+    }
+
+    /**
+     * What was read and what it became may be logged for the made-up test shop, and for a real app
+     * only while the phone's owner has it turned on from a computer over USB debugging
+     * (`adb shell setprop log.tag.MSTransTest DEBUG`; off again on restart). Never otherwise.
+     */
+    private fun diagnosing(): Boolean = foreground == TEST_SHOP || Log.isLoggable(TEST_TAG, Log.DEBUG)
+
+    /** For `diagnosing` only: each line read in pictures that is not translated, and why. */
+    private fun leftOut(pictures: List<ScreenText>, merged: List<ScreenText>, others: List<Box>, nodes: List<ScreenText>) {
+        val kept = merged.filter { it.fromImage }.map { it.text }.toSet()
+        for (line in pictures) {
+            if (line.text in kept) continue
+            val why = when {
+                others.any { (it.intersect(line.bounds)?.area ?: 0L) * 2 > line.bounds.area } -> "under the app's text without Chinese"
+                nodes.any { (it.bounds.intersect(line.bounds)?.area ?: 0L) * 2 > line.bounds.area } -> "under the app's own Chinese"
+                else -> "outside the window or under a bar"
+            }
+            Log.d(TEST_TAG, "picture [${line.text}] ${line.bounds} left out: $why")
         }
     }
 
@@ -1062,7 +1134,9 @@ class ScreenTranslationService : AccessibilityService() {
      * is a screenshot, remembered or plain where not): draws what is already translated, asks for
      * the rest. True: some line was left out for now and the screen must be read again.
      */
-    private fun show(generation: Long, lines: List<ScreenText>, grid: PixelGrid?, window: Box, under: Set<Pair<String, Box>>): Boolean {
+    private fun show(
+        generation: Long, lines: List<ScreenText>, grid: PixelGrid?, window: Box, under: Set<Pair<String, Box>>, images: List<Box>, windowId: Int,
+    ): Boolean {
         val found = HashMap<ScreenText, Look>()
         var stale = false
         // Small views still moving (a label flipping, pictures going by): nothing is drawn in them yet.
@@ -1119,9 +1193,14 @@ class ScreenTranslationService : AccessibilityService() {
             }
         }
         val order = found.keys.sortedWith(compareBy({ found.getValue(it).geometry.box.top }, { found.getValue(it).geometry.box.left }))
-        page = Page(generation, order, found, window)
+        val skipped = order.filter { skipped(it, images, window) }.toSet()
+        // Lines read in pictures: nothing tells when they move (see `watch`), a few of their pixels will.
+        val marks = if (grid == null) emptyMap() else order.filter { it.fromImage && it !in skipped }.mapNotNull { line ->
+            TextMarks.of(found.getValue(line).geometry.box) { x, y -> if (grid.box.contains(Box(x, y, x + 1, y + 1))) grid[x, y] else null }?.let { line to it }
+        }.toMap()
+        page = Page(generation, order, found, window, skipped, marks, windowId)
         render()
-        request(order.map { it.text })
+        request(order.filter { it !in skipped }.map { it.text })
         return stale
     }
 
@@ -1147,16 +1226,95 @@ class ScreenTranslationService : AccessibilityService() {
         )
     }
 
+    // Watching for text that moves in silence
+
+    private var watchStep = 0
+    private val watchNow = Runnable { watch() }
+
+    /**
+     * The user touched the app (the floating button is told, not where): a list the app draws
+     * itself may be scrolling. Its text is looked at again shortly, not at the next turn of `watch`.
+     */
+    private fun touched() {
+        val now = page ?: return
+        if (now.marks.isEmpty()) return
+        main.removeCallbacks(watchNow)
+        watchStep = 0
+        main.postDelayed(watchNow, WATCH_AFTER_TOUCH_MS)
+    }
+
+    private fun watchFrom(step: Int) {
+        main.removeCallbacks(watchNow)
+        watchStep = step.coerceAtMost(WATCH_STEPS_MS.lastIndex)
+        main.postDelayed(watchNow, WATCH_STEPS_MS[watchStep])
+    }
+
+    /**
+     * Some apps move text drawn in their pictures without a word to accessibility (Taobao's sheet
+     * of variants scrolls its list in silence): the translations then lay where the text had been.
+     * Android 14+ shows the app's window alone (no translations over it, nothing blinks), so it is
+     * looked at again now and then while a page with such text is shown, less often while nothing
+     * changes. Where that text moved, its translations go at once and the page is read again.
+     */
+    private fun watch() {
+        val now = page ?: return
+        if (!running || Build.VERSION.SDK_INT < 34 || now.marks.isEmpty() || !controller.isCurrent(now.generation)) return
+        if (scanJob?.isActive == true || pending != null || overlay.showingOriginal) {
+            watchFrom(watchStep)
+            return
+        }
+        scope.launch {
+            val shot = capture.take(now.windowId, now.window, screen(), overlay) as? ScreenCapture.Shot.Image
+            val moved = shot?.let { image ->
+                try {
+                    val bitmap = image.bitmap
+                    now.marks.filter { (line, before) ->
+                        val box = now.looks[line]?.geometry?.box ?: return@filter false
+                        val seen = TextMarks.of(box) { x, y ->
+                            val bx = x - image.left
+                            val by = y - image.top
+                            if (bx in 0 until bitmap.width && by in 0 until bitmap.height) bitmap.getPixel(bx, by) else null
+                        }
+                        seen == null || TextMarks.changed(before, seen)
+                    }.keys
+                } finally {
+                    image.bitmap.recycle()
+                }
+            }.orEmpty()
+            onMain {
+                if (page !== now || !controller.isCurrent(now.generation)) return@onMain
+                if (moved.isEmpty()) {
+                    watchFrom(watchStep + 1)
+                    return@onMain
+                }
+                // Their translations go now; what was read in pictures there is not shown again.
+                val gone = moved.map { it.text to it.bounds }.toSet()
+                imageText = imageText.filterNot { (it.text to it.bounds) in gone }
+                page = Page(now.generation, now.lines - moved, now.looks, now.window, now.skipped, now.marks - moved, now.windowId)
+                render()
+                // One line alone changing is a countdown or a picture going by; more is the page moving: read again.
+                if (moved.size >= 2 || moved.size == now.marks.size) {
+                    if (diagnosing()) Log.d(TEST_TAG, "text moved in silence: ${moved.size} of ${now.marks.size} lines, read again")
+                    lastFrame = null
+                    imagesDue = true
+                    schedule(Action.Scan(0, now.generation, restart = false))
+                } else watchFrom(watchStep)
+            }
+        }
+    }
+
     /** Lays out and draws every line of the page that has a translation by now. */
     private fun render() {
         scope.launch(composing) {
             val now = page ?: return@launch
             if (!controller.isCurrent(now.generation)) return@launch
-            // What was read and what it became: for the made-up test shop, and for a real app only
-            // while the phone's owner has it turned on from a computer over USB debugging
-            // (`adb shell setprop log.tag.MSTransTest DEBUG`; off again on restart). Never otherwise.
-            val trying = foreground == TEST_SHOP || Log.isLoggable(TEST_TAG, Log.DEBUG)
+            // What was read and what it became (see `diagnosing`).
+            val trying = diagnosing()
             val entries = now.lines.mapNotNull { line ->
+                if (line in now.skipped) {
+                    if (trying) Log.d(TEST_TAG, "${if (line.fromImage) "picture" else "app"} [${line.text}] -> (phần phụ, để nguyên)")
+                    return@mapNotNull null
+                }
                 val known = translator.quick(line.text)?.text
                 if (trying) Log.d(TEST_TAG, "${if (line.fromImage) "picture" else "app"} [${line.text}] -> [${known ?: "…"}]")
                 if (known == null) return@mapNotNull null
@@ -1256,7 +1414,7 @@ class ScreenTranslationService : AccessibilityService() {
             settings.paused = !settings.paused
             overlay.showingOriginal = false
             refresh()
-        }).also { button = it }
+        }, onOutside = { touched() }).also { button = it }
         floating.show(
             when {
                 settings.paused -> FloatingButton.Look.PAUSED
@@ -1284,6 +1442,7 @@ class ScreenTranslationService : AccessibilityService() {
         main.removeCallbacks(scanNow)
         main.removeCallbacks(keyboardGone)
         main.removeCallbacks(leftCheck)
+        main.removeCallbacks(watchNow)
         scope.cancel()
         readerThreads.shutdown()
         lookups.shutdown()
@@ -1355,6 +1514,20 @@ class ScreenTranslationService : AccessibilityService() {
         private const val GUESSED_SIZE_SP = 16f
         private val NOWHERE = Any()
         private val NO_BOX = Box(0, 0, 0, 0)
+        /** A view of the app this wide and high at least is a picture (smaller: an icon). */
+        private const val MIN_PICTURE_PX = 120
+        /** A picture narrower than this many tenths of the window is a small one (a list's photos, two to a row). */
+        private const val SMALL_PICTURE_TENTHS = 7
+        /**
+         * After a page's pictures are read, they are looked at again this long after, twice: a sheet
+         * still sliding up, photos still loading (Taobao's sheet of variants was read while it slid
+         * up, found empty, and never read again, 27/11/2026). Read again only if they changed.
+         */
+        private val FOLLOW_UPS_MS = longArrayOf(700L, 1_500L)
+        /** How long after a page was read its pictures are looked at again (`watch`): sooner at first, then less often while nothing moves. */
+        private val WATCH_STEPS_MS = longArrayOf(600L, 1_000L, 2_000L)
+        /** A touch on the app: its text is looked at again this soon (a list is moving, or about to). */
+        private const val WATCH_AFTER_TOUCH_MS = 350L
         /** How many questions about its nodes the app is asked at a time. */
         private const val READERS = 4
         /** An app that has not said within this long which view scrolled is taken to be scrolling its page. */

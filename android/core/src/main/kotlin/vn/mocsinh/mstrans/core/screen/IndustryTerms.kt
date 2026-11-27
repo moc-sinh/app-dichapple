@@ -232,6 +232,20 @@ object IndustryTerms {
         "包包" to "Túi xách", "手表" to "Đồng hồ", "眼镜框" to "Gọng kính",
     )
 
+    /** Sports and games, lamps and lighting (a billiard table's and a lamp's variants, 27/11/2026). */
+    private val SPORTS_LIGHTS = linkedMapOf(
+        "台球" to "Bi-a", "台球桌" to "Bàn bi-a", "台球杆" to "Cơ bi-a", "球杆" to "Cơ bi-a", "台球厅" to "Quán bi-a", "球房" to "Phòng bi-a",
+        "乒乓球" to "Bóng bàn", "乒乓球桌" to "Bàn bóng bàn", "羽毛球" to "Cầu lông", "篮球" to "Bóng rổ", "足球" to "Bóng đá", "网球" to "Quần vợt",
+        "高尔夫" to "Golf", "跑步机" to "Máy chạy bộ", "哑铃" to "Tạ tay", "三合一" to "3 trong 1", "二合一" to "2 trong 1", "加大号" to "Cỡ lớn",
+        "超大号" to "Cỡ siêu lớn", "高脚" to "Chân cao", "不折叠" to "Không gấp", "折叠款" to "Loại gấp", "级别" to "Cỡ", "即将售罄" to "Sắp hết hàng",
+        "售罄" to "Hết hàng", "练习" to "Luyện tập", "训练" to "Tập luyện", "神器" to "Dụng cụ", "吸顶" to "Ốp trần", "吸顶灯" to "Đèn ốp trần",
+        "吸/吊两用" to "Ốp trần hoặc treo", "吸吊两用" to "Ốp trần hoặc treo", "两用" to "Dùng được 2 cách", "胡桃木" to "Gỗ óc chó",
+        "胡桃木色" to "Màu gỗ óc chó", "木纹" to "Vân gỗ", "木纹色" to "Màu vân gỗ", "圆角" to "Bo góc", "菱形" to "Hình thoi", "安装" to "Lắp đặt",
+        "联系客服" to "Liên hệ CSKH", "免安装" to "Không cần lắp", "光源" to "Nguồn sáng", "照度" to "Độ rọi", "显色指数" to "Chỉ số hoàn màu",
+        "护眼" to "Bảo vệ mắt", "无频闪" to "Không nhấp nháy", "调光" to "Chỉnh độ sáng", "色温" to "Nhiệt độ màu", "暖光" to "Ánh sáng vàng",
+        "白光" to "Ánh sáng trắng", "中性光" to "Ánh sáng trung tính", "三色变光" to "Đổi 3 màu ánh sáng",
+    )
+
     /** Places goods are sent from (the line under a product on 1688), and countries. */
     private val PLACES = linkedMapOf(
         "中国" to "Trung Quốc", "香港" to "Hồng Kông", "澳门" to "Ma Cao", "台湾" to "Đài Loan", "日本" to "Nhật Bản", "韩国" to "Hàn Quốc",
@@ -249,7 +263,7 @@ object IndustryTerms {
 
     /** Everything above; later groups win where two give the same word. */
     val ALL: Map<String, String> = ATTRIBUTES + COLOURS + MATERIALS + GLASSES + ELECTRONICS + CLOTHES + HOME + PERSONAL + TRADE + SHOP +
-        MEASURE + FACTORY + MACHINES + MORE + PLACES
+        MEASURE + FACTORY + MACHINES + MORE + SPORTS_LIGHTS + PLACES
 
     /** Shorter forms for places with little room (a price row, a chip). */
     val SHORT: Map<String, String> = linkedMapOf(

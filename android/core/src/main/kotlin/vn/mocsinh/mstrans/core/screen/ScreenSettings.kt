@@ -37,6 +37,7 @@ class ScreenSettings(private val store: KeyValueStore) {
         const val BUTTON_Y = "screenButtonY"
         const val AUTO_OFF = "screenAutoOff"
         const val AI_BEST = "screenAiBest"
+        const val FOCUS = "screenFocus"
     }
 
     private fun bool(key: String, default: Boolean) = store.get(key)?.toBooleanStrictOrNull() ?: default
@@ -95,6 +96,14 @@ class ScreenSettings(private val store: KeyValueStore) {
     var aiBest: Boolean
         get() = bool(Key.AI_BEST, false)
         set(value) = store.set(Key.AI_BEST, value.toString())
+
+    /**
+     * "Chỉ dịch phần chính": offers, delivery promises, counts and the text in small pictures of a
+     * list are left as they are (`ScreenFocus`). On by default.
+     */
+    var focus: Boolean
+        get() = bool(Key.FOCUS, true)
+        set(value) = store.set(Key.FOCUS, value.toString())
 
     var buttonY: Float
         get() = store.get(Key.BUTTON_Y)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.35f

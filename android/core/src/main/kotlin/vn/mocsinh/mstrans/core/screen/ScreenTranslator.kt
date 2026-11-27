@@ -415,6 +415,12 @@ class ScreenTranslator(
             Slip("天平", listOf("平衡", "余额"), "cân bằng|số dư|thăng bằng", "cân tiểu ly"),
             // 衡器 "weighing apparatus".
             Slip("衡器", listOf("平衡"), "cân bằng", "thiết bị cân"),
+            // 店铺 "store": a shop, not keeping something (Taobao, 27/11/2026: "Lưu trữ cân điện tử").
+            Slip("店铺", listOf("存储", "储存", "保存", "内存"), "lưu trữ", "cửa hàng"),
+            // 加装 "fitted in addition", not "plus".
+            Slip("加装", emptyList(), "cộng với|cộng thêm", "lắp thêm"),
+            // 元: shops write "tệ".
+            Slip("元", listOf("人民币"), "nhân dân tệ", "tệ"),
         )
 
         /** Lower case, one form of each accent ("xoá" is "xóa"). */

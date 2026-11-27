@@ -25,6 +25,11 @@ class FloatingButton(
     private val settings: ScreenSettings,
     private val onTap: () -> Unit,
     private val onHold: () -> Unit,
+    /**
+     * A finger came down somewhere else on the screen (only that: Android does not say where, nor
+     * what was touched). Text the app draws itself may be about to move without telling.
+     */
+    private val onOutside: () -> Unit = {},
 ) {
     enum class Look { TRANSLATING, ORIGINAL, PAUSED }
 
@@ -36,7 +41,8 @@ class FloatingButton(
     private val params = WindowManager.LayoutParams(
         size, size,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
         PixelFormat.TRANSLUCENT,
     ).apply {
         gravity = Gravity.TOP or Gravity.END
@@ -88,6 +94,11 @@ class FloatingButton(
         }
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
+                // A touch elsewhere: it goes on to the app as ever (this window is not focusable).
+                MotionEvent.ACTION_OUTSIDE -> {
+                    onOutside()
+                    return@setOnTouchListener false
+                }
                 MotionEvent.ACTION_DOWN -> {
                     downY = event.rawY
                     startY = params.y
